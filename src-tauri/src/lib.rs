@@ -8,6 +8,13 @@ mod utils;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .manage(services::seed_services())
+        .invoke_handler(tauri::generate_handler![
+            commands::services::list_services,
+            commands::services::start_service,
+            commands::services::stop_service,
+            commands::services::restart_service,
+        ])
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(

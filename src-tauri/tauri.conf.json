@@ -15,8 +15,8 @@
         "title": "Rezure",
         "width": 1080,
         "height": 720,
-        "minWidth": 860,
-        "minHeight": 560,
+        "minWidth": 1000,
+        "minHeight": 600,
         "resizable": true,
         "fullscreen": false
       }
