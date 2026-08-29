@@ -321,9 +321,14 @@ mod tests {
 
     #[test]
     fn list_status_reports_every_manifest_entry() {
+        // `installed` reflects real local disk state, not something this
+        // test controls, so only structure/ordering is asserted here.
         let statuses = list_status();
         assert_eq!(statuses.len(), MANIFEST.len());
-        assert!(statuses.iter().all(|s| !s.installed));
+        for (status, pkg) in statuses.iter().zip(MANIFEST) {
+            assert_eq!(status.id, pkg.id);
+            assert_eq!(status.version, pkg.version);
+        }
     }
 
     #[test]
