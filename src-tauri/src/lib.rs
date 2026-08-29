@@ -19,6 +19,8 @@ pub fn run() {
             commands::php::list_php_versions,
             commands::php::set_active_php_version,
             commands::projects::list_projects,
+            commands::binaries::list_binaries,
+            commands::binaries::install_binary,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

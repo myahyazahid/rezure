@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useServicesStore } from '@/stores/services'
 import ServiceRow from '@/components/services/ServiceRow.vue'
+import BinaryInstallPanel from '@/components/services/BinaryInstallPanel.vue'
 
 const store = useServicesStore()
 </script>
@@ -42,6 +43,10 @@ const store = useServicesStore()
     </div>
     <div v-else class="mt-5 flex flex-col gap-2.5">
       <ServiceRow v-for="service in store.services" :key="service.id" :service="service" />
+    </div>
+
+    <div class="mt-8">
+      <BinaryInstallPanel />
     </div>
   </section>
 </template>

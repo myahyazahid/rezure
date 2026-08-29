@@ -6,16 +6,19 @@ import AppSidebar from '@/components/common/AppSidebar.vue'
 import { useServicesStore } from '@/stores/services'
 import { useProjectsStore } from '@/stores/projects'
 import { usePhpStore } from '@/stores/php'
+import { useBinariesStore } from '@/stores/binaries'
 
 const servicesStore = useServicesStore()
 const projectsStore = useProjectsStore()
 const phpStore = usePhpStore()
+const binariesStore = useBinariesStore()
 
 onMounted(() => {
-  // Sidebar badges read from all three stores, so they are loaded up front.
+  // Sidebar badges and the dashboard read from all four stores, so they are loaded up front.
   servicesStore.fetchAll()
   projectsStore.fetchAll()
   phpStore.fetchAll()
+  binariesStore.fetchAll()
 })
 </script>
 

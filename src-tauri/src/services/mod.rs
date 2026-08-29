@@ -3,6 +3,7 @@
 //! Every service (Apache/Nginx, MySQL, PHP-FPM, ...) implements the [`Service`]
 //! trait so adding a new one never requires special-casing elsewhere.
 
+pub mod binaries;
 mod mock;
 pub mod php;
 
