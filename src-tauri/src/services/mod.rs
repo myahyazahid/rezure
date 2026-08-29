@@ -4,6 +4,7 @@
 //! trait so adding a new one never requires special-casing elsewhere.
 
 mod mock;
+pub mod php;
 
 use std::sync::{Arc, Mutex};
 
@@ -12,6 +13,9 @@ use serde::Serialize;
 use crate::utils::error::AppError;
 
 pub use mock::seed_services;
+
+/// Number of samples kept for a service's CPU sparkline.
+const CPU_HISTORY_LEN: usize = 24;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -26,6 +30,7 @@ pub enum ServiceStatus {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ServiceInfo {
     pub id: String,
     pub name: String,
@@ -33,6 +38,10 @@ pub struct ServiceInfo {
     pub status: ServiceStatus,
     pub version: String,
     pub port: u16,
+    /// Current CPU usage, only reported while the service is running.
+    pub cpu_percent: Option<u8>,
+    /// Recent CPU samples driving the UI sparkline; empty while stopped.
+    pub cpu_history: Vec<u8>,
 }
 
 /// Shared abstraction every service (real or mock) implements.
@@ -83,6 +92,7 @@ pub struct MockService {
     version: String,
     port: u16,
     status: Mutex<ServiceStatus>,
+    cpu_history: Vec<u8>,
 }
 
 impl MockService {
@@ -101,19 +111,48 @@ impl MockService {
             version: version.to_string(),
             port,
             status: Mutex::new(status),
+            cpu_history: mock_cpu_history(id),
         }
     }
 }
 
+/// Deterministic pseudo-random walk so each mock service gets a stable,
+/// plausible-looking CPU curve instead of a flat line.
+fn mock_cpu_history(seed_source: &str) -> Vec<u8> {
+    let mut state = seed_source
+        .bytes()
+        .fold(1u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
+    let mut value = 35i32;
+
+    (0..CPU_HISTORY_LEN)
+        .map(|_| {
+            // Linear congruential generator (Numerical Recipes constants).
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let delta = ((state >> 16) % 15) as i32 - 7;
+            value = (value + delta).clamp(12, 68);
+            value as u8
+        })
+        .collect()
+}
+
 impl Service for MockService {
     fn info(&self) -> ServiceInfo {
+        let status = *self.status.lock().unwrap();
+        let running = status == ServiceStatus::Running;
+
         ServiceInfo {
             id: self.id.clone(),
             name: self.name.clone(),
             category: self.category.clone(),
-            status: *self.status.lock().unwrap(),
+            status,
             version: self.version.clone(),
             port: self.port,
+            cpu_percent: running.then(|| self.cpu_history.last().copied().unwrap_or(0)),
+            cpu_history: if running {
+                self.cpu_history.clone()
+            } else {
+                Vec::new()
+            },
         }
     }
 

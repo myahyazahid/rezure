@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import type { ServiceInfo } from '@/types/service'
 import { useServicesStore } from '@/stores/services'
 import BasePill from '@/components/common/BasePill.vue'
+import ServiceSparkline from '@/components/services/ServiceSparkline.vue'
 import ServiceLogPanel from '@/components/services/ServiceLogPanel.vue'
 
 const props = defineProps<{ service: ServiceInfo }>()
@@ -29,15 +30,15 @@ function onRestart() {
 
 <template>
   <div
-    class="rounded-xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900"
+    class="rounded-2xl border border-neutral-200/80 bg-neutral-100/60 transition hover:border-neutral-300 dark:border-neutral-800 dark:bg-neutral-900/60"
   >
-    <div class="flex items-center gap-3 p-4">
+    <div class="flex items-center gap-3 p-3.5">
       <div
         class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold"
         :class="
           isRunning
             ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400'
-            : 'bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400'
+            : 'bg-neutral-200/70 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400'
         "
       >
         {{ initial }}
@@ -50,15 +51,30 @@ function onRestart() {
           }}</span>
           <BasePill class="shrink-0">{{ service.category }}</BasePill>
         </div>
-        <div class="mt-1 flex items-center gap-1.5 text-sm">
+        <div class="mt-0.5 flex items-center gap-1.5 text-sm">
           <span
             class="h-1.5 w-1.5 rounded-full"
             :class="isRunning ? 'bg-emerald-500' : 'bg-neutral-400 dark:bg-neutral-600'"
           ></span>
-          <span :class="isRunning ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-500'">
+          <span
+            :class="
+              isRunning ? 'font-medium text-emerald-600 dark:text-emerald-400' : 'text-neutral-500'
+            "
+          >
             {{ isRunning ? 'Running' : 'Stopped' }}
           </span>
         </div>
+      </div>
+
+      <!-- Dropped on narrow windows so the controls never get pushed off-screen. -->
+      <div
+        v-if="isRunning && service.cpuHistory.length"
+        class="hidden shrink-0 items-center gap-2 lg:flex"
+      >
+        <ServiceSparkline :values="service.cpuHistory" />
+        <span class="font-mono text-xs whitespace-nowrap text-neutral-500">
+          {{ service.cpuPercent }}% cpu
+        </span>
       </div>
 
       <BasePill variant="mono" class="shrink-0">{{ service.version }}</BasePill>
@@ -66,22 +82,34 @@ function onRestart() {
 
       <button
         type="button"
-        class="shrink-0 rounded-lg px-4 py-1.5 text-sm font-semibold transition disabled:opacity-50"
+        class="flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-semibold transition disabled:opacity-50"
         :class="
           isRunning
-            ? 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-200 dark:hover:bg-neutral-700'
-            : 'bg-red-600 text-white hover:bg-red-500'
+            ? 'bg-red-100 text-red-600 hover:bg-red-200 dark:bg-red-500/15 dark:text-red-400 dark:hover:bg-red-500/25'
+            : 'bg-red-600 text-white shadow-sm shadow-red-600/30 hover:bg-red-500'
         "
         :disabled="isPending"
         @click="onPrimaryAction"
       >
+        <svg
+          v-if="isRunning"
+          viewBox="0 0 10 10"
+          fill="currentColor"
+          aria-hidden="true"
+          class="h-2 w-2"
+        >
+          <rect width="10" height="10" rx="1.5" />
+        </svg>
+        <svg v-else viewBox="0 0 10 10" fill="currentColor" aria-hidden="true" class="h-2.5 w-2.5">
+          <path d="M1.5 0.8 9 5 1.5 9.2Z" />
+        </svg>
         {{ isRunning ? 'Stop' : 'Start' }}
       </button>
 
       <button
         type="button"
         title="Restart"
-        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-neutral-200 text-neutral-500 transition hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800"
+        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-neutral-200 bg-white/60 text-neutral-500 transition hover:bg-white disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400 dark:hover:bg-neutral-800"
         :disabled="isPending"
         @click="onRestart"
       >
@@ -102,7 +130,7 @@ function onRestart() {
       <button
         type="button"
         title="Toggle logs"
-        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-neutral-200 text-neutral-500 transition hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800"
+        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-neutral-200 bg-white/60 text-neutral-500 transition hover:bg-white dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400 dark:hover:bg-neutral-800"
         @click="toggleExpanded"
       >
         <svg

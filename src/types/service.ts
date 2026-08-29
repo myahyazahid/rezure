@@ -7,4 +7,8 @@ export interface ServiceInfo {
   status: ServiceStatus
   version: string
   port: number
+  /** Current CPU usage; null while the service is stopped. */
+  cpuPercent: number | null
+  /** Recent CPU samples driving the sparkline; empty while stopped. */
+  cpuHistory: number[]
 }
