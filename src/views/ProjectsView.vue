@@ -30,16 +30,43 @@ const filteredProjects = computed(() => {
         </p>
       </div>
 
-      <button
-        type="button"
-        class="flex shrink-0 items-center gap-2 rounded-full bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-red-500/40 transition hover:bg-red-500"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="h-4 w-4">
-          <path stroke-linecap="round" d="M12 5v14M5 12h14" />
-        </svg>
-        New project
-      </button>
+      <div class="flex shrink-0 items-center gap-2">
+        <button
+          type="button"
+          class="flex items-center gap-2 rounded-full border border-neutral-200 bg-white/70 px-4 py-2.5 text-sm font-semibold text-neutral-700 transition hover:bg-white disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
+          :disabled="store.syncingHosts || store.allHostsReady"
+          :title="
+            store.allHostsReady
+              ? 'Every domain already resolves'
+              : 'Add project domains to the hosts file (needs admin approval)'
+          "
+          @click="store.syncHosts"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+            />
+          </svg>
+          {{ store.syncingHosts ? 'Waiting for admin approval…' : 'Sync hosts file' }}
+        </button>
+
+        <button
+          type="button"
+          class="flex items-center gap-2 rounded-full bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-red-500/40 transition hover:bg-red-500"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="h-4 w-4">
+            <path stroke-linecap="round" d="M12 5v14M5 12h14" />
+          </svg>
+          New project
+        </button>
+      </div>
     </div>
+
+    <p v-if="store.hostsError" class="mt-3 text-sm text-red-600 dark:text-red-400">
+      {{ store.hostsError }}
+    </p>
 
     <div class="mt-5 flex flex-wrap items-center gap-2">
       <SearchInput v-model="search" placeholder="Search projects or domains" class="min-w-55 flex-1" />
@@ -108,9 +135,14 @@ const filteredProjects = computed(() => {
 
         <div class="mt-4 flex items-center justify-between gap-2">
           <span
-            class="truncate rounded-full bg-red-50 px-2.5 py-1 font-mono text-xs text-red-600 dark:bg-red-500/10 dark:text-red-400"
+            class="flex min-w-0 items-center gap-1.5 truncate rounded-full bg-red-50 px-2.5 py-1 font-mono text-xs text-red-600 dark:bg-red-500/10 dark:text-red-400"
+            :title="project.hasHostsEntry ? 'Resolves in the browser' : 'Not in the hosts file yet'"
           >
-            {{ project.domain }}
+            <span
+              class="h-1.5 w-1.5 shrink-0 rounded-full"
+              :class="project.hasHostsEntry ? 'bg-emerald-500' : 'bg-neutral-400 dark:bg-neutral-600'"
+            ></span>
+            <span class="truncate">{{ project.domain }}</span>
           </span>
           <ProjectActionButtons :domain="project.domain" :path="project.path" />
         </div>
@@ -141,8 +173,15 @@ const filteredProjects = computed(() => {
           </p>
           <p class="truncate font-mono text-xs text-neutral-500">{{ project.path }}</p>
         </div>
-        <span class="w-40 shrink-0 truncate font-mono text-xs text-red-600 dark:text-red-400">
-          {{ project.domain }}
+        <span
+          class="flex w-40 shrink-0 items-center gap-1.5 truncate font-mono text-xs text-red-600 dark:text-red-400"
+          :title="project.hasHostsEntry ? 'Resolves in the browser' : 'Not in the hosts file yet'"
+        >
+          <span
+            class="h-1.5 w-1.5 shrink-0 rounded-full"
+            :class="project.hasHostsEntry ? 'bg-emerald-500' : 'bg-neutral-400 dark:bg-neutral-600'"
+          ></span>
+          <span class="truncate">{{ project.domain }}</span>
         </span>
         <span class="w-28 shrink-0">
           <BasePill>{{ project.stack }}</BasePill>

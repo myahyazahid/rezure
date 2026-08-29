@@ -138,7 +138,7 @@ function levelClass(level: LogLevel) {
         class="flex items-center justify-between border-t border-neutral-200 px-4 py-2.5 text-xs text-neutral-500 dark:border-neutral-800"
       >
         <span>{{ filtered.length }} lines</span>
-        <span>{{ store.paused ? 'Paused' : 'Live tail · updates every 2.6s' }}</span>
+        <span>{{ store.paused ? 'Paused' : 'Live tail' }}</span>
       </div>
     </div>
   </section>

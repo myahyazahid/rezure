@@ -7,3 +7,10 @@ export interface LogEntry {
   level: LogLevel
   message: string
 }
+
+/** Payload of the Rust-side `service://log` event, one per output line. */
+export interface ServiceLogEvent {
+  serviceId: string
+  stream: 'stdout' | 'stderr'
+  line: string
+}

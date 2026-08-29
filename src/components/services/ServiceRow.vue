@@ -14,17 +14,34 @@ const expanded = ref(false)
 const isRunning = computed(() => props.service.status === 'running')
 const isPending = computed(() => store.isPending(props.service.id))
 const initial = computed(() => props.service.name.charAt(0).toUpperCase())
+const error = ref<string | null>(null)
 
 function toggleExpanded() {
   expanded.value = !expanded.value
 }
 
-function onPrimaryAction() {
-  return isRunning.value ? store.stop(props.service.id) : store.start(props.service.id)
+function errorMessage(e: unknown): string {
+  if (typeof e === 'string') return e
+  if (e instanceof Error) return e.message
+  return 'Something went wrong.'
 }
 
-function onRestart() {
-  return store.restart(props.service.id)
+async function onPrimaryAction() {
+  error.value = null
+  try {
+    await (isRunning.value ? store.stop(props.service.id) : store.start(props.service.id))
+  } catch (e) {
+    error.value = errorMessage(e)
+  }
+}
+
+async function onRestart() {
+  error.value = null
+  try {
+    await store.restart(props.service.id)
+  } catch (e) {
+    error.value = errorMessage(e)
+  }
 }
 </script>
 
@@ -64,6 +81,9 @@ function onRestart() {
             {{ isRunning ? 'Running' : 'Stopped' }}
           </span>
         </div>
+        <p v-if="error" class="mt-0.5 truncate text-xs text-red-600 dark:text-red-400">
+          {{ error }}
+        </p>
       </div>
 
       <!-- Dropped on narrow windows so the controls never get pushed off-screen. -->

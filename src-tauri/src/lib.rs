@@ -4,13 +4,13 @@ mod db;
 mod services;
 mod utils;
 
+use tauri::Manager;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .manage(services::seed_services())
         .manage(services::php::seed_php_versions())
-        .manage(db::projects::seed_projects())
         .invoke_handler(tauri::generate_handler![
             commands::services::list_services,
             commands::services::start_service,
@@ -19,6 +19,7 @@ pub fn run() {
             commands::php::list_php_versions,
             commands::php::set_active_php_version,
             commands::projects::list_projects,
+            commands::projects::sync_hosts,
             commands::binaries::list_binaries,
             commands::binaries::install_binary,
         ])
@@ -30,6 +31,9 @@ pub fn run() {
                         .build(),
                 )?;
             }
+            // Needs a live `AppHandle` (to emit `service://log` events),
+            // which only exists once the app is actually starting up.
+            app.manage(services::real_services(app.handle().clone()));
             Ok(())
         })
         .run(tauri::generate_context!())
