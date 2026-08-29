@@ -1,5 +1,6 @@
 use crate::db::projects::ProjectInfo;
-use crate::services::{hosts, projects, vhosts};
+use crate::services::scaffold::ProjectTemplate;
+use crate::services::{hosts, projects, scaffold, vhosts};
 use crate::utils::error::AppError;
 
 #[tauri::command]
@@ -28,4 +29,34 @@ pub async fn sync_hosts() -> Result<bool, AppError> {
     tokio::task::spawn_blocking(hosts::sync_hosts_entries)
         .await
         .map_err(|e| AppError::HostsUpdateFailed(format!("background task panicked: {e}")))?
+}
+
+#[tauri::command]
+pub fn list_project_templates() -> Vec<ProjectTemplate> {
+    scaffold::TEMPLATES.to_vec()
+}
+
+/// The folder new projects are created under — shown in the "New project"
+/// dialog so the path preview matches reality.
+#[tauri::command]
+pub fn www_root() -> Result<String, AppError> {
+    projects::www_root().map(|p| p.display().to_string())
+}
+
+/// Creates a new project under `www_root()` from a template. Can take a
+/// while (Laravel resolves and downloads its Composer dependencies over
+/// the network) — the frontend shows a pending state for the duration.
+#[tauri::command]
+pub async fn create_project(name: String, template: String) -> Result<(), AppError> {
+    scaffold::create_project(&name, &template).await
+}
+
+#[tauri::command]
+pub fn composer_installed() -> bool {
+    scaffold::composer_installed()
+}
+
+#[tauri::command]
+pub async fn install_composer() -> Result<(), AppError> {
+    scaffold::install_composer().await
 }

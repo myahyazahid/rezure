@@ -27,6 +27,13 @@ Goal: a functional, installable release covering the essential local dev environ
 - Auto-edit the OS `hosts` file (requires admin permission)
 - Project list UI with active/inactive status
 
+### Phase 3.5 — Runtime Version Switching
+- Support multiple installed versions per bundled runtime (starting with PHP — the only one with real download/process infrastructure in place)
+- "Switch" UI: pick which installed version is active, install additional versions on demand
+- Services and scaffolding (Composer/Laravel) resolve to whichever version is currently active
+- Node.js and Python rows are shown as not-yet-available rather than faked — no portable binary source exists for either yet; adding them means repeating Phase 2's binary-bundling work for a new runtime
+- Active-version selection is in-memory only until Phase 4's settings persistence lands (a restart resets it to the newest installed version)
+
 ### Phase 4 — Config & Local Storage
 - Persist user settings (JSON/TOML config file)
 - Store project list & history in SQLite (`rusqlite`/`sqlx`)

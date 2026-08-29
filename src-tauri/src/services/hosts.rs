@@ -119,29 +119,44 @@ fn quote_ps(s: &str) -> String {
 }
 
 /// The one step that actually needs admin rights: copies `staged` over
-/// `dest` via a UAC-elevated `powershell -File`. `Start-Process -Verb
-/// RunAs` throws if the user declines the prompt, which the `try/catch`
-/// turns into exit code 1223 (`ERROR_CANCELLED`) so it's distinguishable
-/// from a real failure.
+/// `dest` via a UAC-elevated `powershell -File`.
+///
+/// Deliberately does *not* trust `$p.ExitCode` from `Start-Process -Verb
+/// RunAs -PassThru` as the success signal — that combination is known to
+/// report bogus exit codes (a process launched via `ShellExecuteEx` for
+/// elevation isn't always bound properly for exit-code retrieval). Instead
+/// this waits for the elevated hop to finish either way, then checks
+/// whether `dest` actually ended up matching `staged` — the one thing
+/// that's both reliable to check (a plain file read, no elevation needed)
+/// and the actual thing that was supposed to happen.
 fn elevate_copy(staged: &Path, dest: &Path) -> Result<(), AppError> {
     let dir = staging_dir()?;
     fs::create_dir_all(&dir)
         .map_err(|e| AppError::Io(format!("could not create {}: {e}", dir.display())))?;
 
     let script_path = dir.join("apply-hosts.ps1");
+    let error_log_path = dir.join("apply-hosts.error.log");
+    let _ = fs::remove_file(&error_log_path);
+
+    // `-ErrorAction Stop` matters: `Copy-Item` failures (access denied,
+    // missing path, ...) are *non-terminating* by default in PowerShell,
+    // so without this the `catch` below silently never fires — the error
+    // just prints to the (briefly-visible, then closed) elevated console
+    // and the script carries on as if nothing happened.
     let script = format!(
-        "Copy-Item -LiteralPath {} -Destination {} -Force\n",
+        "try {{\n    Copy-Item -LiteralPath {} -Destination {} -Force -ErrorAction Stop\n}} catch {{\n    $_.Exception.Message | Out-File -FilePath {} -Encoding utf8\n    exit 1\n}}\n",
         quote_ps(&staged.display().to_string()),
         quote_ps(&dest.display().to_string()),
+        quote_ps(&error_log_path.display().to_string()),
     );
     fs::write(&script_path, script)
         .map_err(|e| AppError::Io(format!("could not write {}: {e}", script_path.display())))?;
 
+    // `-Verb RunAs` throws synchronously if the user declines the UAC
+    // prompt — before `-Wait` would ever start blocking — so that failure
+    // mode alone is reliable to catch here.
     let launcher = format!(
-        "try {{ \
-            $p = Start-Process powershell -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',{}) -Verb RunAs -Wait -PassThru; \
-            exit $p.ExitCode \
-        }} catch {{ exit 1223 }}",
+        "try {{ Start-Process powershell -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',{}) -Verb RunAs -Wait; exit 0 }} catch {{ exit 1223 }}",
         quote_ps(&script_path.display().to_string()),
     );
 
@@ -150,13 +165,23 @@ fn elevate_copy(staged: &Path, dest: &Path) -> Result<(), AppError> {
         .status()
         .map_err(|e| AppError::HostsUpdateFailed(e.to_string()))?;
 
-    match status.code() {
-        Some(0) => Ok(()),
-        Some(1223) => Err(AppError::HostsUpdateCancelled),
-        other => Err(AppError::HostsUpdateFailed(format!(
-            "elevated copy exited with status {other:?}"
-        ))),
+    if status.code() == Some(1223) {
+        return Err(AppError::HostsUpdateCancelled);
     }
+
+    let actual = fs::read_to_string(dest).unwrap_or_default();
+    let expected = fs::read_to_string(staged).unwrap_or_default();
+    if actual == expected {
+        return Ok(());
+    }
+
+    let detail = fs::read_to_string(&error_log_path)
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| {
+            "the hosts file wasn't updated — was the admin prompt approved?".to_string()
+        });
+    Err(AppError::HostsUpdateFailed(detail.trim().to_string()))
 }
 
 /// Rewrites Rezure's managed block to match the current project scan.

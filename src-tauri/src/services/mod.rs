@@ -6,8 +6,10 @@
 pub mod binaries;
 pub mod hosts;
 pub mod php;
+pub mod php_ini;
 pub mod process;
 pub mod projects;
+pub mod scaffold;
 pub mod vhosts;
 
 use std::sync::Arc;

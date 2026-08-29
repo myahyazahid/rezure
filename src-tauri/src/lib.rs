@@ -10,7 +10,6 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .manage(services::php::seed_php_versions())
         .invoke_handler(tauri::generate_handler![
             commands::services::list_services,
             commands::services::start_service,
@@ -20,6 +19,11 @@ pub fn run() {
             commands::php::set_active_php_version,
             commands::projects::list_projects,
             commands::projects::sync_hosts,
+            commands::projects::list_project_templates,
+            commands::projects::create_project,
+            commands::projects::www_root,
+            commands::projects::composer_installed,
+            commands::projects::install_composer,
             commands::binaries::list_binaries,
             commands::binaries::install_binary,
         ])

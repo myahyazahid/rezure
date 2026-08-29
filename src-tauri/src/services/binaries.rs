@@ -19,28 +19,40 @@ use crate::utils::error::AppError;
 /// A downloadable portable binary package.
 #[derive(Debug, Clone, Copy)]
 pub struct BinaryPackage {
+    /// Unique across the whole manifest (`"php-8.3.33"`, not just `"php"`)
+    /// — a family can have more than one installable version.
     pub id: &'static str,
+    /// Groups every installable version of the same runtime together
+    /// (`"php"` for every PHP entry) — see [`family_packages`]. Also the
+    /// on-disk cache folder shared by every version in the family:
+    /// `bin/<family>/<version>/`.
+    pub family: &'static str,
     pub name: &'static str,
     pub version: &'static str,
     pub download_url: &'static str,
     pub sha256: &'static str,
     /// Path to the main executable inside the extracted archive — doubles as
-    /// the install-completion check and, later, the path `Service::start`
-    /// will spawn.
+    /// the install-completion check and the path a `Service` spawns.
     pub exe_relative_path: &'static str,
 }
 
 pub const MANIFEST: &[BinaryPackage] = &[
     BinaryPackage {
         id: "nginx",
+        family: "nginx",
         name: "Nginx",
         version: "1.25.3",
         download_url: "https://nginx.org/download/nginx-1.25.3.zip",
         sha256: "58df6e5865a922aaa477ac89b79c13739347a37ccc4b3de58de91f1487710cc4",
         exe_relative_path: "nginx-1.25.3/nginx.exe",
     },
+    // Every PHP entry is a separate downloadable version, in newest-first
+    // order — `services::php` picks `.first()` of `family_packages("php")`
+    // as the default active version, and the Switch UI lists them in this
+    // order too.
     BinaryPackage {
-        id: "php",
+        id: "php-8.3.33",
+        family: "php",
         name: "PHP",
         version: "8.3.33",
         download_url:
@@ -49,7 +61,28 @@ pub const MANIFEST: &[BinaryPackage] = &[
         exe_relative_path: "php.exe",
     },
     BinaryPackage {
+        id: "php-8.2.33",
+        family: "php",
+        name: "PHP",
+        version: "8.2.33",
+        download_url:
+            "https://downloads.php.net/~windows/releases/php-8.2.33-nts-Win32-vs16-x64.zip",
+        sha256: "d0bd189522fa50255ee94ed4b340ed4330f5ae33a90a74205275b0f0b221d388",
+        exe_relative_path: "php.exe",
+    },
+    BinaryPackage {
+        id: "php-8.1.34",
+        family: "php",
+        name: "PHP",
+        version: "8.1.34",
+        download_url:
+            "https://downloads.php.net/~windows/releases/php-8.1.34-nts-Win32-vs16-x64.zip",
+        sha256: "9cfe246cb144076c16f5913a3ef88a474c3dd7e60f0f0c8bb95faf68674016cc",
+        exe_relative_path: "php.exe",
+    },
+    BinaryPackage {
         id: "mariadb",
+        family: "mariadb",
         name: "MariaDB",
         version: "11.2.2",
         download_url:
@@ -66,6 +99,12 @@ pub fn find(id: &str) -> Result<&'static BinaryPackage, AppError> {
         .ok_or_else(|| AppError::UnknownBinary(id.to_string()))
 }
 
+/// Every package sharing a `family`, in manifest order (newest version
+/// first, by convention — see the PHP entries above).
+pub fn family_packages(family: &str) -> Vec<&'static BinaryPackage> {
+    MANIFEST.iter().filter(|pkg| pkg.family == family).collect()
+}
+
 /// `%LOCALAPPDATA%\Rezure\bin`, created lazily on first install.
 fn install_root() -> Result<PathBuf, AppError> {
     let base = dirs::data_local_dir().ok_or_else(|| {
@@ -75,7 +114,7 @@ fn install_root() -> Result<PathBuf, AppError> {
 }
 
 fn package_dir(pkg: &BinaryPackage) -> Result<PathBuf, AppError> {
-    Ok(install_root()?.join(pkg.id).join(pkg.version))
+    Ok(install_root()?.join(pkg.family).join(pkg.version))
 }
 
 /// Where `pkg`'s main executable lives once installed, whether or not it
@@ -332,13 +371,21 @@ mod tests {
     }
 
     #[test]
-    fn exe_path_is_nested_under_the_package_id_and_version() {
-        let pkg = find("php").unwrap();
+    fn exe_path_is_nested_under_the_package_family_and_version() {
+        let pkg = find("php-8.3.33").unwrap();
         let path = exe_path(pkg).unwrap();
         let path_str = path.to_string_lossy();
 
         assert!(path_str.contains("php"));
         assert!(path_str.contains("8.3.33"));
         assert!(path_str.ends_with("php.exe"));
+    }
+
+    #[test]
+    fn family_packages_returns_every_php_version_newest_first() {
+        let versions = family_packages("php");
+        assert_eq!(versions.len(), 3);
+        assert_eq!(versions[0].version, "8.3.33");
+        assert!(versions.iter().all(|pkg| pkg.family == "php"));
     }
 }

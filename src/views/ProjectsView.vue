@@ -4,11 +4,13 @@ import { useProjectsStore } from '@/stores/projects'
 import SearchInput from '@/components/common/SearchInput.vue'
 import BasePill from '@/components/common/BasePill.vue'
 import ProjectActionButtons from '@/components/projects/ProjectActionButtons.vue'
+import NewProjectModal from '@/components/projects/NewProjectModal.vue'
 
 const store = useProjectsStore()
 
 const search = ref('')
 const viewMode = ref<'grid' | 'list'>('grid')
+const showNewProjectModal = ref(false)
 
 const filteredProjects = computed(() => {
   const query = search.value.trim().toLowerCase()
@@ -55,6 +57,7 @@ const filteredProjects = computed(() => {
         <button
           type="button"
           class="flex items-center gap-2 rounded-full bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-red-500/40 transition hover:bg-red-500"
+          @click="showNewProjectModal = true"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="h-4 w-4">
             <path stroke-linecap="round" d="M12 5v14M5 12h14" />
@@ -67,6 +70,8 @@ const filteredProjects = computed(() => {
     <p v-if="store.hostsError" class="mt-3 text-sm text-red-600 dark:text-red-400">
       {{ store.hostsError }}
     </p>
+
+    <NewProjectModal v-if="showNewProjectModal" @close="showNewProjectModal = false" />
 
     <div class="mt-5 flex flex-wrap items-center gap-2">
       <SearchInput v-model="search" placeholder="Search projects or domains" class="min-w-55 flex-1" />

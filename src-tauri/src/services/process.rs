@@ -14,6 +14,7 @@ use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use tauri::{AppHandle, Emitter};
 
 use super::binaries::{self, BinaryPackage};
+use super::php_ini;
 use super::vhosts::{self, PHP_FASTCGI_PORT};
 use super::{Service, ServiceHandle, ServiceInfo, ServiceManager, ServiceStatus, CPU_HISTORY_LEN};
 use crate::utils::error::AppError;
@@ -71,7 +72,6 @@ pub struct ProcessService {
     name: &'static str,
     category: &'static str,
     port: u16,
-    package: &'static BinaryPackage,
     launch: Launch,
     log_sink: LogSink,
     child: Mutex<Option<Child>>,
@@ -91,12 +91,12 @@ fn runtime_dir(id: &str) -> Result<PathBuf, AppError> {
 
 impl ProcessService {
     pub fn nginx(log_sink: LogSink) -> Result<Self, AppError> {
+        binaries::find("nginx")?; // fail fast if the manifest entry is ever missing
         Ok(Self {
             id: "nginx",
             name: "Nginx",
             category: "Web server",
             port: 80,
-            package: binaries::find("nginx")?,
             launch: Launch::Nginx,
             log_sink,
             child: Mutex::new(None),
@@ -106,12 +106,14 @@ impl ProcessService {
     }
 
     pub fn php(log_sink: LogSink) -> Result<Self, AppError> {
+        if binaries::family_packages("php").is_empty() {
+            return Err(AppError::UnknownBinary("php".to_string()));
+        }
         Ok(Self {
             id: "php",
             name: "PHP",
             category: "Runtime",
             port: PHP_FASTCGI_PORT,
-            package: binaries::find("php")?,
             launch: Launch::Php,
             log_sink,
             child: Mutex::new(None),
@@ -121,12 +123,12 @@ impl ProcessService {
     }
 
     pub fn mariadb(log_sink: LogSink) -> Result<Self, AppError> {
+        binaries::find("mariadb")?;
         Ok(Self {
             id: "mariadb",
             name: "MariaDB",
             category: "Database",
             port: 3306,
-            package: binaries::find("mariadb")?,
             launch: Launch::MariaDb {
                 data_dir: runtime_dir("mariadb")?.join("data"),
             },
@@ -137,10 +139,22 @@ impl ProcessService {
         })
     }
 
+    /// Resolves which binary this service currently runs. Fixed for
+    /// nginx/MariaDB (one version each); for PHP this follows whatever
+    /// `services::php` currently reports as active, so a version switch
+    /// takes effect the next time the service starts.
+    fn package(&self) -> Result<&'static BinaryPackage, AppError> {
+        match self.launch {
+            Launch::Nginx => binaries::find("nginx"),
+            Launch::Php => super::php::active_package(),
+            Launch::MariaDb { .. } => binaries::find("mariadb"),
+        }
+    }
+
     /// Builds the `Command` to spawn, preparing any per-service runtime
     /// state (PHP's docroot, MariaDB's data directory) it needs first.
     fn command(&self) -> Result<Command, AppError> {
-        let exe = binaries::exe_path(self.package)?;
+        let exe = binaries::exe_path(self.package()?)?;
 
         let mut cmd = match &self.launch {
             Launch::Nginx => {
@@ -156,8 +170,12 @@ impl ProcessService {
                     .parent()
                     .ok_or_else(|| AppError::Io("php.exe has no parent directory".to_string()))?
                     .join("php-cgi.exe");
+                let ini_path = php_ini::ensure_php_ini(&exe)?;
                 let mut cmd = Command::new(cgi_exe);
-                cmd.args(["-b", &format!("127.0.0.1:{}", self.port)]);
+                cmd.arg("-c")
+                    .arg(&ini_path)
+                    .arg("-b")
+                    .arg(format!("127.0.0.1:{}", self.port));
                 cmd
             }
             Launch::MariaDb { data_dir } => {
@@ -341,6 +359,13 @@ impl Service for ProcessService {
             }
         };
 
+        // Best-effort — `package()` only fails if a family has zero
+        // manifest entries, which the constructors already guard against.
+        let version = self
+            .package()
+            .map(|pkg| pkg.version.to_string())
+            .unwrap_or_default();
+
         ServiceInfo {
             id: self.id.to_string(),
             name: self.name.to_string(),
@@ -350,7 +375,7 @@ impl Service for ProcessService {
             } else {
                 ServiceStatus::Stopped
             },
-            version: self.package.version.to_string(),
+            version,
             port: self.port,
             cpu_percent,
             cpu_history: self.cpu_history.lock().unwrap().clone(),
@@ -362,7 +387,7 @@ impl Service for ProcessService {
             return Ok(self.info());
         }
 
-        if !binaries::is_installed(self.package) {
+        if !binaries::is_installed(self.package()?) {
             return Err(AppError::BinaryNotInstalled(self.name.to_string()));
         }
 
@@ -562,6 +587,57 @@ mod tests {
 
         let stopped = service.stop().unwrap();
         assert_eq!(stopped.status, ServiceStatus::Stopped);
+    }
+
+    /// Switches the active PHP version and confirms the *actual spawned
+    /// process* — not just what the code claims — points at that
+    /// version's own `php-cgi.exe`. Needs at least two PHP versions
+    /// installed. Run with:
+    /// `cargo test --lib services::process::tests::switching_php_version_changes_which_binary_actually_runs -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn switching_php_version_changes_which_binary_actually_runs() {
+        use crate::services::php;
+
+        let versions = crate::services::binaries::family_packages("php");
+        let installed: Vec<_> = versions
+            .iter()
+            .filter(|pkg| crate::services::binaries::is_installed(pkg))
+            .collect();
+        assert!(
+            installed.len() >= 2,
+            "need at least 2 installed PHP versions to run this test"
+        );
+
+        let original_active = php::active_id();
+
+        for pkg in &installed {
+            php::set_active(pkg.id).unwrap();
+
+            let service = ProcessService::php(no_op_sink()).unwrap();
+            service.start().unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(300));
+
+            let output = Command::new("powershell")
+                .args([
+                    "-NoProfile",
+                    "-Command",
+                    "(Get-Process -Name php-cgi -ErrorAction SilentlyContinue).Path",
+                ])
+                .output()
+                .unwrap();
+            let running_path = String::from_utf8_lossy(&output.stdout).to_string();
+
+            service.stop().unwrap();
+
+            assert!(
+                running_path.contains(pkg.version),
+                "expected the running php-cgi to be under {}, got: {running_path}",
+                pkg.version
+            );
+        }
+
+        php::set_active(&original_active).unwrap();
     }
 
     /// The full pipeline for real: a project folder on disk -> vhost

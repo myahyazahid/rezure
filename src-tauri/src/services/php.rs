@@ -1,66 +1,88 @@
-//! PHP version switcher.
+//! Tracks which installed PHP version is active — the one `services::process`
+//! spawns for the FastCGI service and `services::scaffold` runs Composer
+//! through.
 //!
-//! Backed by a fixed list until portable binaries are bundled — the public
-//! surface (`list` / `set_active`) is what the real implementation will keep.
+//! Global, process-wide state (not per-request): a `OnceLock<Mutex<...>>`
+//! rather than threading a manager object through every command and
+//! service. In-memory only for now — a restart resets it to the newest
+//! *installed* version, since Phase 4's settings persistence hasn't landed
+//! yet to remember an explicit choice across restarts.
 
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 use serde::Serialize;
 
+use super::binaries::{self, BinaryPackage};
 use crate::utils::error::AppError;
 
+const FAMILY: &str = "php";
+
 #[derive(Debug, Clone, Serialize)]
-pub struct PhpVersion {
+#[serde(rename_all = "camelCase")]
+pub struct PhpVersionStatus {
     pub id: String,
     pub version: String,
+    pub installed: bool,
     pub active: bool,
 }
 
-/// Tauri-managed state tracking which installed PHP version is selected.
-pub struct PhpVersionManager {
-    installed: Vec<String>,
-    active: Mutex<String>,
+fn active_cell() -> &'static Mutex<String> {
+    static ACTIVE: OnceLock<Mutex<String>> = OnceLock::new();
+    ACTIVE.get_or_init(|| Mutex::new(default_active_id()))
 }
 
-impl PhpVersionManager {
-    pub fn list(&self) -> Vec<PhpVersion> {
-        let active = self.active.lock().unwrap().clone();
-
-        self.installed
-            .iter()
-            .map(|version| PhpVersion {
-                id: version.clone(),
-                version: version.clone(),
-                active: *version == active,
-            })
-            .collect()
-    }
-
-    pub fn set_active(&self, id: &str) -> Result<Vec<PhpVersion>, AppError> {
-        if !self.installed.iter().any(|v| v == id) {
-            return Err(AppError::PhpVersionNotFound(id.to_string()));
-        }
-
-        *self.active.lock().unwrap() = id.to_string();
-        Ok(self.list())
-    }
+/// The newest *installed* version, or just the newest known version if
+/// nothing's installed yet (nothing works until something is, regardless
+/// of which id this picks).
+fn default_active_id() -> String {
+    let versions = binaries::family_packages(FAMILY);
+    versions
+        .iter()
+        .find(|pkg| binaries::is_installed(pkg))
+        .or_else(|| versions.first())
+        .map(|pkg| pkg.id.to_string())
+        .unwrap_or_default()
 }
 
-/// Seed data mirroring `docs/UI-design` — replaced by a real scan of the
-/// installed PHP binaries once bundling lands.
-pub fn seed_php_versions() -> PhpVersionManager {
-    let installed = vec![
-        "8.3.2".to_string(),
-        "8.2.15".to_string(),
-        "8.1.27".to_string(),
-        "8.0.30".to_string(),
-        "7.4.33".to_string(),
-    ];
+pub fn active_id() -> String {
+    active_cell().lock().unwrap().clone()
+}
 
-    PhpVersionManager {
-        active: Mutex::new(installed[0].clone()),
-        installed,
+/// The active version's package — resolves which `php.exe`/`php-cgi.exe`
+/// `services::process` and `services::scaffold` should actually run.
+pub fn active_package() -> Result<&'static BinaryPackage, AppError> {
+    binaries::find(&active_id())
+}
+
+/// Switches the active version. Rejects anything not installed yet — the
+/// Switch UI's "Install version" is a separate, explicit step.
+pub fn set_active(id: &str) -> Result<Vec<PhpVersionStatus>, AppError> {
+    let pkg = binaries::find(id)?;
+    if pkg.family != FAMILY {
+        return Err(AppError::PhpVersionNotFound(id.to_string()));
     }
+    if !binaries::is_installed(pkg) {
+        return Err(AppError::BinaryNotInstalled(format!(
+            "{} {}",
+            pkg.name, pkg.version
+        )));
+    }
+
+    *active_cell().lock().unwrap() = id.to_string();
+    Ok(list())
+}
+
+pub fn list() -> Vec<PhpVersionStatus> {
+    let active = active_id();
+    binaries::family_packages(FAMILY)
+        .iter()
+        .map(|pkg| PhpVersionStatus {
+            id: pkg.id.to_string(),
+            version: pkg.version.to_string(),
+            installed: binaries::is_installed(pkg),
+            active: pkg.id == active,
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -68,29 +90,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn first_version_is_active_by_default() {
-        let list = seed_php_versions().list();
-
-        assert_eq!(list.len(), 5);
-        assert!(list[0].active);
-        assert_eq!(list.iter().filter(|v| v.active).count(), 1);
+    fn list_reports_every_php_version_with_exactly_one_active() {
+        let versions = list();
+        assert_eq!(versions.len(), binaries::family_packages(FAMILY).len());
+        assert_eq!(versions.iter().filter(|v| v.active).count(), 1);
     }
 
     #[test]
-    fn set_active_moves_the_flag_to_the_requested_version() {
-        let manager = seed_php_versions();
-        let list = manager.set_active("8.1.27").unwrap();
-
-        let active: Vec<_> = list.iter().filter(|v| v.active).map(|v| &v.id).collect();
-        assert_eq!(active, vec!["8.1.27"]);
+    fn set_active_rejects_a_non_php_id() {
+        assert!(set_active("nginx").is_err());
     }
 
     #[test]
-    fn set_active_rejects_an_unknown_version() {
-        let manager = seed_php_versions();
+    fn set_active_rejects_an_unknown_id() {
+        assert!(set_active("php-1.0.0").is_err());
+    }
 
-        assert!(manager.set_active("5.6.0").is_err());
-        // The previous selection must survive a failed switch.
-        assert!(manager.list()[0].active);
+    #[test]
+    fn set_active_rejects_a_version_that_isnt_installed() {
+        // None of the fixed PHP versions are guaranteed installed on a
+        // fresh checkout/CI box, so this just needs *a* not-installed one.
+        let not_installed = binaries::family_packages(FAMILY)
+            .into_iter()
+            .find(|pkg| !binaries::is_installed(pkg));
+
+        if let Some(pkg) = not_installed {
+            let err = set_active(pkg.id).unwrap_err();
+            assert!(matches!(err, AppError::BinaryNotInstalled(_)));
+        }
     }
 }

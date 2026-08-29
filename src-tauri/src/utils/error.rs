@@ -47,6 +47,20 @@ pub enum AppError {
 
     #[error("failed to update the hosts file: {0}")]
     HostsUpdateFailed(String),
+
+    #[error("unknown project template: {0}")]
+    UnknownTemplate(String),
+
+    #[error(
+        "\"{0}\" isn't a valid project name — use lowercase letters, digits, and hyphens only"
+    )]
+    InvalidProjectName(String),
+
+    #[error("a project named \"{0}\" already exists")]
+    ProjectAlreadyExists(String),
+
+    #[error("failed to create the project: {0}")]
+    ScaffoldFailed(String),
 }
 
 /// Serialized as its `Display` message (the `#[error("...")]` text) rather
