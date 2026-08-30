@@ -27,10 +27,24 @@ Goal: a functional, installable release covering the essential local dev environ
 - Auto-edit the OS `hosts` file (requires admin permission)
 - Project list UI with active/inactive status
 
+### Phase 3.5 — Runtime Version Switching
+- Support multiple installed versions per bundled runtime (starting with PHP — the only one with real download/process infrastructure in place)
+- "Switch" UI: pick which installed version is active, install additional versions on demand
+- Services and scaffolding (Composer/Laravel) resolve to whichever version is currently active
+- Node.js and Python rows are shown as not-yet-available rather than faked — no portable binary source exists for either yet; adding them means repeating Phase 2's binary-bundling work for a new runtime
+- Active-version selection is in-memory only until Phase 4's settings persistence lands (a restart resets it to the newest installed version)
+
 ### Phase 4 — Config & Local Storage
 - Persist user settings (JSON/TOML config file)
 - Store project list & history in SQLite (`rusqlite`/`sqlx`)
 - Basic Settings page (binary paths, default ports, etc.)
+
+### Phase 4.5 — Database Management
+- Databases page for the bundled MariaDB: list schemas with table count, size and the project that appears to use them
+- Create and drop databases; export to `.sql` (`mariadb-dump`) and import a `.sql` back
+- Detect the SQL clients already installed (TablePlus, DBeaver, HeidiSQL, MySQL Workbench, Navicat) and open a database in the one the user picks — with the bundled `mariadb.exe` console as an always-available fallback
+- Driven through the client binaries that ship with the server, so no MySQL driver crate is added to the dependency tree
+- Detail: [`databases.md`](databases.md)
 
 ### Phase 5 — UI Polish
 - Main layout (sidebar: services, projects, settings)
@@ -79,7 +93,7 @@ Goal: expand Rezure beyond core Laragon parity with added value features.
 - One-click tunneling (ngrok/cloudflared)
 - Integrated terminal
 - Docker toggle mode (container vs native binary)
-- Embedded lightweight database GUI
+- Embedded lightweight database GUI (browsing and editing table data in-app; the Phase 4.5 Databases page manages schemas and hands off to an external client, it does not browse rows)
 - Local project health dashboard (port conflict detector, log viewer)
 
 **Dashboard (Laravel) — expanded scope:**

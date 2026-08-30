@@ -3,13 +3,17 @@ import { computed } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { useServicesStore } from '@/stores/services'
 import { useProjectsStore } from '@/stores/projects'
+import { useDatabasesStore } from '@/stores/databases'
 import { usePhpStore } from '@/stores/php'
+import { useLogsStore } from '@/stores/logs'
 import { useUptime } from '@/composables/useUptime'
 
 const route = useRoute()
 const servicesStore = useServicesStore()
 const projectsStore = useProjectsStore()
+const databasesStore = useDatabasesStore()
 const phpStore = usePhpStore()
+const logsStore = useLogsStore()
 const { label: uptimeLabel } = useUptime()
 
 const navItems = computed(() => [
@@ -18,18 +22,42 @@ const navItems = computed(() => [
     icon: 'pulse' as const,
     label: 'Services',
     badge: `${servicesStore.runningCount}/${servicesStore.services.length}`,
+    variant: 'default' as const,
   },
   {
     to: '/projects',
     icon: 'folder' as const,
     label: 'Projects',
     badge: String(projectsStore.projects.length),
+    variant: 'default' as const,
+  },
+  {
+    to: '/databases',
+    icon: 'database' as const,
+    label: 'Databases',
+    badge: String(databasesStore.databases.length),
+    variant: 'default' as const,
   },
   {
     to: '/switch',
     icon: 'switch' as const,
     label: 'Switch',
     badge: String(phpStore.versions.length),
+    variant: 'default' as const,
+  },
+  {
+    to: '/logs',
+    icon: 'logs' as const,
+    label: 'Logs',
+    badge: logsStore.errorCount > 0 ? String(logsStore.errorCount) : '',
+    variant: 'alert' as const,
+  },
+  {
+    to: '/settings',
+    icon: 'settings' as const,
+    label: 'Settings',
+    badge: '',
+    variant: 'default' as const,
   },
 ])
 
@@ -97,7 +125,21 @@ const ringOffset = computed(() => {
             />
           </svg>
           <svg
-            v-else
+            v-else-if="item.icon === 'database'"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="h-4 w-4"
+          >
+            <ellipse cx="12" cy="6" rx="7" ry="3" />
+            <path
+              stroke-linecap="round"
+              d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"
+            />
+          </svg>
+          <svg
+            v-else-if="item.icon === 'switch'"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -105,6 +147,31 @@ const ringOffset = computed(() => {
             class="h-4 w-4"
           >
             <path stroke-linecap="round" stroke-linejoin="round" d="M4 8h13l-3-3M20 16H7l3 3" />
+          </svg>
+          <svg
+            v-else-if="item.icon === 'logs'"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="h-4 w-4"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h10" />
+          </svg>
+          <svg
+            v-else
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="h-4 w-4"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37a1.724 1.724 0 0 0 2.572-1.065Z"
+            />
+            <circle cx="12" cy="12" r="3" />
           </svg>
         </span>
 
@@ -120,6 +187,13 @@ const ringOffset = computed(() => {
         </span>
 
         <span
+          v-if="item.variant === 'alert' && item.badge"
+          class="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-xs font-semibold text-white"
+        >
+          {{ item.badge }}
+        </span>
+        <span
+          v-else-if="item.badge"
           class="rounded-full px-2 py-0.5 text-xs font-medium"
           :class="
             isActive(item.to)

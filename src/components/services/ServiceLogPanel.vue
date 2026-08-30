@@ -1,11 +1,19 @@
 <script setup lang="ts">
-defineProps<{ serviceId: string }>()
+import { computed } from 'vue'
+import { useLogsStore } from '@/stores/logs'
 
-const lines = [
-  '[info] service initialized',
-  '[info] listening for connections',
-  '[info] waiting for requests…',
-]
+const props = defineProps<{ serviceId: string }>()
+
+const store = useLogsStore()
+
+/** Oldest-first, most recent 20 lines — natural top-to-bottom reading order. */
+const lines = computed(() =>
+  store.entries
+    .filter((entry) => entry.service === props.serviceId)
+    .slice(0, 20)
+    .reverse()
+    .map((entry) => `[${entry.time}] ${entry.message}`),
+)
 </script>
 
 <template>
@@ -16,6 +24,9 @@ const lines = [
       Log — {{ serviceId }}
     </p>
     <div class="rounded-lg bg-neutral-900 p-3 font-mono text-xs text-neutral-300 dark:bg-black">
+      <p v-if="lines.length === 0" class="text-neutral-500">
+        No log output yet — start the service to see it here.
+      </p>
       <p v-for="(line, i) in lines" :key="i">{{ line }}</p>
     </div>
   </div>

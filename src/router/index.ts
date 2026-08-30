@@ -14,9 +14,19 @@ const router = createRouter({
       component: () => import('../views/ProjectsView.vue'),
     },
     {
+      path: '/databases',
+      name: 'databases',
+      component: () => import('../views/DatabasesView.vue'),
+    },
+    {
       path: '/switch',
       name: 'switch',
       component: () => import('../views/SwitchView.vue'),
+    },
+    {
+      path: '/logs',
+      name: 'logs',
+      component: () => import('../views/LogsView.vue'),
     },
     {
       path: '/settings',

@@ -44,10 +44,21 @@ Because Rezure interacts heavily with the OS (files, ports, processes), failure 
 
 ---
 
-## 6. Database (SQLite)
+## 6. Databases
+
+Two different things are called "database" in this codebase, and they are unrelated:
+
+**Rezure's own storage (SQLite)** — the app's internal state.
 
 - Schema changes are handled through a migration system (`sqlx migrate` or `refinery`) rather than manual schema edits, so contributors can apply schema updates without resetting their local database.
 - Initial schema scope: `projects`, `services_config`, `settings`.
+
+**The managed MariaDB** — the server Rezure starts *for the user's projects*, with its own data directory under `%LOCALAPPDATA%\Rezure\data\mariadb`.
+
+- Managed through the client binaries that ship in the same archive as the server (`mariadb.exe`, `mariadb-dump.exe`), not through a MySQL driver crate — the archive is already downloaded, so a second way to speak the protocol would be redundant weight.
+- Identifiers (schema and collation names) can't be bound as query parameters, so they are validated against a strict allowlist before any statement is built. See `services::database::validate_identifier`.
+- Rezure ships no database GUI of its own: `services::db_clients` detects the SQL clients already installed and hands one a ready-made connection.
+- Full detail in [`databases.md`](databases.md).
 
 ---
 

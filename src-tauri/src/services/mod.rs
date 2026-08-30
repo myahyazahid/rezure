@@ -3,16 +3,25 @@
 //! Every service (Apache/Nginx, MySQL, PHP-FPM, ...) implements the [`Service`]
 //! trait so adding a new one never requires special-casing elsewhere.
 
-mod mock;
+pub mod binaries;
+pub mod database;
+pub mod db_clients;
+pub mod hosts;
+pub mod launcher;
 pub mod php;
+pub mod php_ini;
+pub mod process;
+pub mod projects;
+pub mod scaffold;
+pub mod vhosts;
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use serde::Serialize;
 
 use crate::utils::error::AppError;
 
-pub use mock::seed_services;
+pub use process::real_services;
 
 /// Number of samples kept for a service's CPU sparkline.
 const CPU_HISTORY_LEN: usize = 24;
@@ -22,7 +31,8 @@ const CPU_HISTORY_LEN: usize = 24;
 pub enum ServiceStatus {
     Running,
     Stopped,
-    // Reserved for real (non-mock) services with an async spawn/shutdown step.
+    // Reserved for a future async spawn/shutdown step (e.g. waiting on a
+    // service's own readiness probe before reporting it as running).
     #[allow(dead_code)]
     Starting,
     #[allow(dead_code)]
@@ -44,10 +54,14 @@ pub struct ServiceInfo {
     pub cpu_history: Vec<u8>,
 }
 
-/// Shared abstraction every service (real or mock) implements.
-/// Adding a new service type means implementing this trait, not
-/// special-casing it elsewhere in the codebase.
+/// Shared abstraction every service implements. Adding a new service type
+/// means implementing this trait, not special-casing it elsewhere in the
+/// codebase.
 pub trait Service: Send + Sync {
+    /// Stable identifier (matches the frontend's `ServiceInfo.id`) — cheap
+    /// to call, unlike `info()`, so `ServiceManager::find` doesn't need to
+    /// touch the process/CPU-sampling machinery just to match by id.
+    fn id(&self) -> &str;
     fn info(&self) -> ServiceInfo;
     fn start(&self) -> Result<ServiceInfo, AppError>;
     fn stop(&self) -> Result<ServiceInfo, AppError>;
@@ -76,93 +90,21 @@ impl ServiceManager {
     pub fn find(&self, id: &str) -> Result<ServiceHandle, AppError> {
         self.services
             .iter()
-            .find(|s| s.info().id == id)
+            .find(|s| s.id() == id)
             .cloned()
             .ok_or_else(|| AppError::ServiceNotFound(id.to_string()))
     }
-}
 
-/// In-memory service backed by no real process — stands in for a real
-/// `Service` implementation (spawned process + port check) in Phase 2's
-/// UI/architecture pass, before portable binaries are bundled.
-pub struct MockService {
-    id: String,
-    name: String,
-    category: String,
-    version: String,
-    port: u16,
-    status: Mutex<ServiceStatus>,
-    cpu_history: Vec<u8>,
-}
-
-impl MockService {
-    pub fn new(
-        id: &str,
-        name: &str,
-        category: &str,
-        version: &str,
-        port: u16,
-        status: ServiceStatus,
-    ) -> Self {
-        Self {
-            id: id.to_string(),
-            name: name.to_string(),
-            category: category.to_string(),
-            version: version.to_string(),
-            port,
-            status: Mutex::new(status),
-            cpu_history: mock_cpu_history(id),
+    /// Stops every running service — best-effort, on a normal app exit, so
+    /// a closed Rezure window never leaves a service running as an orphan
+    /// the next launch can't see (see `process::pid_file_path`). A failure
+    /// stopping one service must not skip the rest, so errors are logged
+    /// rather than propagated.
+    pub fn stop_all(&self) {
+        for service in &self.services {
+            if let Err(err) = service.stop() {
+                log::warn!("failed to stop {} on exit: {err}", service.id());
+            }
         }
-    }
-}
-
-/// Deterministic pseudo-random walk so each mock service gets a stable,
-/// plausible-looking CPU curve instead of a flat line.
-fn mock_cpu_history(seed_source: &str) -> Vec<u8> {
-    let mut state = seed_source
-        .bytes()
-        .fold(1u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
-    let mut value = 35i32;
-
-    (0..CPU_HISTORY_LEN)
-        .map(|_| {
-            // Linear congruential generator (Numerical Recipes constants).
-            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-            let delta = ((state >> 16) % 15) as i32 - 7;
-            value = (value + delta).clamp(12, 68);
-            value as u8
-        })
-        .collect()
-}
-
-impl Service for MockService {
-    fn info(&self) -> ServiceInfo {
-        let status = *self.status.lock().unwrap();
-        let running = status == ServiceStatus::Running;
-
-        ServiceInfo {
-            id: self.id.clone(),
-            name: self.name.clone(),
-            category: self.category.clone(),
-            status,
-            version: self.version.clone(),
-            port: self.port,
-            cpu_percent: running.then(|| self.cpu_history.last().copied().unwrap_or(0)),
-            cpu_history: if running {
-                self.cpu_history.clone()
-            } else {
-                Vec::new()
-            },
-        }
-    }
-
-    fn start(&self) -> Result<ServiceInfo, AppError> {
-        *self.status.lock().unwrap() = ServiceStatus::Running;
-        Ok(self.info())
-    }
-
-    fn stop(&self) -> Result<ServiceInfo, AppError> {
-        *self.status.lock().unwrap() = ServiceStatus::Stopped;
-        Ok(self.info())
     }
 }

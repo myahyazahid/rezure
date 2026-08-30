@@ -1,17 +1,12 @@
-use tauri::State;
-
-use crate::services::php::{PhpVersion, PhpVersionManager};
+use crate::services::php::{self, PhpVersionStatus};
 use crate::utils::error::AppError;
 
 #[tauri::command]
-pub fn list_php_versions(manager: State<'_, PhpVersionManager>) -> Vec<PhpVersion> {
-    manager.list()
+pub fn list_php_versions() -> Vec<PhpVersionStatus> {
+    php::list()
 }
 
 #[tauri::command]
-pub fn set_active_php_version(
-    id: String,
-    manager: State<'_, PhpVersionManager>,
-) -> Result<Vec<PhpVersion>, AppError> {
-    manager.set_active(&id)
+pub fn set_active_php_version(id: String) -> Result<Vec<PhpVersionStatus>, AppError> {
+    php::set_active(&id)
 }

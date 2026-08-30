@@ -34,6 +34,16 @@ Roadmap pengembangan **Rezure v1**, fokus ke rilis awal yang fungsional sebelum 
 
 ---
 
+## Fase 3.5 — Runtime Version Switching
+
+- Support banyak versi terinstall per runtime yang dibundel (mulai dari PHP — satu-satunya yang udah punya infrastruktur download/proses beneran)
+- UI "Switch": pilih versi mana yang aktif, install versi tambahan on-demand
+- Service dan scaffolding (Composer/Laravel) pakai versi yang lagi aktif
+- Baris Node.js dan Python ditandai "belum tersedia", bukan dipura-purain jalan — belum ada sumber binary portable buat keduanya; nambahin itu berarti ngulang kerjaan bundling binary Fase 2 buat runtime baru
+- Pemilihan versi aktif masih di memori doang sampai Fase 4 (persist settings) kelar — restart app balikin ke versi terbaru yang terinstall
+
+---
+
 ## Fase 4 — Konfigurasi & Storage Lokal
 
 - Simpan pengaturan user (config file JSON/TOML)
