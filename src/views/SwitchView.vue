@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { usePhpStore } from '@/stores/php'
 import { useBinariesStore } from '@/stores/binaries'
+import { useServicesStore } from '@/stores/services'
 import { useComposerStore } from '@/stores/composer'
 import RuntimeSwitchRow, {
   type RuntimeVersionEntry,
@@ -10,9 +11,21 @@ import InstallPhpVersionModal from '@/components/services/InstallPhpVersionModal
 
 const phpStore = usePhpStore()
 const binariesStore = useBinariesStore()
+const servicesStore = useServicesStore()
 const composerStore = useComposerStore()
 
 const showInstallModal = ref(false)
+
+/**
+ * Switching also reloads the running PHP service on the backend, so the
+ * service list is stale afterwards — its version badge and uptime both
+ * changed. Nothing polls it, so it's refreshed here rather than leaving
+ * the Services page showing the version that was running a moment ago.
+ */
+async function switchPhp(id: string) {
+  const result = await phpStore.setActive(id)
+  if (result?.restarted) await servicesStore.fetchAll()
+}
 
 onMounted(() => {
   composerStore.fetchStatus()
@@ -72,6 +85,9 @@ const composerVersions = computed<RuntimeVersionEntry[]>(() => [
     <p v-if="phpStore.error" class="mt-3 text-sm text-red-600 dark:text-red-400">
       {{ phpStore.error }}
     </p>
+    <p v-else-if="phpStore.notice" class="mt-3 text-sm text-emerald-600 dark:text-emerald-400">
+      {{ phpStore.notice }}
+    </p>
     <p v-if="composerStore.error" class="mt-3 text-sm text-red-600 dark:text-red-400">
       {{ composerStore.error }}
     </p>
@@ -84,7 +100,7 @@ const composerVersions = computed<RuntimeVersionEntry[]>(() => [
         :installed-count="phpInstalledCount"
         :versions="phpVersions"
         :installing-id="phpStore.installingId"
-        @select="phpStore.setActive"
+        @select="switchPhp"
         @install="phpStore.install"
       />
       <RuntimeSwitchRow

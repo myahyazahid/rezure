@@ -23,3 +23,11 @@ export interface PhpRelease {
   latest: boolean
   installed: boolean
 }
+
+/** Result of switching the active version — the switch also reloads the
+ *  running PHP service, and says whether that worked. */
+export interface PhpSwitchResult {
+  versions: PhpVersion[]
+  restarted: boolean
+  restartError: string | null
+}

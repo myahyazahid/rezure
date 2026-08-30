@@ -94,8 +94,24 @@ untouched.
 ## Switching
 
 The Switch page's PHP dropdown lists **only installed versions** — installing is the dialog's
-job. Picking one takes effect the next time the PHP service starts, since `services::process`
-resolves the active version at spawn time rather than caching a path.
+job.
+
+Picking one **reloads PHP straight away**: if the service is running, Rezure restarts it onto
+the new binary, so there's no manual restart step. `services::process` resolves the PHP
+binary at spawn time rather than caching a path, which is what makes the restart land on the
+new version at all.
+
+Only PHP is restarted. nginx reaches it over `127.0.0.1:9000` per request and reconnects on
+its own once the new process has rebound the port, so bouncing nginx too would drop live
+requests for nothing.
+
+If PHP wasn't running, nothing is restarted — the choice simply applies the next time it
+starts, and the page says so.
+
+If the restart *fails* (the port got taken in between, say), the switch still stands and the
+page reports the failure separately: the active version really did change, and PHP is now
+down. Reporting it as a failed switch would leave the UI showing the old version as active
+while the backend had already moved on.
 
 The active choice is in-memory for now (Phase 4's settings persistence hasn't landed), so a
 restart falls back to the newest installed version. It's also self-healing: if the active

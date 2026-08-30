@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import type { PhpRelease, PhpVersion } from '@/types/php'
+import type { PhpRelease, PhpSwitchResult, PhpVersion } from '@/types/php'
 import type { InstallProgress } from '@/types/binary'
 
 // Keep in sync with `PROGRESS_EVENT` in src-tauri/src/services/binaries.rs
@@ -25,6 +25,9 @@ export const usePhpStore = defineStore('php', () => {
 
   const dropInDir = ref('')
   const adding = ref(false)
+  /** Short-lived confirmation shown after a switch, e.g. that the PHP
+   *  service was reloaded onto the new version. */
+  const notice = ref<string | null>(null)
 
   /** Install progress, keyed by version — the backend emits the version as
    *  the progress id for a PHP install. */
@@ -49,12 +52,32 @@ export const usePhpStore = defineStore('php', () => {
     }
   }
 
+  /**
+   * Switches the active version. The backend also restarts the PHP service
+   * when it's running, so the change takes effect without a manual reload —
+   * `restarted` says whether that happened, and `restartError` when it was
+   * attempted and failed.
+   */
   async function setActive(id: string) {
     error.value = null
+    notice.value = null
     try {
-      versions.value = await invoke<PhpVersion[]>('set_active_php_version', { id })
+      const result = await invoke<PhpSwitchResult>('set_active_php_version', { id })
+      versions.value = result.versions
+
+      if (result.restartError) {
+        // The version did switch — this is about the service that failed to
+        // come back up, so it can't be reported as a failed switch.
+        error.value = `Switched to PHP ${id}, but the service didn't restart: ${result.restartError}`
+      } else if (result.restarted) {
+        notice.value = `PHP ${id} is active — the service was reloaded.`
+      } else {
+        notice.value = `PHP ${id} is active — it'll be used the next time PHP starts.`
+      }
+      return result
     } catch (e) {
       error.value = errorMessage(e)
+      return null
     }
   }
 
@@ -139,6 +162,7 @@ export const usePhpStore = defineStore('php', () => {
     catalogError,
     dropInDir,
     adding,
+    notice,
     fetchAll,
     fetchDropInDir,
     fetchCatalog,

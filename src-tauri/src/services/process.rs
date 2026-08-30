@@ -710,55 +710,124 @@ mod tests {
         assert_eq!(stopped.status, ServiceStatus::Stopped);
     }
 
-    /// Switches the active PHP version and confirms the *actual spawned
-    /// process* — not just what the code claims — points at that
-    /// version's own `php-cgi.exe`. Needs at least two PHP versions
-    /// installed. Run with:
-    /// `cargo test --lib services::process::tests::switching_php_version_changes_which_binary_actually_runs -- --ignored --nocapture`
+    /// The reload path in one assertion, with no processes involved: the
+    /// binary a spawn *would* use has to follow the active version, and be
+    /// that version's own `php-cgi.exe`.
+    ///
+    /// This is what makes the Switch page's auto-reload work at all — the
+    /// restart only lands on the new version because `resolved_exe`
+    /// re-resolves at spawn time instead of caching a path. Runs anywhere,
+    /// so it guards that property on every `cargo test`.
     #[test]
-    #[ignore]
-    fn switching_php_version_changes_which_binary_actually_runs() {
+    fn the_binary_a_spawn_would_use_follows_the_active_php_version() {
         use crate::services::php;
 
-        let versions = crate::services::binaries::family_packages("php");
-        let installed: Vec<_> = versions
-            .iter()
-            .filter(|pkg| crate::services::binaries::is_installed(pkg))
-            .collect();
-        assert!(
-            installed.len() >= 2,
-            "need at least 2 installed PHP versions to run this test"
-        );
+        let installed = php::installed();
+        if installed.len() < 2 {
+            // Nothing to switch between on this machine; the assertions
+            // below would be vacuous rather than wrong.
+            return;
+        }
 
         let original_active = php::active_id();
+        let service = ProcessService::php(no_op_sink()).unwrap();
 
-        for pkg in &installed {
-            php::set_active(pkg.id).unwrap();
+        for runtime in &installed {
+            php::set_active(&runtime.version).unwrap();
 
-            let service = ProcessService::php(no_op_sink()).unwrap();
-            service.start().unwrap();
-            std::thread::sleep(std::time::Duration::from_millis(300));
-
-            let output = Command::new("powershell")
-                .args([
-                    "-NoProfile",
-                    "-Command",
-                    "(Get-Process -Name php-cgi -ErrorAction SilentlyContinue).Path",
-                ])
-                .output()
-                .unwrap();
-            let running_path = String::from_utf8_lossy(&output.stdout).to_string();
-
-            service.stop().unwrap();
-
+            let exe = service.resolved_exe().unwrap();
             assert!(
-                running_path.contains(pkg.version),
-                "expected the running php-cgi to be under {}, got: {running_path}",
-                pkg.version
+                exe.ends_with("php-cgi.exe"),
+                "php runs as php-cgi, got {}",
+                exe.display()
+            );
+            assert!(
+                exe.starts_with(&runtime.dir),
+                "after switching to {}, the spawn should resolve inside {} — got {}",
+                runtime.version,
+                runtime.dir.display(),
+                exe.display()
             );
         }
 
         php::set_active(&original_active).unwrap();
+    }
+
+    /// Switches the active PHP version *while the service is running* and
+    /// confirms the actual spawned process — not just what the code claims
+    /// — moved to the new version's own `php-cgi.exe`.
+    ///
+    /// This is the mechanism behind the Switch page's auto-reload:
+    /// `commands::php::set_active_php_version` does exactly this pair
+    /// (`set_active` then `restart`) when the service is up. Needs at least
+    /// two installed PHP versions. Run with:
+    /// `cargo test --lib services::process::tests::switching_php_version_reloads_onto_the_new_binary -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn switching_php_version_reloads_onto_the_new_binary() {
+        use crate::services::php;
+
+        let installed = php::installed();
+        assert!(
+            installed.len() >= 2,
+            "need at least 2 installed PHP versions to run this test, found {}",
+            installed.len()
+        );
+
+        // Rezure itself holds this port whenever PHP is running, and this
+        // test needs to spawn its own — say so plainly instead of failing
+        // later with a bare PortInUse.
+        assert!(
+            std::net::TcpListener::bind(("127.0.0.1", PHP_FASTCGI_PORT)).is_ok(),
+            "port {PHP_FASTCGI_PORT} is busy — stop PHP in Rezure before running this test"
+        );
+
+        let original_active = php::active_id();
+        let service = ProcessService::php(no_op_sink()).unwrap();
+
+        // Start on the first version, then switch to each of the others
+        // without stopping first — the restart is what has to move it.
+        php::set_active(&installed[0].version).unwrap();
+        service.start().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        assert!(
+            running_php_cgi_path().contains(&installed[0].version),
+            "expected the service to start on {}, got: {}",
+            installed[0].version,
+            running_php_cgi_path()
+        );
+
+        for runtime in installed.iter().skip(1) {
+            php::set_active(&runtime.version).unwrap();
+            service.restart().unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(400));
+
+            let running = running_php_cgi_path();
+            println!("switched to {} -> {}", runtime.version, running.trim());
+            assert!(
+                running.contains(&runtime.version),
+                "after switching to {} the running php-cgi should be under it, got: {running}",
+                runtime.version
+            );
+        }
+
+        service.stop().unwrap();
+        php::set_active(&original_active).unwrap();
+    }
+
+    /// Path of whatever `php-cgi.exe` is running right now, straight from
+    /// the OS — the point is to check the real process, not our own record
+    /// of what we think we spawned.
+    fn running_php_cgi_path() -> String {
+        let output = Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "(Get-Process -Name php-cgi -ErrorAction SilentlyContinue).Path",
+            ])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&output.stdout).to_string()
     }
 
     /// The full pipeline for real: a project folder on disk -> vhost

@@ -5,13 +5,36 @@ use std::path::PathBuf;
 
 use tauri::AppHandle;
 
+use serde::Serialize;
+use tauri::State;
+
 use crate::services::binaries;
 use crate::services::php::{self, PhpVersionStatus};
 use crate::services::php_catalog::{self, PhpRelease};
+use crate::services::{ServiceManager, ServiceStatus};
 use crate::utils::error::AppError;
+
+/// The PHP service's id in [`ServiceManager`] — see `ProcessService::php`.
+const PHP_SERVICE: &str = "php";
 
 fn joined(e: tokio::task::JoinError) -> AppError {
     AppError::Io(format!("background task panicked: {e}"))
+}
+
+/// What a version switch did, beyond changing the active version.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PhpSwitchResult {
+    pub versions: Vec<PhpVersionStatus>,
+    /// True when the running PHP service was restarted onto the new version.
+    /// False when it wasn't running — there was nothing to reload.
+    pub restarted: bool,
+    /// Set when the restart itself failed. Reported *beside* the result
+    /// rather than as a failed command: the switch already happened, so
+    /// returning an error would leave the UI showing the old version as
+    /// active while the backend had already moved on. The user needs to see
+    /// both — the version changed, and PHP is now down.
+    pub restart_error: Option<String>,
 }
 
 /// The PHP versions on disk — downloaded by Rezure or dropped into the
@@ -22,9 +45,43 @@ pub fn list_php_versions() -> Vec<PhpVersionStatus> {
     php::list()
 }
 
+/// Switches the active PHP version and reloads the service so the change
+/// takes effect immediately.
+///
+/// `services::process` resolves the PHP binary at spawn time, so a running
+/// `php-cgi` keeps serving the old version until it restarts. Doing that
+/// here means the Switch page's promise ("pick the version each new vhost
+/// should use") is true the moment it's clicked, instead of quietly
+/// requiring a manual restart nothing in the UI asks for.
+///
+/// Only PHP is restarted: nginx reaches it over `127.0.0.1:9000` per
+/// request and reconnects on its own once the new process has rebound the
+/// port, so bouncing nginx too would drop live requests for nothing.
 #[tauri::command]
-pub fn set_active_php_version(id: String) -> Result<Vec<PhpVersionStatus>, AppError> {
-    php::set_active(&id)
+pub async fn set_active_php_version(
+    id: String,
+    manager: State<'_, ServiceManager>,
+) -> Result<PhpSwitchResult, AppError> {
+    let versions = php::set_active(&id)?;
+
+    let service = manager.find(PHP_SERVICE)?;
+    if service.info().status != ServiceStatus::Running {
+        return Ok(PhpSwitchResult {
+            versions,
+            restarted: false,
+            restart_error: None,
+        });
+    }
+
+    let restart = tokio::task::spawn_blocking(move || service.restart())
+        .await
+        .map_err(joined)?;
+
+    Ok(PhpSwitchResult {
+        versions,
+        restarted: restart.is_ok(),
+        restart_error: restart.err().map(|e| e.to_string()),
+    })
 }
 
 /// The versions php.net currently publishes for Windows. Hits the network
