@@ -54,51 +54,51 @@ function domainTitle(hasHostsEntry: boolean) {
         </p>
       </div>
 
-      <button
-        type="button"
-        class="flex shrink-0 items-center gap-2 rounded-full bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-red-500/40 transition hover:bg-red-500"
-        @click="showNewProjectModal = true"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2.5"
-          class="h-4 w-4"
+      <div class="flex shrink-0 items-center gap-2">
+        <button
+          type="button"
+          class="flex items-center gap-2 rounded-full border border-neutral-200 bg-white/70 px-4 py-2.5 text-sm font-semibold text-neutral-700 transition hover:bg-white disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
+          :disabled="store.syncingHosts || store.unresolvedProjects.length === 0"
+          :title="
+            store.unresolvedProjects.length === 0
+              ? 'Every domain already resolves'
+              : 'Add project domains to the hosts file (needs admin approval)'
+          "
+          @click="store.syncHosts"
         >
-          <path stroke-linecap="round" d="M12 5v14M5 12h14" />
-        </svg>
-        New project
-      </button>
-    </div>
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="h-4 w-4"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+            />
+          </svg>
+          {{ store.syncingHosts ? 'Waiting for admin approval…' : 'Sync hosts file' }}
+        </button>
 
-    <!-- Syncing the hosts file needs a UAC prompt, so it stays an explicit
-         action — but it only earns space on the page when there's actually
-         a domain that doesn't resolve yet. -->
-    <div
-      v-if="store.unresolvedProjects.length > 0"
-      class="mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-500/25 dark:bg-amber-500/10"
-    >
-      <p class="min-w-0 flex-1 text-sm text-amber-900 dark:text-amber-200">
-        {{ store.unresolvedProjects.length }} of {{ store.projects.length }} domains don't resolve
-        yet — add them to the hosts file so they open in your browser.
-      </p>
-      <button
-        type="button"
-        class="flex shrink-0 items-center gap-2 rounded-full bg-amber-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-800 disabled:opacity-60 dark:bg-amber-400 dark:text-amber-950 dark:hover:bg-amber-300"
-        :disabled="store.syncingHosts"
-        title="Add project domains to the hosts file (needs admin approval)"
-        @click="store.syncHosts"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-          />
-        </svg>
-        {{ store.syncingHosts ? 'Waiting for admin approval…' : 'Sync hosts file' }}
-      </button>
+        <button
+          type="button"
+          class="flex items-center gap-2 rounded-full bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-red-500/40 transition hover:bg-red-500"
+          @click="showNewProjectModal = true"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            class="h-4 w-4"
+          >
+            <path stroke-linecap="round" d="M12 5v14M5 12h14" />
+          </svg>
+          New project
+        </button>
+      </div>
     </div>
 
     <p v-if="store.hostsError" class="mt-3 text-sm text-red-600 dark:text-red-400">
