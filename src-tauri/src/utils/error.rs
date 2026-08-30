@@ -61,6 +61,12 @@ pub enum AppError {
 
     #[error("failed to create the project: {0}")]
     ScaffoldFailed(String),
+
+    #[error("project not found: {0}")]
+    ProjectNotFound(String),
+
+    #[error("couldn't open {target}: {reason}")]
+    OpenFailed { target: String, reason: String },
 }
 
 /// Serialized as its `Display` message (the `#[error("...")]` text) rather

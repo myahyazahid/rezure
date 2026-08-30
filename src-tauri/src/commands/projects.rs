@@ -1,6 +1,6 @@
 use crate::db::projects::ProjectInfo;
 use crate::services::scaffold::ProjectTemplate;
-use crate::services::{hosts, projects, scaffold, vhosts};
+use crate::services::{hosts, launcher, projects, scaffold, vhosts};
 use crate::utils::error::AppError;
 
 #[tauri::command]
@@ -59,4 +59,24 @@ pub fn composer_installed() -> bool {
 #[tauri::command]
 pub async fn install_composer() -> Result<(), AppError> {
     scaffold::install_composer().await
+}
+
+/// Opens the project's site in the default browser. Takes the project's
+/// id, not a URL — the domain is re-resolved from the scan on this side so
+/// the frontend can't ask the OS to open something Rezure didn't detect.
+#[tauri::command]
+pub fn open_project_site(id: String) -> Result<(), AppError> {
+    launcher::open_site(&id)
+}
+
+/// Opens the project folder in Explorer.
+#[tauri::command]
+pub fn open_project_folder(id: String) -> Result<(), AppError> {
+    launcher::open_folder(&id)
+}
+
+/// Opens a terminal in the project folder.
+#[tauri::command]
+pub fn open_project_terminal(id: String) -> Result<(), AppError> {
+    launcher::open_terminal(&id)
 }

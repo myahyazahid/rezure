@@ -5,6 +5,7 @@
 
 pub mod binaries;
 pub mod hosts;
+pub mod launcher;
 pub mod php;
 pub mod php_ini;
 pub mod process;
@@ -90,5 +91,18 @@ impl ServiceManager {
             .find(|s| s.id() == id)
             .cloned()
             .ok_or_else(|| AppError::ServiceNotFound(id.to_string()))
+    }
+
+    /// Stops every running service — best-effort, on a normal app exit, so
+    /// a closed Rezure window never leaves a service running as an orphan
+    /// the next launch can't see (see `process::pid_file_path`). A failure
+    /// stopping one service must not skip the rest, so errors are logged
+    /// rather than propagated.
+    pub fn stop_all(&self) {
+        for service in &self.services {
+            if let Err(err) = service.stop() {
+                log::warn!("failed to stop {} on exit: {err}", service.id());
+            }
+        }
     }
 }

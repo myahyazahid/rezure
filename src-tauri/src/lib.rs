@@ -8,7 +8,7 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             commands::services::list_services,
@@ -24,6 +24,9 @@ pub fn run() {
             commands::projects::www_root,
             commands::projects::composer_installed,
             commands::projects::install_composer,
+            commands::projects::open_project_site,
+            commands::projects::open_project_folder,
+            commands::projects::open_project_terminal,
             commands::binaries::list_binaries,
             commands::binaries::install_binary,
         ])
@@ -40,6 +43,19 @@ pub fn run() {
             app.manage(services::real_services(app.handle().clone()));
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        // Best-effort: on a normal quit (window closed, not a crash), stop
+        // every running service so it can't outlive this process as an
+        // orphan holding its port — see `services::ProcessService::reap_orphan`
+        // for the case this can't cover (a crash / force-kill, which never
+        // reaches this handler at all).
+        if let tauri::RunEvent::ExitRequested { .. } = event {
+            if let Some(manager) = app_handle.try_state::<services::ServiceManager>() {
+                manager.stop_all();
+            }
+        }
+    });
 }

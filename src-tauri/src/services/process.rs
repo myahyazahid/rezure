@@ -10,7 +10,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
-use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use tauri::{AppHandle, Emitter};
 
 use super::binaries::{self, BinaryPackage};
@@ -89,6 +89,19 @@ fn runtime_dir(id: &str) -> Result<PathBuf, AppError> {
     Ok(base.join("Rezure").join("data").join(id))
 }
 
+/// Where a service's last-known PID is recorded across app restarts.
+///
+/// `child: Mutex<Option<Child>>` only lives as long as this `AppHandle`, so
+/// if Rezure is force-closed or crashes while a service is running, the
+/// next launch has no in-memory record of it — yet the OS process (and
+/// whatever port it holds) is still alive, since Windows doesn't tie a
+/// child's lifetime to its parent's. This file is the breadcrumb that lets
+/// `reap_orphan` recognize and clean up exactly that leftover, and nothing
+/// else — see its doc comment for the matching rule.
+fn pid_file_path(id: &str) -> Result<PathBuf, AppError> {
+    Ok(runtime_dir(id)?.join("service.pid"))
+}
+
 impl ProcessService {
     pub fn nginx(log_sink: LogSink) -> Result<Self, AppError> {
         binaries::find("nginx")?; // fail fast if the manifest entry is ever missing
@@ -151,10 +164,27 @@ impl ProcessService {
         }
     }
 
+    /// The binary that actually ends up running — `php` is the one case
+    /// where this differs from `binaries::exe_path`: the manifest points at
+    /// `php.exe`, but what gets spawned is `php-cgi.exe`, which ships
+    /// alongside it in the same zip. Shared by `command()` (to build the
+    /// spawn) and `reap_orphan()` (to recognize a leftover from a previous
+    /// run), so the two can never drift apart.
+    fn resolved_exe(&self) -> Result<PathBuf, AppError> {
+        let exe = binaries::exe_path(self.package()?)?;
+        match self.launch {
+            Launch::Php => Ok(exe
+                .parent()
+                .ok_or_else(|| AppError::Io("php.exe has no parent directory".to_string()))?
+                .join("php-cgi.exe")),
+            Launch::Nginx | Launch::MariaDb { .. } => Ok(exe),
+        }
+    }
+
     /// Builds the `Command` to spawn, preparing any per-service runtime
     /// state (PHP's docroot, MariaDB's data directory) it needs first.
     fn command(&self) -> Result<Command, AppError> {
-        let exe = binaries::exe_path(self.package()?)?;
+        let exe = self.resolved_exe()?;
 
         let mut cmd = match &self.launch {
             Launch::Nginx => {
@@ -165,13 +195,8 @@ impl ProcessService {
                 cmd
             }
             Launch::Php => {
-                // `php-cgi.exe` ships alongside `php.exe` in the same zip.
-                let cgi_exe = exe
-                    .parent()
-                    .ok_or_else(|| AppError::Io("php.exe has no parent directory".to_string()))?
-                    .join("php-cgi.exe");
                 let ini_path = php_ini::ensure_php_ini(&exe)?;
-                let mut cmd = Command::new(cgi_exe);
+                let mut cmd = Command::new(&exe);
                 cmd.arg("-c")
                     .arg(&ini_path)
                     .arg("-b")
@@ -391,6 +416,7 @@ impl Service for ProcessService {
             return Err(AppError::BinaryNotInstalled(self.name.to_string()));
         }
 
+        self.reap_orphan()?;
         ensure_port_available(self.bind_addr(), self.port, self.name)?;
 
         let mut cmd = self.command()?;
@@ -398,6 +424,10 @@ impl Service for ProcessService {
             name: self.name.to_string(),
             reason: e.to_string(),
         })?;
+
+        if let Ok(path) = pid_file_path(self.id) {
+            let _ = fs::write(&path, child.id().to_string());
+        }
 
         self.spawn_log_readers(&mut child);
         *self.child.lock().unwrap() = Some(child);
@@ -411,8 +441,54 @@ impl Service for ProcessService {
             let _ = child.wait();
         }
         drop(child_guard);
+        if let Ok(path) = pid_file_path(self.id) {
+            let _ = fs::remove_file(&path);
+        }
         self.cpu_history.lock().unwrap().clear();
         Ok(self.info())
+    }
+}
+
+impl ProcessService {
+    /// Cleans up a leftover instance of this exact service from a previous
+    /// Rezure run — see [`pid_file_path`] for why this can happen. Only
+    /// acts when the recorded PID is *still alive and still running this
+    /// service's own binary*; a dead PID (clean shutdown) or one recycled
+    /// by an unrelated process is left completely alone, since a stale
+    /// record is the only thing this can verify — it's never treated as
+    /// license to kill whatever happens to be using the port.
+    fn reap_orphan(&self) -> Result<(), AppError> {
+        let pid_path = pid_file_path(self.id)?;
+        let Ok(recorded) = fs::read_to_string(&pid_path) else {
+            return Ok(());
+        };
+        // Whatever happens next, this record is about to be superseded by
+        // either a fresh start or a confirmed-dead entry — never left
+        // pointing at a PID that's no longer meaningful.
+        let _ = fs::remove_file(&pid_path);
+
+        let Ok(pid) = recorded.trim().parse::<u32>() else {
+            return Ok(());
+        };
+
+        let expected_exe = self.resolved_exe()?;
+        let sys_pid = Pid::from_u32(pid);
+        let is_ours = {
+            let mut sys = self.sys.lock().unwrap();
+            sys.refresh_processes_specifics(
+                ProcessesToUpdate::Some(&[sys_pid]),
+                true,
+                ProcessRefreshKind::nothing().with_exe(UpdateKind::Always),
+            );
+            sys.process(sys_pid)
+                .and_then(|p| p.exe())
+                .is_some_and(|exe| exe == expected_exe)
+        };
+
+        if is_ours {
+            kill_process_tree(pid);
+        }
+        Ok(())
     }
 }
 
@@ -508,6 +584,39 @@ mod tests {
         drop(listener);
         ensure_port_available("127.0.0.1", port, "Test")
             .expect("port must be free once the listener drops");
+    }
+
+    #[test]
+    fn reap_orphan_is_a_no_op_when_theres_no_recorded_pid() {
+        let service = ProcessService::mariadb(no_op_sink()).unwrap();
+        let pid_path = pid_file_path(service.id).unwrap();
+        let _ = fs::remove_file(&pid_path);
+
+        assert!(service.reap_orphan().is_ok());
+    }
+
+    #[test]
+    fn reap_orphan_leaves_a_live_pid_alone_when_its_not_this_services_binary() {
+        let service = ProcessService::nginx(no_op_sink()).unwrap();
+        let pid_path = pid_file_path(service.id).unwrap();
+        fs::create_dir_all(pid_path.parent().unwrap()).unwrap();
+        // The current test process is guaranteed alive, but it's the test
+        // binary, not nginx.exe — reap_orphan must recognize the mismatch
+        // and leave it running rather than killing an unrelated process.
+        fs::write(&pid_path, std::process::id().to_string()).unwrap();
+
+        service.reap_orphan().unwrap();
+
+        assert!(
+            !pid_path.exists(),
+            "a resolved record — match or not — must not be left pointing at a stale pid"
+        );
+        assert!(
+            sysinfo::System::new_all()
+                .process(Pid::from_u32(std::process::id()))
+                .is_some(),
+            "the current process must still be running"
+        );
     }
 
     /// Real spawn/stop against the actual downloaded binary — not run by

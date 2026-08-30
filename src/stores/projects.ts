@@ -13,6 +13,7 @@ export const useProjectsStore = defineStore('projects', () => {
   const projects = ref<ProjectInfo[]>([])
   const syncingHosts = ref(false)
   const hostsError = ref<string | null>(null)
+  const openError = ref<string | null>(null)
 
   const templates = ref<ProjectTemplate[]>([])
   const wwwRoot = ref('')
@@ -22,6 +23,10 @@ export const useProjectsStore = defineStore('projects', () => {
   const allHostsReady = computed(
     () => projects.value.length > 0 && projects.value.every((p) => p.hasHostsEntry),
   )
+
+  /** Projects whose domain won't resolve in a browser yet — what the
+   *  hosts-file prompt on the Projects page is offering to fix. */
+  const unresolvedProjects = computed(() => projects.value.filter((p) => !p.hasHostsEntry))
 
   async function fetchAll() {
     projects.value = await invoke<ProjectInfo[]>('list_projects')
@@ -45,6 +50,28 @@ export const useProjectsStore = defineStore('projects', () => {
       syncingHosts.value = false
     }
   }
+
+  /**
+   * Hands a project to the browser / Explorer / a terminal. Only the
+   * project id crosses the IPC boundary — Rust resolves it back to a real
+   * scanned project and decides what to actually open, so nothing here
+   * needs to build a URL or a shell command.
+   */
+  async function launch(
+    command: 'open_project_site' | 'open_project_folder' | 'open_project_terminal',
+    id: string,
+  ) {
+    openError.value = null
+    try {
+      await invoke(command, { id })
+    } catch (e) {
+      openError.value = errorMessage(e)
+    }
+  }
+
+  const openSite = (id: string) => launch('open_project_site', id)
+  const openFolder = (id: string) => launch('open_project_folder', id)
+  const openTerminal = (id: string) => launch('open_project_terminal', id)
 
   async function fetchTemplateInfo() {
     const [fetchedTemplates, fetchedWwwRoot] = await Promise.all([
@@ -76,13 +103,18 @@ export const useProjectsStore = defineStore('projects', () => {
     projects,
     syncingHosts,
     hostsError,
+    openError,
     allHostsReady,
+    unresolvedProjects,
     templates,
     wwwRoot,
     creating,
     createError,
     fetchAll,
     syncHosts,
+    openSite,
+    openFolder,
+    openTerminal,
     fetchTemplateInfo,
     createProject,
   }
