@@ -39,6 +39,13 @@ Goal: a functional, installable release covering the essential local dev environ
 - Store project list & history in SQLite (`rusqlite`/`sqlx`)
 - Basic Settings page (binary paths, default ports, etc.)
 
+### Phase 4.5 — Database Management
+- Databases page for the bundled MariaDB: list schemas with table count, size and the project that appears to use them
+- Create and drop databases; export to `.sql` (`mariadb-dump`) and import a `.sql` back
+- Detect the SQL clients already installed (TablePlus, DBeaver, HeidiSQL, MySQL Workbench, Navicat) and open a database in the one the user picks — with the bundled `mariadb.exe` console as an always-available fallback
+- Driven through the client binaries that ship with the server, so no MySQL driver crate is added to the dependency tree
+- Detail: [`databases.md`](databases.md)
+
 ### Phase 5 — UI Polish
 - Main layout (sidebar: services, projects, settings)
 - Consistent Tailwind-based styling
@@ -86,7 +93,7 @@ Goal: expand Rezure beyond core Laragon parity with added value features.
 - One-click tunneling (ngrok/cloudflared)
 - Integrated terminal
 - Docker toggle mode (container vs native binary)
-- Embedded lightweight database GUI
+- Embedded lightweight database GUI (browsing and editing table data in-app; the Phase 4.5 Databases page manages schemas and hands off to an external client, it does not browse rows)
 - Local project health dashboard (port conflict detector, log viewer)
 
 **Dashboard (Laravel) — expanded scope:**

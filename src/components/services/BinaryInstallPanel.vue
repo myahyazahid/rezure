@@ -63,9 +63,7 @@ function progressPercent(id: string) {
               <BasePill variant="mono">v{{ binary.version }}</BasePill>
             </div>
             <p class="mt-0.5 text-xs text-neutral-500">
-              <template v-if="store.isInstalling(binary.id)">{{
-                stageLabel(binary.id)
-              }}</template>
+              <template v-if="store.isInstalling(binary.id)">{{ stageLabel(binary.id) }}</template>
               <template v-else>{{ binary.installed ? 'Installed' : 'Not installed' }}</template>
             </p>
           </div>

@@ -77,13 +77,27 @@ const composerVersions = computed<RuntimeVersionEntry[]>(() => [
         :installing-id="composerStore.installing ? 'composer' : null"
         @install="composerStore.install"
       />
-      <RuntimeSwitchRow icon="N" name="Node.js" active-version="" :installed-count="0" :versions="[]" disabled />
-      <RuntimeSwitchRow icon="P" name="Python" active-version="" :installed-count="0" :versions="[]" disabled />
+      <RuntimeSwitchRow
+        icon="N"
+        name="Node.js"
+        active-version=""
+        :installed-count="0"
+        :versions="[]"
+        disabled
+      />
+      <RuntimeSwitchRow
+        icon="P"
+        name="Python"
+        active-version=""
+        :installed-count="0"
+        :versions="[]"
+        disabled
+      />
     </div>
 
     <p class="mt-4 text-xs text-neutral-400">
-      Node.js and Python aren't available yet — Rezure doesn't bundle a portable runtime for
-      either, so there's nothing installable to switch between.
+      Node.js and Python aren't available yet — Rezure doesn't bundle a portable runtime for either,
+      so there's nothing installable to switch between.
     </p>
   </section>
 </template>

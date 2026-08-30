@@ -53,11 +53,19 @@ function pick(entry: RuntimeVersionEntry) {
     <div class="min-w-0 flex-1">
       <p class="font-semibold text-neutral-900 dark:text-neutral-100">{{ name }}</p>
       <p class="mt-0.5 font-mono text-xs text-neutral-500">
-        {{ disabled ? 'not available yet' : activeVersion ? `active ${activeVersion}` : 'not installed' }}
+        {{
+          disabled
+            ? 'not available yet'
+            : activeVersion
+              ? `active ${activeVersion}`
+              : 'not installed'
+        }}
       </p>
     </div>
 
-    <span v-if="!disabled" class="shrink-0 text-xs text-neutral-500">{{ installedCount }} installed</span>
+    <span v-if="!disabled" class="shrink-0 text-xs text-neutral-500"
+      >{{ installedCount }} installed</span
+    >
 
     <div v-if="!disabled" class="relative shrink-0">
       <button
@@ -88,17 +96,27 @@ function pick(entry: RuntimeVersionEntry) {
             :key="entry.id"
             type="button"
             class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left font-mono text-sm transition disabled:cursor-wait"
-            :class="entry.installed ? 'hover:bg-neutral-100 dark:hover:bg-neutral-800' : 'text-neutral-400 hover:bg-neutral-100 dark:text-neutral-500 dark:hover:bg-neutral-800'"
+            :class="
+              entry.installed
+                ? 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                : 'text-neutral-400 hover:bg-neutral-100 dark:text-neutral-500 dark:hover:bg-neutral-800'
+            "
             :disabled="installingId === entry.id"
             @click="pick(entry)"
           >
             <span
               class="h-1.5 w-1.5 shrink-0 rounded-full"
-              :class="entry.id === activeVersion || entry.version === activeVersion ? 'bg-red-500' : 'bg-transparent'"
+              :class="
+                entry.id === activeVersion || entry.version === activeVersion
+                  ? 'bg-red-500'
+                  : 'bg-transparent'
+              "
             ></span>
             <span class="flex-1 truncate">{{ entry.version }}</span>
             <span v-if="i === 0" class="text-[10px] text-neutral-400">latest</span>
-            <span v-if="installingId === entry.id" class="text-[10px] text-neutral-400">installing…</span>
+            <span v-if="installingId === entry.id" class="text-[10px] text-neutral-400"
+              >installing…</span
+            >
             <svg
               v-else-if="!entry.installed"
               viewBox="0 0 24 24"
@@ -108,7 +126,11 @@ function pick(entry: RuntimeVersionEntry) {
               class="h-3.5 w-3.5 shrink-0"
               aria-label="Download"
             >
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14" />
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"
+              />
             </svg>
           </button>
         </div>

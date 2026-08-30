@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { useServicesStore } from '@/stores/services'
 import { useProjectsStore } from '@/stores/projects'
+import { useDatabasesStore } from '@/stores/databases'
 import { usePhpStore } from '@/stores/php'
 import { useLogsStore } from '@/stores/logs'
 import { useUptime } from '@/composables/useUptime'
@@ -10,6 +11,7 @@ import { useUptime } from '@/composables/useUptime'
 const route = useRoute()
 const servicesStore = useServicesStore()
 const projectsStore = useProjectsStore()
+const databasesStore = useDatabasesStore()
 const phpStore = usePhpStore()
 const logsStore = useLogsStore()
 const { label: uptimeLabel } = useUptime()
@@ -27,6 +29,13 @@ const navItems = computed(() => [
     icon: 'folder' as const,
     label: 'Projects',
     badge: String(projectsStore.projects.length),
+    variant: 'default' as const,
+  },
+  {
+    to: '/databases',
+    icon: 'database' as const,
+    label: 'Databases',
+    badge: String(databasesStore.databases.length),
     variant: 'default' as const,
   },
   {
@@ -116,6 +125,20 @@ const ringOffset = computed(() => {
             />
           </svg>
           <svg
+            v-else-if="item.icon === 'database'"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="h-4 w-4"
+          >
+            <ellipse cx="12" cy="6" rx="7" ry="3" />
+            <path
+              stroke-linecap="round"
+              d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"
+            />
+          </svg>
+          <svg
             v-else-if="item.icon === 'switch'"
             viewBox="0 0 24 24"
             fill="none"
@@ -135,7 +158,14 @@ const ringOffset = computed(() => {
           >
             <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h10" />
           </svg>
-          <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+          <svg
+            v-else
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="h-4 w-4"
+          >
             <path
               stroke-linecap="round"
               stroke-linejoin="round"

@@ -4,6 +4,8 @@
 //! trait so adding a new one never requires special-casing elsewhere.
 
 pub mod binaries;
+pub mod database;
+pub mod db_clients;
 pub mod hosts;
 pub mod launcher;
 pub mod php;

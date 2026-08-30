@@ -10,6 +10,7 @@ use tauri::Manager;
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             commands::services::list_services,
             commands::services::start_service,
@@ -29,6 +30,16 @@ pub fn run() {
             commands::projects::open_project_terminal,
             commands::binaries::list_binaries,
             commands::binaries::install_binary,
+            commands::database::list_databases,
+            commands::database::database_server_info,
+            commands::database::list_collations,
+            commands::database::create_database,
+            commands::database::drop_database,
+            commands::database::export_database,
+            commands::database::import_sql,
+            commands::database::open_dumps_folder,
+            commands::database::list_db_clients,
+            commands::database::open_in_db_client,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

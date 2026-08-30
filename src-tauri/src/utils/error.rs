@@ -67,6 +67,17 @@ pub enum AppError {
 
     #[error("couldn't open {target}: {reason}")]
     OpenFailed { target: String, reason: String },
+
+    #[error(
+        "\"{name}\" isn't a valid {kind} name — use letters, digits, underscores and hyphens only"
+    )]
+    InvalidDatabaseName { name: String, kind: String },
+
+    #[error("MariaDB: {0}")]
+    DatabaseQueryFailed(String),
+
+    #[error("no such SQL client: {0}")]
+    UnknownDbClient(String),
 }
 
 /// Serialized as its `Display` message (the `#[error("...")]` text) rather

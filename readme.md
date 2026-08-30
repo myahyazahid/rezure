@@ -11,6 +11,7 @@ Rezure lets you spin up local web development environments (Apache/Nginx, PHP, M
 - One-click start/stop for local services (Apache, Nginx, MySQL/MariaDB, PHP-FPM)
 - Automatic virtual host & `hosts` file configuration
 - Multi-version PHP switching
+- Database management for the bundled MariaDB — create, export, import, and open a database in whichever SQL client you already have installed (see [`docs/databases.md`](docs/databases.md))
 - Portable bundled binaries — no manual installation required
 - Lightweight footprint thanks to Tauri (native webview, small binary size)
 
@@ -122,6 +123,11 @@ Rezure is open source and contributions are welcome — bug reports, feature req
 Before contributing, please read:
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to set up your dev environment, coding conventions, and PR process
 - [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) — community guidelines
+
+**Reference docs:**
+- [`docs/architecture.md`](docs/architecture.md) — technical foundation & design decisions
+- [`docs/databases.md`](docs/databases.md) — the bundled MariaDB, SQL-client detection, export/import
+- [`docs/roadmap.md`](docs/roadmap.md) — what's in scope per version
 
 **Coding standards (summary):**
 - Rust code formatted with `cargo fmt`, linted with `cargo clippy`

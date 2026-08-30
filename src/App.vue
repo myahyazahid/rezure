@@ -7,18 +7,23 @@ import { useServicesStore } from '@/stores/services'
 import { useProjectsStore } from '@/stores/projects'
 import { usePhpStore } from '@/stores/php'
 import { useBinariesStore } from '@/stores/binaries'
+import { useDatabasesStore } from '@/stores/databases'
 
 const servicesStore = useServicesStore()
 const projectsStore = useProjectsStore()
 const phpStore = usePhpStore()
 const binariesStore = useBinariesStore()
+const databasesStore = useDatabasesStore()
 
 onMounted(() => {
-  // Sidebar badges and the dashboard read from all four stores, so they are loaded up front.
+  // Sidebar badges and the dashboard read from all of these, so they are loaded up front.
   servicesStore.fetchAll()
   projectsStore.fetchAll()
   phpStore.fetchAll()
   binariesStore.fetchAll()
+  // Best-effort: this one fails when MariaDB isn't running, which the
+  // Databases page reports on its own rather than as a startup error.
+  databasesStore.fetchAll()
 })
 </script>
 

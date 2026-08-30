@@ -83,7 +83,9 @@ watch(name, () => {
         <div>
           <h2 class="text-xl font-bold tracking-tight">New project</h2>
           <p class="mt-0.5 text-sm text-neutral-500">
-            {{ step === 1 ? 'Step 1 of 2 — pick a starting point' : 'Step 2 of 2 — name it and go' }}
+            {{
+              step === 1 ? 'Step 1 of 2 — pick a starting point' : 'Step 2 of 2 — name it and go'
+            }}
           </p>
         </div>
         <div class="flex shrink-0 items-center gap-1 pt-1.5">
@@ -120,10 +122,15 @@ watch(name, () => {
                   : 'border-neutral-300 dark:border-neutral-600'
               "
             >
-              <span v-if="selectedTemplateId === template.id" class="h-2 w-2 rounded-full bg-red-500"></span>
+              <span
+                v-if="selectedTemplateId === template.id"
+                class="h-2 w-2 rounded-full bg-red-500"
+              ></span>
             </span>
             <div class="min-w-0">
-              <p class="font-semibold text-neutral-900 dark:text-neutral-100">{{ template.name }}</p>
+              <p class="font-semibold text-neutral-900 dark:text-neutral-100">
+                {{ template.name }}
+              </p>
               <p class="truncate text-xs text-neutral-500">{{ template.description }}</p>
             </div>
           </div>
@@ -169,17 +176,23 @@ watch(name, () => {
               : 'border-neutral-200 focus:border-red-400 dark:border-neutral-700'
           "
         />
-        <p v-if="nameError" class="mt-1.5 text-xs text-red-600 dark:text-red-400">{{ nameError }}</p>
+        <p v-if="nameError" class="mt-1.5 text-xs text-red-600 dark:text-red-400">
+          {{ nameError }}
+        </p>
 
         <div class="mt-4 grid grid-cols-2 gap-3">
           <div class="rounded-xl bg-red-50 p-3 dark:bg-red-500/10">
-            <p class="text-[10px] font-semibold tracking-wide text-red-400 uppercase">Local domain</p>
+            <p class="text-[10px] font-semibold tracking-wide text-red-400 uppercase">
+              Local domain
+            </p>
             <p class="truncate font-mono text-sm text-red-600 dark:text-red-400">
               {{ name.trim() || '…' }}.test
             </p>
           </div>
           <div class="rounded-xl bg-neutral-100 p-3 dark:bg-neutral-800">
-            <p class="text-[10px] font-semibold tracking-wide text-neutral-400 uppercase">Template</p>
+            <p class="text-[10px] font-semibold tracking-wide text-neutral-400 uppercase">
+              Template
+            </p>
             <p class="truncate text-sm font-semibold text-neutral-900 dark:text-neutral-100">
               {{ selectedTemplate?.name }}
             </p>
@@ -193,9 +206,8 @@ watch(name, () => {
         <p v-if="store.creating" class="mt-3 text-xs text-neutral-500">
           Creating project…
           <template v-if="selectedTemplateId === 'laravel'">
-            Composer is resolving and downloading dependencies — this
-            typically takes 3-6 minutes, longer on a slow connection. Keep
-            this open.
+            Composer is resolving and downloading dependencies — this typically takes 3-6 minutes,
+            longer on a slow connection. Keep this open.
           </template>
           <template v-else-if="selectedTemplateId === 'wordpress'">
             downloading WordPress core — usually around a minute.
@@ -227,8 +239,20 @@ watch(name, () => {
               class="h-4 w-4 animate-spin"
               aria-hidden="true"
             >
-              <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5" opacity="0.25" />
-              <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+              <circle
+                cx="12"
+                cy="12"
+                r="9"
+                stroke="currentColor"
+                stroke-width="2.5"
+                opacity="0.25"
+              />
+              <path
+                d="M21 12a9 9 0 0 0-9-9"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+              />
             </svg>
             {{ store.creating ? 'Creating…' : 'Create project' }}
           </button>
