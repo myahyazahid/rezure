@@ -49,6 +49,34 @@ pub struct Profile {
     pub version: String,
     pub port: u16,
     pub source: ProfileSource,
+    /// A specific server build to run this profile on, when Rezure shouldn't
+    /// pick one itself.
+    ///
+    /// Set when adopting another tool's data: Laragon's MySQL 8.4 datadir
+    /// needs Laragon's own MySQL 8.4 binary, and that build is already on
+    /// disk — pointing at it costs nothing, while copying it would duplicate
+    /// a quarter of a gigabyte to no end. It's also consistent with what a
+    /// profile already is: a pointer to somebody else's folder. If that tool
+    /// is uninstalled its datadir goes with it, so an owned copy of the
+    /// binary would have outlived the only data it could open.
+    ///
+    /// `None` means "resolve from the versions Rezure knows about" — the
+    /// path Rezure's own profile takes.
+    #[serde(default)]
+    pub binary_dir: Option<String>,
+    /// The `my.ini` this install's datadir depends on.
+    ///
+    /// Not optional detail — a datadir is only readable under the config it
+    /// was created with. XAMPP's sets `plugin_dir`, and without it the
+    /// server can't load Aria, so the `mysql.db` privilege table (an Aria
+    /// table) reads as `Incorrect file format 'db'` and startup aborts.
+    /// Laragon and XAMPP both launch their servers with `--defaults-file`
+    /// for exactly this reason, so an adopted profile has to as well.
+    ///
+    /// `None` for a datadir Rezure created, which depends on no config
+    /// beyond the flags it's started with.
+    #[serde(default)]
+    pub defaults_file: Option<String>,
     /// True for the datadir Rezure created and owns. Exactly one profile has
     /// it, and it's the fallback when an adopted profile can't be started.
     pub is_default: bool,
@@ -191,6 +219,8 @@ pub fn ensure_default(
                 version,
                 port,
                 source: ProfileSource::Rezure,
+                binary_dir: None,
+                defaults_file: None,
                 is_default: true,
                 last_used_at: None,
             },
@@ -212,32 +242,39 @@ pub fn ensure_default(
     changed
 }
 
+/// Everything needed to register a datadir, minus the bookkeeping
+/// (`id`, `is_default`, `last_used_at`) this module fills in itself.
+pub struct NewProfile {
+    pub name: String,
+    pub datadir_path: String,
+    pub engine: Engine,
+    pub version: String,
+    pub port: u16,
+    pub source: ProfileSource,
+    pub binary_dir: Option<String>,
+    pub defaults_file: Option<String>,
+}
+
 /// Adds a profile for an existing datadir. Records the path and nothing
 /// else — the folder itself is never touched.
-pub fn add(
-    store: &mut ProfileStore,
-    name: String,
-    datadir_path: String,
-    engine: Engine,
-    version: String,
-    port: u16,
-    source: ProfileSource,
-) -> Result<Profile, AppError> {
-    if let Some(existing) = store.datadir_taken_by(&datadir_path, None) {
+pub fn add(store: &mut ProfileStore, new: NewProfile) -> Result<Profile, AppError> {
+    if let Some(existing) = store.datadir_taken_by(&new.datadir_path, None) {
         return Err(AppError::DatadirAlreadyRegistered {
-            path: datadir_path,
+            path: new.datadir_path,
             name: existing.name.clone(),
         });
     }
 
     let profile = Profile {
         id: new_id(),
-        name,
-        datadir_path,
-        engine,
-        version,
-        port,
-        source,
+        name: new.name,
+        datadir_path: new.datadir_path,
+        engine: new.engine,
+        version: new.version,
+        port: new.port,
+        source: new.source,
+        binary_dir: new.binary_dir,
+        defaults_file: new.defaults_file,
         is_default: false,
         last_used_at: None,
     };
@@ -337,25 +374,33 @@ mod tests {
         let mut store = store_with_default();
         add(
             &mut store,
-            "Laragon".to_string(),
-            r"C:\laragon\data\mysql-8.4".to_string(),
-            Engine::MySql,
-            "8.4.3".to_string(),
-            3306,
-            ProfileSource::Laragon,
+            NewProfile {
+                name: "Laragon".to_string(),
+                datadir_path: r"C:\laragon\data\mysql-8.4".to_string(),
+                engine: Engine::MySql,
+                version: "8.4.3".to_string(),
+                port: 3306,
+                source: ProfileSource::Laragon,
+                binary_dir: None,
+                defaults_file: None,
+            },
         )
         .unwrap();
 
         let err = add(
             &mut store,
-            "Laragon again".to_string(),
-            // Same folder, different spelling — forward slashes, trailing
-            // separator, different case.
-            "c:/Laragon/Data/mysql-8.4/".to_string(),
-            Engine::MySql,
-            "8.4.3".to_string(),
-            3307,
-            ProfileSource::Custom,
+            NewProfile {
+                name: "Laragon again".to_string(),
+                // Same folder, different spelling — forward slashes, trailing
+                // separator, different case.
+                datadir_path: "c:/Laragon/Data/mysql-8.4/".to_string(),
+                engine: Engine::MySql,
+                version: "8.4.3".to_string(),
+                port: 3307,
+                source: ProfileSource::Custom,
+                binary_dir: None,
+                defaults_file: None,
+            },
         )
         .unwrap_err();
 
@@ -385,12 +430,16 @@ mod tests {
         let mut store = store_with_default();
         let added = add(
             &mut store,
-            "Laragon".to_string(),
-            r"C:\laragon\data\mysql-8.4".to_string(),
-            Engine::MySql,
-            "8.4.3".to_string(),
-            3306,
-            ProfileSource::Laragon,
+            NewProfile {
+                name: "Laragon".to_string(),
+                datadir_path: r"C:\laragon\data\mysql-8.4".to_string(),
+                engine: Engine::MySql,
+                version: "8.4.3".to_string(),
+                port: 3306,
+                source: ProfileSource::Laragon,
+                binary_dir: None,
+                defaults_file: None,
+            },
         )
         .unwrap();
         store.active_profile_id = Some(added.id.clone());
@@ -406,12 +455,16 @@ mod tests {
         let mut store = store_with_default();
         let added = add(
             &mut store,
-            "XAMPP".to_string(),
-            r"C:\xampp\mysql\data".to_string(),
-            Engine::MariaDb,
-            "10.4.32".to_string(),
-            3306,
-            ProfileSource::Xampp,
+            NewProfile {
+                name: "XAMPP".to_string(),
+                datadir_path: r"C:\xampp\mysql\data".to_string(),
+                engine: Engine::MariaDb,
+                version: "10.4.32".to_string(),
+                port: 3306,
+                source: ProfileSource::Xampp,
+                binary_dir: None,
+                defaults_file: None,
+            },
         )
         .unwrap();
 
@@ -426,12 +479,16 @@ mod tests {
         let mut store = store_with_default();
         add(
             &mut store,
-            "Laragon".to_string(),
-            r"C:\laragon\data\mysql-8.4".to_string(),
-            Engine::MySql,
-            "8.4.3".to_string(),
-            3307,
-            ProfileSource::Laragon,
+            NewProfile {
+                name: "Laragon".to_string(),
+                datadir_path: r"C:\laragon\data\mysql-8.4".to_string(),
+                engine: Engine::MySql,
+                version: "8.4.3".to_string(),
+                port: 3307,
+                source: ProfileSource::Laragon,
+                binary_dir: None,
+                defaults_file: None,
+            },
         )
         .unwrap();
 

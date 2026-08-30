@@ -15,6 +15,17 @@ use serde::Serialize;
 
 use crate::utils::error::AppError;
 
+/// Where a project came from, which decides what can be done to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProjectKind {
+    /// Found by scanning `www_root()`. Managed by moving folders in and out.
+    Scanned,
+    /// A folder elsewhere the user pointed Rezure at. Unlinkable, and the
+    /// only kind that can go missing while still being listed.
+    Linked,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectInfo {
@@ -32,6 +43,11 @@ pub struct ProjectInfo {
     /// or terminal) — `None` until it's been opened at least once.
     pub last_opened_at: Option<i64>,
     pub open_count: i64,
+    pub kind: ProjectKind,
+    /// True for a linked project whose folder is no longer there — moved,
+    /// deleted, or on a drive that isn't plugged in. Listed anyway rather
+    /// than quietly dropped, since the last case fixes itself.
+    pub missing: bool,
 }
 
 fn now() -> i64 {
@@ -138,6 +154,8 @@ mod tests {
             has_hosts_entry: false,
             last_opened_at: None,
             open_count: 0,
+            kind: ProjectKind::Scanned,
+            missing: false,
         }
     }
 

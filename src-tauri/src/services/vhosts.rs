@@ -160,7 +160,13 @@ pub fn sync_vhosts() -> Result<usize, AppError> {
     ensure_dir(&vhosts)?;
     let fastcgi_params = nginx_conf_dir()?.join("fastcgi_params");
 
-    let current = scan_projects()?;
+    // A linked project whose folder is gone gets no vhost — nginx would be
+    // pointed at a root that doesn't exist. It stays in the list, though,
+    // since the folder may simply be on a drive that isn't plugged in.
+    let current: Vec<_> = scan_projects()?
+        .into_iter()
+        .filter(|project| !project.missing)
+        .collect();
     let current_ids: std::collections::HashSet<&str> =
         current.iter().map(|p| p.id.as_str()).collect();
 

@@ -5,12 +5,22 @@ import SearchInput from '@/components/common/SearchInput.vue'
 import BasePill from '@/components/common/BasePill.vue'
 import ProjectActionButtons from '@/components/projects/ProjectActionButtons.vue'
 import NewProjectModal from '@/components/projects/NewProjectModal.vue'
+import LinkProjectModal from '@/components/projects/LinkProjectModal.vue'
 
 const store = useProjectsStore()
 
 const search = ref('')
 const viewMode = ref<'grid' | 'list'>('list')
 const showNewProjectModal = ref(false)
+const showLinkProjectModal = ref(false)
+/** Unlink asks first — it's a list the user curated, and an accidental
+ *  click would otherwise silently drop an entry. */
+const confirmingUnlink = ref<string | null>(null)
+
+async function unlink(id: string) {
+  confirmingUnlink.value = null
+  await store.unlinkProject(id)
+}
 
 const filteredProjects = computed(() => {
   const query = search.value.trim().toLowerCase()
@@ -94,6 +104,22 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
 
         <button
           type="button"
+          class="flex items-center gap-2 rounded-full border border-neutral-200 bg-white/70 px-4 py-2.5 text-sm font-semibold text-neutral-700 transition hover:bg-white dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
+          title="Serve a project from a folder outside your www directory"
+          @click="showLinkProjectModal = true"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
+            />
+          </svg>
+          Add folder
+        </button>
+
+        <button
+          type="button"
           class="flex items-center gap-2 rounded-full bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-red-500/40 transition hover:bg-red-500"
           @click="showNewProjectModal = true"
         >
@@ -119,6 +145,50 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
     </p>
 
     <NewProjectModal v-if="showNewProjectModal" @close="showNewProjectModal = false" />
+    <LinkProjectModal v-if="showLinkProjectModal" @close="showLinkProjectModal = false" />
+
+    <!-- Says plainly that nothing is deleted. "Remove" next to a folder path
+         reads as destructive unless the opposite is stated. -->
+    <div
+      v-if="confirmingUnlink"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      @click.self="confirmingUnlink = null"
+    >
+      <div
+        class="w-full max-w-md rounded-2xl border border-neutral-200 bg-white p-6 shadow-2xl dark:border-neutral-700 dark:bg-neutral-900"
+      >
+        <h2 class="text-lg font-bold text-neutral-900 dark:text-neutral-100">
+          Remove this project from Rezure?
+        </h2>
+        <p class="mt-2 text-sm text-neutral-500">
+          Rezure stops serving it and drops its virtual host.
+          <strong class="text-neutral-700 dark:text-neutral-200">
+            The folder and everything in it stays exactly where it is
+          </strong>
+          — you can add it again any time.
+        </p>
+        <div class="mt-6 flex justify-end gap-2">
+          <button
+            type="button"
+            class="rounded-full px-4 py-2 text-sm font-semibold text-neutral-600 dark:text-neutral-300"
+            @click="confirmingUnlink = null"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="rounded-full bg-red-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-red-500"
+            @click="unlink(confirmingUnlink)"
+          >
+            Remove
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <p v-if="store.linkError" class="mt-3 text-sm text-red-600 dark:text-red-400">
+      {{ store.linkError }}
+    </p>
 
     <div class="mt-5 flex flex-wrap items-center gap-3">
       <SearchInput
@@ -187,13 +257,23 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
         class="rounded-2xl border border-neutral-200 bg-white p-4 transition hover:border-neutral-300 dark:border-neutral-800 dark:bg-neutral-900/60 dark:hover:border-neutral-700"
       >
         <div class="flex items-start justify-between gap-2">
-          <p class="truncate font-semibold text-neutral-900 dark:text-neutral-100">
-            {{ project.name }}
+          <p class="flex min-w-0 items-center gap-2 truncate font-semibold text-neutral-900 dark:text-neutral-100">
+            <span class="truncate">{{ project.name }}</span>
+            <span
+              v-if="project.kind === 'linked'"
+              class="shrink-0 rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-neutral-500 uppercase dark:bg-neutral-800 dark:text-neutral-400"
+              title="Served from a folder outside your www directory"
+            >
+              Linked
+            </span>
           </p>
           <BasePill class="shrink-0">{{ project.stack }}</BasePill>
         </div>
         <p class="mt-1 truncate font-mono text-xs text-neutral-500">{{ project.path }}</p>
-        <p v-if="lastOpenedLabel(project)" class="mt-0.5 truncate text-xs text-neutral-400">
+        <p v-if="project.missing" class="mt-0.5 truncate text-xs text-amber-600 dark:text-amber-400">
+          Folder not found — it may have moved, or be on a drive that isn't connected.
+        </p>
+        <p v-else-if="lastOpenedLabel(project)" class="mt-0.5 truncate text-xs text-neutral-400">
           {{ lastOpenedLabel(project) }}
         </p>
 
@@ -212,10 +292,22 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
             {{ project.domain }}
           </span>
           <ProjectActionButtons
+            v-if="!project.missing"
             :project-id="project.id"
             :domain="project.domain"
             :path="project.path"
           />
+          <button
+            v-if="project.kind === 'linked'"
+            type="button"
+            title="Remove from Rezure (the folder is left alone)"
+            class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-neutral-200 text-neutral-400 transition hover:border-red-300 hover:text-red-600 dark:border-neutral-700 dark:hover:border-red-500/40 dark:hover:text-red-400"
+            @click="confirmingUnlink = project.id"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+              <path stroke-linecap="round" d="M18.4 5.6 5.6 18.4M5.6 5.6l12.8 12.8" />
+            </svg>
+          </button>
         </div>
       </div>
     </div>
@@ -239,11 +331,23 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
         class="flex items-center gap-3 border-b border-neutral-200/70 px-5 py-3.5 transition last:border-b-0 hover:bg-neutral-50 dark:border-neutral-800/70 dark:hover:bg-neutral-800/30"
       >
         <div class="min-w-0 flex-1">
-          <p class="truncate font-semibold text-neutral-900 dark:text-neutral-100">
+          <p class="flex items-center gap-2 truncate font-semibold text-neutral-900 dark:text-neutral-100">
             {{ project.name }}
+            <!-- Only linked projects carry a badge: a project in www is the
+                 norm and doesn't need labelling. -->
+            <span
+              v-if="project.kind === 'linked'"
+              class="shrink-0 rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-neutral-500 uppercase dark:bg-neutral-800 dark:text-neutral-400"
+              title="Served from a folder outside your www directory"
+            >
+              Linked
+            </span>
           </p>
           <p class="truncate font-mono text-xs text-neutral-500">{{ project.path }}</p>
-          <p v-if="lastOpenedLabel(project)" class="truncate text-xs text-neutral-400">
+          <p v-if="project.missing" class="truncate text-xs text-amber-600 dark:text-amber-400">
+            Folder not found — it may have moved, or be on a drive that isn't connected.
+          </p>
+          <p v-else-if="lastOpenedLabel(project)" class="truncate text-xs text-neutral-400">
             {{ lastOpenedLabel(project) }}
           </p>
         </div>
@@ -257,12 +361,26 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
         <span class="w-28 shrink-0">
           <BasePill>{{ project.stack }}</BasePill>
         </span>
-        <div class="flex w-44 shrink-0 justify-end">
+        <div class="flex w-44 shrink-0 items-center justify-end gap-1">
           <ProjectActionButtons
+            v-if="!project.missing"
             :project-id="project.id"
             :domain="project.domain"
             :path="project.path"
           />
+          <!-- Unlink only exists for linked projects: a scanned one is
+               removed by moving its folder out of www, not from here. -->
+          <button
+            v-if="project.kind === 'linked'"
+            type="button"
+            title="Remove from Rezure (the folder is left alone)"
+            class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-neutral-200 text-neutral-400 transition hover:border-red-300 hover:text-red-600 dark:border-neutral-700 dark:hover:border-red-500/40 dark:hover:text-red-400"
+            @click="confirmingUnlink = project.id"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+              <path stroke-linecap="round" d="M18.4 5.6 5.6 18.4M5.6 5.6l12.8 12.8" />
+            </svg>
+          </button>
         </div>
       </div>
     </div>

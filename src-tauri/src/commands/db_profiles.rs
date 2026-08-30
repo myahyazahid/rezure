@@ -9,7 +9,7 @@ use tauri::State;
 
 use crate::config::profiles::{Profile, ProfileSource};
 use crate::services::db_engine::Engine;
-use crate::services::db_profiles::{self, DetectedDatadir, ProfileStatus};
+use crate::services::db_profiles::{self, AddProfile, DetectedDatadir, ProfileStatus};
 use crate::services::{ServiceManager, ServiceStatus};
 use crate::utils::error::AppError;
 
@@ -41,23 +41,33 @@ pub async fn detect_db_profiles() -> Result<Vec<DetectedDatadir>, AppError> {
         .map_err(joined)
 }
 
+/// The add-profile form, as one payload — the frontend sends it under a
+/// single `request` key.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddProfileRequest {
+    pub name: String,
+    pub datadir_path: String,
+    pub engine: Option<Engine>,
+    pub version: String,
+    pub port: u16,
+    pub source: Option<ProfileSource>,
+    pub binary_dir: Option<String>,
+    pub defaults_file: Option<String>,
+}
+
 #[tauri::command]
-pub fn add_db_profile(
-    name: String,
-    datadir_path: String,
-    engine: Option<Engine>,
-    version: String,
-    port: u16,
-    source: Option<ProfileSource>,
-) -> Result<Vec<ProfileStatus>, AppError> {
-    db_profiles::add(
-        name,
-        datadir_path,
-        engine,
-        version,
-        port,
-        source.unwrap_or(ProfileSource::Custom),
-    )?;
+pub fn add_db_profile(request: AddProfileRequest) -> Result<Vec<ProfileStatus>, AppError> {
+    db_profiles::add(AddProfile {
+        name: request.name,
+        datadir_path: request.datadir_path,
+        engine: request.engine,
+        version: request.version,
+        port: request.port,
+        source: request.source.unwrap_or(ProfileSource::Custom),
+        binary_dir: request.binary_dir,
+        defaults_file: request.defaults_file,
+    })?;
     Ok(db_profiles::list())
 }
 

@@ -204,6 +204,9 @@ fn elevate_copy(staged: &Path, dest: &Path) -> Result<(), AppError> {
 /// already up to date (in which case no UAC prompt is shown at all — the
 /// comparison happens before elevation is ever triggered).
 pub fn sync_hosts_entries() -> Result<bool, AppError> {
+    // Missing folders keep their hosts entry: it costs nothing, and losing
+    // it every time an external drive is unplugged would mean re-running an
+    // admin prompt to get it back.
     let mut domains: Vec<String> = scan_projects()?.into_iter().map(|p| p.domain).collect();
     domains.sort();
     domains.dedup();

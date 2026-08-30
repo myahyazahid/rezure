@@ -14,6 +14,7 @@ pub mod php;
 pub mod php_catalog;
 pub mod php_ini;
 pub mod php_path;
+pub mod ports;
 pub mod process;
 pub mod projects;
 pub mod scaffold;
@@ -72,6 +73,18 @@ pub trait Service: Send + Sync {
     fn restart(&self) -> Result<ServiceInfo, AppError> {
         self.stop()?;
         self.start()
+    }
+
+    /// Kills the process immediately, skipping whatever clean shutdown
+    /// [`Service::stop`] would attempt.
+    ///
+    /// The escape hatch for a service that won't stop on its own — a hung
+    /// database can otherwise hold the UI for the length of its shutdown
+    /// timeout, with no way out. Defaults to a plain `stop` for services
+    /// whose shutdown is already immediate; only implementations that wait
+    /// for something need to override it.
+    fn force_stop(&self) -> Result<ServiceInfo, AppError> {
+        self.stop()
     }
 }
 

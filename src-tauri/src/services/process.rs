@@ -268,6 +268,24 @@ impl ProcessService {
                 }
 
                 let mut cmd = Command::new(&exe);
+
+                // `--defaults-file` has to come first — mysqld rejects it in
+                // any other position. It carries the settings the datadir was
+                // created under, `plugin_dir` above all: without it the server
+                // can't load Aria, and an Aria `mysql.db` privilege table then
+                // reads as "Incorrect file format 'db'" and startup aborts.
+                // This is why Laragon and XAMPP both pass it, and why adopting
+                // their data means adopting their config too.
+                if let Some(defaults) = &profile.defaults_file {
+                    cmd.arg(format!("--defaults-file={defaults}"));
+                }
+
+                // Everything after the defaults file overrides it, which is
+                // what makes a per-profile port work even though the adopted
+                // `my.ini` names one of its own.
+                if let Some(basedir) = exe.parent().and_then(|bin| bin.parent()) {
+                    cmd.arg(format!("--basedir={}", basedir.display()));
+                }
                 cmd.arg(format!("--datadir={}", data_dir.display()))
                     .arg(format!("--port={}", profile.port))
                     .arg("--bind-address=127.0.0.1")
@@ -377,12 +395,23 @@ fn spawn_log_reader(
 /// the exact address the service itself will bind to is the check this
 /// can actually make reliably.
 fn ensure_port_available(addr: &str, port: u16, name: &str) -> Result<(), AppError> {
-    TcpListener::bind((addr, port))
-        .map(|_| ())
-        .map_err(|_| AppError::PortInUse {
+    if TcpListener::bind((addr, port)).is_ok() {
+        return Ok(());
+    }
+
+    // Naming the holder turns a dead end into something actionable — most
+    // often it's one of Rezure's own orphans, which it can simply take back.
+    Err(match super::ports::holder(port) {
+        Some(holder) => AppError::PortInUseBy {
             port,
             name: name.to_string(),
-        })
+            holder: holder.description,
+        },
+        None => AppError::PortInUse {
+            port,
+            name: name.to_string(),
+        },
+    })
 }
 
 /// How long a database server gets to flush and close on its own before
@@ -429,6 +458,49 @@ fn request_graceful_shutdown(server_exe: &Path, port: u16) -> bool {
         .status()
         .map(|status| status.success())
         .unwrap_or(false)
+}
+
+/// How long a database gets to finish starting before Rezure calls it a
+/// failure. Recovering a large InnoDB datadir is the slow case.
+const READY_TIMEOUT: Duration = Duration::from_secs(45);
+
+/// Waits until the server is actually accepting connections, or has died
+/// trying.
+///
+/// A successful `spawn()` only means the process was created. `mysqld` does
+/// the work that can fail — opening the datadir, loading privilege tables —
+/// *after* that, and exits if any of it goes wrong. Reporting "running" on
+/// spawn alone is how a fatal startup error reaches the user as unexplained
+/// log lines instead of a failed action, which is exactly what happened
+/// when a datadir turned out not to be openable.
+///
+/// Returns the process's own last words when it didn't come up, so the
+/// caller can say *why* rather than just that it didn't.
+fn wait_until_accepting(child: &mut Child, port: u16) -> Result<(), String> {
+    let deadline = Instant::now() + READY_TIMEOUT;
+
+    while Instant::now() < deadline {
+        // A dead process will never start listening — check it first so a
+        // fast failure is reported immediately rather than after the full
+        // timeout.
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                return Err(format!("the server exited during startup ({status})"));
+            }
+            Err(err) => return Err(format!("could not check on the server: {err}")),
+            Ok(None) => {}
+        }
+
+        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+
+    Err(format!(
+        "the server did not accept connections within {}s",
+        READY_TIMEOUT.as_secs()
+    ))
 }
 
 /// Polls until `child` exits or `timeout` elapses.
@@ -505,6 +577,28 @@ impl Service for ProcessService {
         }
 
         self.spawn_log_readers(&mut child);
+
+        // Only the database is waited on. nginx and `php-cgi` either bind or
+        // die immediately, while a database does its riskiest work — opening
+        // somebody's datadir — after the process already exists, so "spawned"
+        // and "working" are genuinely different answers for it alone.
+        if matches!(self.launch, Launch::Database) {
+            if let Err(reason) = wait_until_accepting(&mut child, self.current_port()) {
+                // It never came up, so nothing should be tracking it as
+                // running — and a half-started server must not be left
+                // holding the datadir.
+                kill_process_tree(child.id());
+                let _ = child.wait();
+                if let Ok(path) = pid_file_path(self.id) {
+                    let _ = fs::remove_file(&path);
+                }
+                return Err(AppError::ProcessSpawnFailed {
+                    name: self.display_name(),
+                    reason,
+                });
+            }
+        }
+
         *self.child.lock().unwrap() = Some(child);
         Ok(self.info())
     }
@@ -520,16 +614,36 @@ impl Service for ProcessService {
     /// and only force-killed if it doesn't — a hung server still has to be
     /// stoppable.
     fn stop(&self) -> Result<ServiceInfo, AppError> {
+        self.shut_down(true)
+    }
+
+    /// Skips the shutdown request entirely and kills the process tree.
+    ///
+    /// Deliberately available even though [`Service::stop`] already falls
+    /// back to killing: that fallback only happens *after* the full
+    /// shutdown timeout, and a user watching a hung server doesn't want to
+    /// wait it out. For a database this means the datadir is left needing
+    /// crash recovery, which is why the UI asks before doing it.
+    fn force_stop(&self) -> Result<ServiceInfo, AppError> {
+        self.shut_down(false)
+    }
+}
+
+impl ProcessService {
+    /// The one stop path. `graceful` decides whether the process is asked to
+    /// close itself first or simply killed.
+    fn shut_down(&self, graceful: bool) -> Result<ServiceInfo, AppError> {
         let mut child_guard = self.child.lock().unwrap();
         if let Some(mut child) = child_guard.take() {
-            let stopped_cleanly = matches!(self.launch, Launch::Database)
+            let stopped_cleanly = graceful
+                && matches!(self.launch, Launch::Database)
                 && self
                     .resolved_exe()
                     .is_ok_and(|exe| request_graceful_shutdown(&exe, self.current_port()))
                 && wait_for_exit(&mut child, GRACEFUL_SHUTDOWN_TIMEOUT);
 
             if !stopped_cleanly {
-                if matches!(self.launch, Launch::Database) {
+                if graceful && matches!(self.launch, Launch::Database) {
                     log::warn!(
                         "{} did not shut down cleanly in {}s — force-killing it",
                         self.id,
@@ -599,7 +713,7 @@ impl ProcessService {
 /// leaving it running and still holding the port. `taskkill /T` walks and
 /// kills the whole tree; falling back to a plain kill covers the rare case
 /// where `taskkill.exe` isn't reachable.
-fn kill_process_tree(pid: u32) {
+pub(super) fn kill_process_tree(pid: u32) {
     let tree_killed = Command::new("taskkill")
         .args(["/T", "/F", "/PID", &pid.to_string()])
         .stdin(Stdio::null())
@@ -673,13 +787,49 @@ mod tests {
         assert_eq!(info.status, ServiceStatus::Stopped);
     }
 
+    /// Force stop has to be safe to call when there's nothing running — the
+    /// menu offering it can race with the process exiting on its own.
+    #[test]
+    fn force_stopping_a_service_that_never_started_is_a_harmless_no_op() {
+        for service in [
+            ProcessService::mariadb(no_op_sink()).unwrap(),
+            ProcessService::nginx(no_op_sink()).unwrap(),
+        ] {
+            let info = service.force_stop().unwrap();
+            assert_eq!(info.status, ServiceStatus::Stopped);
+        }
+    }
+
+    /// Force stop must not consult the graceful path at all. Proven
+    /// indirectly but meaningfully: it returns promptly even for the
+    /// database, whose `stop` would otherwise be willing to wait
+    /// [`GRACEFUL_SHUTDOWN_TIMEOUT`] before giving up.
+    #[test]
+    fn force_stop_never_waits_on_a_shutdown_timeout() {
+        let service = ProcessService::mariadb(no_op_sink()).unwrap();
+        let started = Instant::now();
+        service.force_stop().unwrap();
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "force stop should be immediate, took {:?}",
+            started.elapsed()
+        );
+    }
+
     #[test]
     fn a_port_already_bound_is_reported_before_spawning() {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let port = listener.local_addr().unwrap().port();
 
         let err = ensure_port_available("127.0.0.1", port, "Test").unwrap_err();
-        assert!(matches!(err, AppError::PortInUse { port: p, .. } if p == port));
+        // Either variant is correct: `PortInUseBy` when the holder could be
+        // identified (the useful case, and what this test process itself
+        // produces), `PortInUse` when it couldn't.
+        assert!(
+            matches!(err, AppError::PortInUse { port: p, .. } if p == port)
+                || matches!(err, AppError::PortInUseBy { port: p, .. } if p == port),
+            "got: {err}"
+        );
 
         drop(listener);
         ensure_port_available("127.0.0.1", port, "Test")

@@ -122,3 +122,39 @@ pub fn open_project_terminal(id: String, db_state: State<'_, DbState>) -> Result
     mark_opened(&db_state, &id);
     Ok(())
 }
+
+/// What linking a folder would produce — name, stack, docroot and the
+/// domain it would get — without registering anything. Also where a bad
+/// path is refused, so the dialog can say why before the user commits.
+#[tauri::command]
+pub fn preview_project_link(path: String) -> Result<projects::LinkPreview, AppError> {
+    projects::prepare_link(&path)
+}
+
+/// Registers a folder outside `www` as a project. Records the path only —
+/// nothing inside the folder is read, written or moved.
+#[tauri::command]
+pub fn link_project(
+    path: String,
+    name: Option<String>,
+    domain: Option<String>,
+) -> Result<(), AppError> {
+    projects::link(&path, name, domain)?;
+    // The new project needs a vhost before it can serve; best-effort, since
+    // a sync problem shouldn't undo a link the user just made.
+    if let Err(err) = vhosts::sync_vhosts() {
+        log::warn!("failed to sync nginx vhosts after linking: {err}");
+    }
+    Ok(())
+}
+
+/// Forgets a linked project. The folder and everything in it is left
+/// exactly as it was — this only removes Rezure's pointer to it.
+#[tauri::command]
+pub fn unlink_project(id: String) -> Result<(), AppError> {
+    projects::unlink(&id)?;
+    if let Err(err) = vhosts::sync_vhosts() {
+        log::warn!("failed to sync nginx vhosts after unlinking: {err}");
+    }
+    Ok(())
+}

@@ -119,6 +119,22 @@ pub enum AppError {
 
     #[error("switched back to \"{restored}\" — {reason}")]
     SwitchRolledBack { restored: String, reason: String },
+
+    #[error("{reason}")]
+    PortHolderProtected { port: u16, reason: String },
+
+    #[error("{path} can't be added as a project — {reason}")]
+    UnusableProjectPath { path: String, reason: String },
+
+    #[error("{path} is already a project here (\"{name}\")")]
+    ProjectAlreadyLinked { path: String, name: String },
+
+    #[error("can't start {name} — {holder}")]
+    PortInUseBy {
+        port: u16,
+        name: String,
+        holder: String,
+    },
 }
 
 /// Serialized as its `Display` message (the `#[error("...")]` text) rather

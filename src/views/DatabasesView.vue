@@ -2,11 +2,14 @@
 import { computed, onMounted, ref } from 'vue'
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
 import { useDatabasesStore } from '@/stores/databases'
+import { useDbProfilesStore } from '@/stores/dbProfiles'
 import OpenInClientMenu from '@/components/databases/OpenInClientMenu.vue'
 import NewDatabaseModal from '@/components/databases/NewDatabaseModal.vue'
 import ImportSqlModal from '@/components/databases/ImportSqlModal.vue'
+import DbProfileSwitcher from '@/components/databases/DbProfileSwitcher.vue'
 
 const store = useDatabasesStore()
+const profilesStore = useDbProfilesStore()
 
 const showNewDatabaseModal = ref(false)
 const importFile = ref<string | null>(null)
@@ -60,24 +63,38 @@ onMounted(() => {
         <p class="mt-1 text-sm text-neutral-500">{{ subtitle }}</p>
       </div>
 
-      <button
-        type="button"
-        class="flex shrink-0 items-center gap-2 rounded-full bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-red-500/40 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
-        :disabled="store.serverDown"
-        @click="showNewDatabaseModal = true"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2.5"
-          class="h-4 w-4"
+      <div class="flex shrink-0 items-center gap-2">
+        <DbProfileSwitcher />
+
+        <button
+          type="button"
+          class="flex shrink-0 items-center gap-2 rounded-full bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-red-500/40 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+          :disabled="store.serverDown"
+          @click="showNewDatabaseModal = true"
         >
-          <path stroke-linecap="round" d="M12 5v14M5 12h14" />
-        </svg>
-        New database
-      </button>
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            class="h-4 w-4"
+          >
+            <path stroke-linecap="round" d="M12 5v14M5 12h14" />
+          </svg>
+          New database
+        </button>
+      </div>
     </div>
+
+    <p
+      v-if="profilesStore.notice"
+      class="mt-3 text-sm text-neutral-600 dark:text-neutral-300"
+    >
+      {{ profilesStore.notice }}
+    </p>
+    <p v-if="profilesStore.error" class="mt-3 text-sm text-red-600 dark:text-red-400">
+      {{ profilesStore.error }}
+    </p>
 
     <!-- The connection, stated once and copyable — so nothing else in the
          app has to ask the user for credentials it already knows. -->
@@ -89,6 +106,12 @@ onMounted(() => {
       <span class="min-w-0 flex-1 truncate font-mono text-sm text-red-700 dark:text-red-300">
         {{ store.server.host }}:{{ store.server.port }} · {{ store.server.user }} ·
         {{ store.server.hasPassword ? 'password set' : 'no password' }}
+        <!-- Which data this is, stated beside the connection: "New database"
+             lands in whichever profile is active, and that has to be obvious
+             before the button is clicked, not after. -->
+        <template v-if="profilesStore.active">
+          · {{ profilesStore.active.name }}
+        </template>
       </span>
       <button
         type="button"
