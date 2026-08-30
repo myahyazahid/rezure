@@ -19,7 +19,7 @@ use std::process::Command;
 
 use serde::Serialize;
 
-use super::database::{self, HOST, PORT, USER};
+use super::database::{self, HOST, USER};
 use crate::utils::error::AppError;
 
 /// Opens the process in its own console window instead of inheriting
@@ -174,22 +174,22 @@ pub fn detect() -> Vec<DbClientInfo> {
 fn connection_args(id: &str, database: &str) -> Vec<String> {
     match id {
         // TablePlus takes a connection URL directly.
-        "tableplus" => vec![format!("mysql://{USER}@{HOST}:{PORT}/{database}")],
+        "tableplus" => vec![format!("mysql://{USER}@{HOST}:{}/{database}", database::port())],
         // DBeaver's `-con` takes one pipe-separated spec. `save=false`
         // keeps Rezure from littering the user's DBeaver workspace with a
         // new saved connection on every click.
         "dbeaver" => vec![
             "-con".to_string(),
             format!(
-                "driver=mariadb|host={HOST}|port={PORT}|database={database}|user={USER}|save=false|connect=true"
+                "driver=mariadb|host={HOST}|port={}|database={database}|user={USER}|save=false|connect=true", database::port()
             ),
         ],
         // Workbench's `-query` opens a connection to a server, with no way
         // to preselect a schema.
-        "workbench" => vec!["-query".to_string(), format!("{USER}@{HOST}:{PORT}")],
+        "workbench" => vec!["-query".to_string(), format!("{USER}@{HOST}:{}", database::port())],
         "heidisql" => vec![
             format!("-h={HOST}"),
-            format!("-P={PORT}"),
+            format!("-P={}", database::port()),
             format!("-u={USER}"),
         ],
         // Navicat has no documented connection flags — it just opens.
@@ -230,7 +230,7 @@ fn open_console(database: &str) -> Result<(), AppError> {
 
     let mut cmd = Command::new(&exe);
     cmd.args(["-h", HOST])
-        .args(["-P", &PORT.to_string()])
+        .args(["-P", &database::port().to_string()])
         .args(["-u", USER])
         .arg(database);
 

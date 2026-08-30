@@ -1,7 +1,8 @@
 //! Auto-detects local projects by scanning `www_root()` — one folder, one
 //! project, stack guessed from marker files (`artisan`, `wp-config.php`,
-//! `package.json`, ...). No database yet (Phase 4): the filesystem itself
-//! is the source of truth, rescanned on every `list_projects` call.
+//! `package.json`, ...). The filesystem is the source of truth for *which*
+//! projects exist, rescanned on every `list_projects` call; `commands::projects`
+//! merges in each project's SQLite history (`db::projects`) afterward.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -55,6 +56,10 @@ pub fn scan_projects() -> Result<Vec<ProjectInfo>, AppError> {
             has_hosts_entry: hosts::has_entry(&domain),
             domain,
             stack: detect_stack(&path),
+            // Filled in by `commands::projects::list_projects` from SQLite —
+            // a bare scan has no way to know this.
+            last_opened_at: None,
+            open_count: 0,
         });
     }
 

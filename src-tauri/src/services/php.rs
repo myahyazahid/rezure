@@ -16,9 +16,11 @@
 //! never passed a checksum, and the UI says so.
 //!
 //! The active version is process-wide in-memory state (a `OnceLock<Mutex<_>>`
-//! rather than a manager threaded through every call). Phase 4's settings
-//! persistence hasn't landed, so a restart falls back to the newest
-//! installed version.
+//! rather than a manager threaded through every call). `commands::php::set_active_php_version`
+//! mirrors a switch into `config::settings::Settings::active_php_version`,
+//! and `lib.rs`'s setup restores it on the next launch — if that version is
+//! no longer installed, [`active_from`]'s self-healing fallback picks the
+//! newest one instead.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -165,10 +167,10 @@ pub async fn install(app: &AppHandle, version: &str) -> Result<Vec<PhpVersionSta
 /// Registers a PHP build the user downloaded themselves by copying it into
 /// the drop-in folder.
 ///
-/// A copy, not a reference: with no settings persistence yet, a list of
-/// external paths would have nowhere to live across restarts, and the
-/// scan-the-folder model stays true — a version *is* a folder under one of
-/// the two roots. Copying also leaves the user's original download alone.
+/// A copy, not a reference: the scan-the-folder model stays true — a
+/// version *is* a folder under one of the two roots, with no separate list
+/// of external paths to keep in sync. Copying also leaves the user's
+/// original download alone.
 pub async fn add_from_folder(source: PathBuf) -> Result<Vec<PhpVersionStatus>, AppError> {
     tokio::task::spawn_blocking(move || add_from_folder_blocking(&source))
         .await

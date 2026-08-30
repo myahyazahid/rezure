@@ -6,6 +6,8 @@
 pub mod binaries;
 pub mod database;
 pub mod db_clients;
+pub mod db_engine;
+pub mod db_profiles;
 pub mod hosts;
 pub mod launcher;
 pub mod php;

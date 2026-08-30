@@ -81,6 +81,44 @@ pub enum AppError {
 
     #[error("no such SQL client: {0}")]
     UnknownDbClient(String),
+
+    #[error("settings error: {0}")]
+    Settings(String),
+
+    #[error("database error: {0}")]
+    Database(String),
+
+    #[error("database profile not found: {0}")]
+    ProfileNotFound(String),
+
+    #[error("that profile can't be removed — {0}")]
+    ProfileUndeletable(String),
+
+    #[error("{path} is already registered as the \"{name}\" profile")]
+    DatadirAlreadyRegistered { path: String, name: String },
+
+    #[error(
+        "{path} doesn't look like a {engine} data directory — pick the folder that holds ibdata1"
+    )]
+    NotADatadir { path: String, engine: String },
+
+    #[error(
+        "no {engine} {version} binary is installed — add one before switching to this profile"
+    )]
+    EngineBinaryMissing { engine: String, version: String },
+
+    #[error(
+        "this datadir was written by {found}, but the profile says {expected} — opening it with the wrong engine can corrupt it"
+    )]
+    EngineMismatch { found: String, expected: String },
+
+    #[error(
+        "{name}'s database server looks like it's still running against this data directory — stop it there first"
+    )]
+    DatadirInUse { name: String },
+
+    #[error("switched back to \"{restored}\" — {reason}")]
+    SwitchRolledBack { restored: String, reason: String },
 }
 
 /// Serialized as its `Display` message (the `#[error("...")]` text) rather

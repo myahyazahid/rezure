@@ -49,6 +49,15 @@ pub fn run() {
             commands::database::open_dumps_folder,
             commands::database::list_db_clients,
             commands::database::open_in_db_client,
+            commands::settings::get_settings,
+            commands::settings::update_settings,
+            commands::settings::storage_paths,
+            commands::db_profiles::list_db_profiles,
+            commands::db_profiles::active_db_profile,
+            commands::db_profiles::detect_db_profiles,
+            commands::db_profiles::add_db_profile,
+            commands::db_profiles::remove_db_profile,
+            commands::db_profiles::switch_db_profile,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -61,6 +70,27 @@ pub fn run() {
             // Needs a live `AppHandle` (to emit `service://log` events),
             // which only exists once the app is actually starting up.
             app.manage(services::real_services(app.handle().clone()));
+
+            let settings = config::settings::load();
+            // Best-effort: the version may no longer be installed, in which
+            // case `services::php`'s own fallback picks the newest one —
+            // nothing here needs to treat that as an error.
+            if let Some(version) = &settings.active_php_version {
+                let _ = services::php::set_active(version);
+            }
+            app.manage(config::settings::SettingsState::new(settings));
+
+            match db::init() {
+                Ok(conn) => {
+                    app.manage(db::DbState::new(conn));
+                }
+                // Degrades rather than crashing the app: commands that need
+                // `DbState` will fail with a clear "state not managed"
+                // error instead of the whole app refusing to start over a
+                // local SQLite file problem (disk full, permissions, ...).
+                Err(err) => log::error!("failed to open the project database: {err}"),
+            }
+
             Ok(())
         })
         .build(tauri::generate_context!())

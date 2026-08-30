@@ -147,7 +147,7 @@ pub struct InstalledRuntime {
 /// Official archives unpack to folders like `php-8.4.25-nts-Win32-vs17-x64`,
 /// and Rezure's own installs to a bare `8.4.25`; both should read as
 /// "8.4.25" in the Switch dropdown.
-fn version_from_folder_name(name: &str) -> Option<String> {
+pub fn version_from_folder_name(name: &str) -> Option<String> {
     let chars: Vec<char> = name.chars().collect();
     let mut start = 0;
 
@@ -178,16 +178,27 @@ fn version_from_folder_name(name: &str) -> Option<String> {
     None
 }
 
-/// One level down, for archives that unpack into their own top-level folder.
-fn nested_candidates(dir: &Path, exe_name: &str) -> Vec<PathBuf> {
-    std::fs::read_dir(dir)
-        .map(|entries| {
-            entries
-                .filter_map(Result::ok)
-                .map(|entry| entry.path().join(exe_name))
-                .collect()
-        })
-        .unwrap_or_default()
+/// Every place an archive might have left the executable, in the order
+/// they're tried.
+///
+/// Four layouts, because the runtimes Rezure supports genuinely differ:
+/// PHP's zip puts `php.exe` at the top (`<dir>/php.exe`), and a
+/// hand-extracted one nests it in the archive's own folder
+/// (`<dir>/php-8.4.25-.../php.exe`). Database servers add a `bin`:
+/// MariaDB's zip lands `mysqld.exe` at
+/// `<dir>/mariadb-11.2.2-winx64/bin/mysqld.exe` — two levels down, which
+/// is why looking only one deep found no installed server at all.
+fn exe_candidates(dir: &Path, exe_name: &str) -> Vec<PathBuf> {
+    let mut candidates = vec![dir.join(exe_name), dir.join("bin").join(exe_name)];
+
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.filter_map(Result::ok) {
+            let nested = entry.path();
+            candidates.push(nested.join(exe_name));
+            candidates.push(nested.join("bin").join(exe_name));
+        }
+    }
+    candidates
 }
 
 /// Numeric-segment comparison, so `8.10.0` sorts above `8.9.0` the way a
@@ -235,20 +246,21 @@ pub fn discover(family: &str, exe_name: &str) -> Vec<InstalledRuntime> {
                 continue;
             };
 
-            // The archive may unpack either flat (`<dir>/php.exe`) or nested
-            // inside one top-level folder (`<dir>/php-8.4.25-.../php.exe`) —
-            // a hand-extracted zip very often looks like the latter.
-            let exe = std::iter::once(dir.join(exe_name))
-                .chain(nested_candidates(&dir, exe_name))
+            let exe = exe_candidates(&dir, exe_name)
+                .into_iter()
                 .find(|candidate| candidate.is_file());
             let Some(exe) = exe else { continue };
 
+            // Walks back up from the executable when the folder it was found
+            // under carries no version — for a `bin/` layout the useful name
+            // is the grandparent (`mariadb-11.2.2-winx64`), not `bin`.
             let version = version_from_folder_name(folder_name)
                 .or_else(|| {
-                    exe.parent()
-                        .and_then(|parent| parent.file_name())
-                        .and_then(|name| name.to_str())
-                        .and_then(version_from_folder_name)
+                    exe.ancestors()
+                        .skip(1)
+                        .take(3)
+                        .filter_map(|dir| dir.file_name().and_then(|n| n.to_str()))
+                        .find_map(version_from_folder_name)
                 })
                 .unwrap_or_else(|| folder_name.to_string());
 
@@ -617,6 +629,56 @@ mod tests {
 
         assert!(nested.is_some(), "a nested extraction must still be found");
         assert!(exe.unwrap().starts_with(&inner));
+    }
+
+    /// The layout MariaDB's (and MySQL's) zip actually produces:
+    /// `<version>/<archive-folder>/bin/mysqld.exe` — two levels down plus a
+    /// `bin`. Looking only one level deep found no installed database
+    /// server at all, which is the regression this guards.
+    #[test]
+    fn discover_finds_a_server_nested_under_a_bin_folder() {
+        let root = match user_bin_root() {
+            Ok(root) => root.join("mariadb"),
+            Err(_) => return,
+        };
+        let bin = root.join("9.9.7").join("mariadb-9.9.7-winx64").join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("mysqld.exe"), b"not a real binary").unwrap();
+
+        let found = discover("mariadb", "mysqld.exe");
+        let nested = found.iter().find(|runtime| runtime.version == "9.9.7");
+        let exe = nested.map(|runtime| runtime.exe.clone());
+
+        let _ = std::fs::remove_dir_all(root.join("9.9.7"));
+
+        assert!(
+            nested.is_some(),
+            "a server under <version>/<archive>/bin must be discovered"
+        );
+        assert!(exe.unwrap().ends_with("mysqld.exe"));
+    }
+
+    /// A `bin` folder contributes no version of its own — the number has to
+    /// come from a real folder name further up.
+    #[test]
+    fn a_bin_folder_never_becomes_the_version() {
+        let root = match user_bin_root() {
+            Ok(root) => root.join("mariadb"),
+            Err(_) => return,
+        };
+        let bin = root.join("mariadb-9.9.6-winx64").join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("mysqld.exe"), b"not a real binary").unwrap();
+
+        let found = discover("mariadb", "mysqld.exe");
+        let version = found
+            .iter()
+            .find(|runtime| runtime.exe.starts_with(&bin))
+            .map(|runtime| runtime.version.clone());
+
+        let _ = std::fs::remove_dir_all(root.join("mariadb-9.9.6-winx64"));
+
+        assert_eq!(version.as_deref(), Some("9.9.6"));
     }
 
     #[test]

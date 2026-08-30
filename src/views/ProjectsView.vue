@@ -42,6 +42,16 @@ function domainTitle(hasHostsEntry: boolean) {
     ? 'Resolves in the browser'
     : "Not in the hosts file yet — it won't resolve until you sync"
 }
+
+/** `lastOpenedAt` is unix seconds from the backend; `null` until a project
+ *  has been opened (site, folder, or terminal) at least once. */
+function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: number }) {
+  if (project.lastOpenedAt === null) return null
+  const diffMs = Date.now() - project.lastOpenedAt * 1000
+  const days = Math.floor(diffMs / 86_400_000)
+  const when = days <= 0 ? 'today' : days === 1 ? '1 day ago' : `${days} days ago`
+  return `Opened ${project.openCount}× · last ${when}`
+}
 </script>
 
 <template>
@@ -183,6 +193,9 @@ function domainTitle(hasHostsEntry: boolean) {
           <BasePill class="shrink-0">{{ project.stack }}</BasePill>
         </div>
         <p class="mt-1 truncate font-mono text-xs text-neutral-500">{{ project.path }}</p>
+        <p v-if="lastOpenedLabel(project)" class="mt-0.5 truncate text-xs text-neutral-400">
+          {{ lastOpenedLabel(project) }}
+        </p>
 
         <div
           class="mt-3 flex items-center justify-between gap-2 border-t border-neutral-200/80 pt-3 dark:border-neutral-800"
@@ -230,6 +243,9 @@ function domainTitle(hasHostsEntry: boolean) {
             {{ project.name }}
           </p>
           <p class="truncate font-mono text-xs text-neutral-500">{{ project.path }}</p>
+          <p v-if="lastOpenedLabel(project)" class="truncate text-xs text-neutral-400">
+            {{ lastOpenedLabel(project) }}
+          </p>
         </div>
         <span
           class="w-44 shrink-0 truncate font-mono text-xs"
