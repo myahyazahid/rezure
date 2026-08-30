@@ -14,6 +14,15 @@ Managing local services (Apache, Nginx, MySQL/MariaDB, PHP-FPM) is the core resp
 
 ---
 
+## 1b. Runtime Versions
+
+- PHP versions are **discovered on disk**, not enumerated in a fixed manifest: `binaries::discover` scans Rezure's own download cache and a user-facing drop-in folder, so a version installed from the app and one the user unpacked by hand are equally real and neither needs registering. Deleting a folder is a complete uninstall.
+- The installable list comes from php.net's published release index at runtime, which supplies the SHA-256 every download is still verified against — a live catalog is not a reason to verify less than a pinned entry.
+- `services::process` resolves the active PHP at spawn time rather than caching a path, so switching versions takes effect on the next start with no extra plumbing.
+- Full detail in [`php-versions.md`](php-versions.md).
+
+---
+
 ## 2. Error Handling
 
 Because Rezure interacts heavily with the OS (files, ports, processes), failure points are numerous — error handling is treated as a first-class concern, not an afterthought.

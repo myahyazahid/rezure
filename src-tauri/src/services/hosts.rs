@@ -16,6 +16,7 @@ use std::process::Command;
 
 use super::projects::scan_projects;
 use crate::utils::error::AppError;
+use crate::utils::powershell::quote_ps;
 
 const BEGIN_MARKER: &str = "# --- Rezure managed entries (do not edit below) ---";
 const END_MARKER: &str = "# --- Rezure managed entries end ---";
@@ -110,12 +111,6 @@ fn has_entry_at(domain: &str, path: &Path) -> bool {
 
 pub fn has_entry(domain: &str) -> bool {
     has_entry_at(domain, &hosts_file_path())
-}
-
-/// Wraps `s` as a single-quoted PowerShell string literal, doubling any
-/// embedded single quotes — PowerShell's own escape for that context.
-fn quote_ps(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "''"))
 }
 
 /// The `powershell -Command` one-liner that re-launches `script_path`
@@ -244,12 +239,6 @@ mod tests {
             std::env::temp_dir().join(format!("rezure-test-hosts-{name}-{}", std::process::id()));
         fs::write(&path, content).unwrap();
         path
-    }
-
-    #[test]
-    fn quote_ps_doubles_embedded_single_quotes() {
-        assert_eq!(quote_ps("C:/plain/path"), "'C:/plain/path'");
-        assert_eq!(quote_ps("it's here"), "'it''s here'");
     }
 
     #[test]

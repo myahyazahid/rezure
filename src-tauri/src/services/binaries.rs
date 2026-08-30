@@ -105,12 +105,167 @@ pub fn family_packages(family: &str) -> Vec<&'static BinaryPackage> {
     MANIFEST.iter().filter(|pkg| pkg.family == family).collect()
 }
 
-/// `%LOCALAPPDATA%\Rezure\bin`, created lazily on first install.
-fn install_root() -> Result<PathBuf, AppError> {
+/// `%LOCALAPPDATA%\Rezure\bin` — where Rezure's own downloads land,
+/// created lazily on first install.
+pub fn install_root() -> Result<PathBuf, AppError> {
     let base = dirs::data_local_dir().ok_or_else(|| {
         AppError::Io("could not resolve the local app data directory".to_string())
     })?;
     Ok(base.join("Rezure").join("bin"))
+}
+
+/// `%USERPROFILE%\rezure\bin` — the drop-in folder, for runtimes the user
+/// downloaded themselves.
+///
+/// Deliberately next to `~\rezure\www` and `~\rezure\dumps` rather than
+/// buried in `AppData`: this one is meant to be opened in Explorer and
+/// dropped into, the way Laragon's `bin\` is. The filesystem is the whole
+/// registry — there is no list of custom paths to persist and keep in
+/// sync, so a folder appearing here *is* an installed version, and
+/// deleting it uninstalls one.
+pub fn user_bin_root() -> Result<PathBuf, AppError> {
+    let home = dirs::home_dir()
+        .ok_or_else(|| AppError::Io("could not resolve the home directory".to_string()))?;
+    Ok(home.join("rezure").join("bin"))
+}
+
+/// One runtime version found on disk, from either root.
+#[derive(Debug, Clone)]
+pub struct InstalledRuntime {
+    /// Version as shown in the UI — pulled out of the folder name, or the
+    /// folder name itself when it carries no version number.
+    pub version: String,
+    pub dir: PathBuf,
+    pub exe: PathBuf,
+    /// `false` for anything under [`user_bin_root`] — the UI marks those as
+    /// added by hand, since Rezure never checksum-verified them.
+    pub managed: bool,
+}
+
+/// The first `1.2.3`-shaped (or `1.2`-shaped) token in `name`.
+///
+/// Official archives unpack to folders like `php-8.4.25-nts-Win32-vs17-x64`,
+/// and Rezure's own installs to a bare `8.4.25`; both should read as
+/// "8.4.25" in the Switch dropdown.
+fn version_from_folder_name(name: &str) -> Option<String> {
+    let chars: Vec<char> = name.chars().collect();
+    let mut start = 0;
+
+    while start < chars.len() {
+        if !chars[start].is_ascii_digit() {
+            start += 1;
+            continue;
+        }
+
+        let mut end = start;
+        let mut dots = 0;
+        while end < chars.len() && (chars[end].is_ascii_digit() || chars[end] == '.') {
+            if chars[end] == '.' {
+                // A trailing dot is not part of the version ("8.4." -> "8.4").
+                if end + 1 >= chars.len() || !chars[end + 1].is_ascii_digit() {
+                    break;
+                }
+                dots += 1;
+            }
+            end += 1;
+        }
+
+        if dots >= 1 {
+            return Some(chars[start..end].iter().collect());
+        }
+        start = end.max(start + 1);
+    }
+    None
+}
+
+/// One level down, for archives that unpack into their own top-level folder.
+fn nested_candidates(dir: &Path, exe_name: &str) -> Vec<PathBuf> {
+    std::fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .map(|entry| entry.path().join(exe_name))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Numeric-segment comparison, so `8.10.0` sorts above `8.9.0` the way a
+/// plain string compare would not.
+pub fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
+    let parts = |v: &str| -> Vec<u64> {
+        v.split(['.', '-'])
+            .map(|part| part.parse::<u64>().unwrap_or(0))
+            .collect()
+    };
+    let (a, b) = (parts(a), parts(b));
+    for i in 0..a.len().max(b.len()) {
+        let ordering = a.get(i).unwrap_or(&0).cmp(b.get(i).unwrap_or(&0));
+        if ordering != std::cmp::Ordering::Equal {
+            return ordering;
+        }
+    }
+    std::cmp::Ordering::Equal
+}
+
+/// Every version of `family` present on disk, newest first.
+///
+/// Scans both roots, so a version Rezure downloaded and one the user
+/// dropped in by hand are equally "installed" — that is what makes the
+/// drop-in folder work with no registration step. Rezure's own installs
+/// win a version collision, since those are the checksum-verified copies.
+pub fn discover(family: &str, exe_name: &str) -> Vec<InstalledRuntime> {
+    let roots = [
+        install_root().map(|root| (root, true)),
+        user_bin_root().map(|root| (root, false)),
+    ];
+
+    let mut found: Vec<InstalledRuntime> = Vec::new();
+    for (root, managed) in roots.into_iter().flatten() {
+        let Ok(entries) = std::fs::read_dir(root.join(family)) else {
+            continue;
+        };
+
+        for entry in entries.filter_map(Result::ok) {
+            let dir = entry.path();
+            if !dir.is_dir() {
+                continue;
+            }
+            let Some(folder_name) = dir.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+
+            // The archive may unpack either flat (`<dir>/php.exe`) or nested
+            // inside one top-level folder (`<dir>/php-8.4.25-.../php.exe`) —
+            // a hand-extracted zip very often looks like the latter.
+            let exe = std::iter::once(dir.join(exe_name))
+                .chain(nested_candidates(&dir, exe_name))
+                .find(|candidate| candidate.is_file());
+            let Some(exe) = exe else { continue };
+
+            let version = version_from_folder_name(folder_name)
+                .or_else(|| {
+                    exe.parent()
+                        .and_then(|parent| parent.file_name())
+                        .and_then(|name| name.to_str())
+                        .and_then(version_from_folder_name)
+                })
+                .unwrap_or_else(|| folder_name.to_string());
+
+            if found.iter().any(|existing| existing.version == version) {
+                continue;
+            }
+            found.push(InstalledRuntime {
+                version,
+                dir,
+                exe,
+                managed,
+            });
+        }
+    }
+
+    found.sort_by(|a, b| compare_versions(&b.version, &a.version));
+    found
 }
 
 fn package_dir(pkg: &BinaryPackage) -> Result<PathBuf, AppError> {
@@ -177,8 +332,81 @@ fn emit_progress(app: &AppHandle, progress: &InstallProgress) {
     }
 }
 
+/// What an install needs to know, whether it came from [`MANIFEST`] or from
+/// a catalog fetched at runtime (see `services::php_catalog`).
+///
+/// Extracted so the live PHP catalog gets the *same* download, checksum and
+/// zip-slip handling as the pinned manifest entries — a version discovered
+/// over the network is not a reason to verify it any less.
+pub struct ArchiveInstall<'a> {
+    /// Identifies this install in [`PROGRESS_EVENT`] payloads.
+    pub id: &'a str,
+    pub label: &'a str,
+    pub download_url: &'a str,
+    pub sha256: &'a str,
+    pub dest_dir: PathBuf,
+    /// Checked after extraction, relative to `dest_dir`.
+    pub exe_relative_path: &'a str,
+}
+
 /// Downloads, checksum-verifies, and extracts a portable binary package,
-/// emitting [`PROGRESS_EVENT`] as it goes. Idempotent — if the executable is
+/// emitting [`PROGRESS_EVENT`] as it goes.
+pub async fn install_archive(app: &AppHandle, spec: &ArchiveInstall<'_>) -> Result<(), AppError> {
+    std::fs::create_dir_all(&spec.dest_dir)
+        .map_err(|e| AppError::Io(format!("could not create {}: {e}", spec.dest_dir.display())))?;
+
+    let archive_bytes = download(app, spec.id, spec.download_url).await?;
+
+    emit_progress(
+        app,
+        &InstallProgress {
+            id: spec.id.to_string(),
+            stage: InstallStage::Verifying,
+            downloaded_bytes: archive_bytes.len() as u64,
+            total_bytes: Some(archive_bytes.len() as u64),
+        },
+    );
+    verify_checksum(spec.id, spec.sha256, &archive_bytes)?;
+
+    emit_progress(
+        app,
+        &InstallProgress {
+            id: spec.id.to_string(),
+            stage: InstallStage::Extracting,
+            downloaded_bytes: archive_bytes.len() as u64,
+            total_bytes: Some(archive_bytes.len() as u64),
+        },
+    );
+
+    let extract_dir = spec.dest_dir.clone();
+    tokio::task::spawn_blocking(move || extract(&archive_bytes, &extract_dir))
+        .await
+        .map_err(|e| AppError::Extract(format!("extraction task panicked: {e}")))??;
+
+    if !spec.dest_dir.join(spec.exe_relative_path).is_file() {
+        // A half-extracted folder would otherwise read as an installed
+        // version on the next scan, so it goes rather than lingering.
+        let _ = std::fs::remove_dir_all(&spec.dest_dir);
+        return Err(AppError::Extract(format!(
+            "expected {} after extracting {}, but it was not found",
+            spec.exe_relative_path, spec.label
+        )));
+    }
+
+    emit_progress(
+        app,
+        &InstallProgress {
+            id: spec.id.to_string(),
+            stage: InstallStage::Done,
+            downloaded_bytes: 0,
+            total_bytes: None,
+        },
+    );
+
+    Ok(())
+}
+
+/// Installs a pinned [`MANIFEST`] entry. Idempotent — if the executable is
 /// already present this returns immediately without hitting the network.
 pub async fn install(app: &AppHandle, id: &str) -> Result<BinaryStatus, AppError> {
     let pkg = find(id)?;
@@ -187,68 +415,30 @@ pub async fn install(app: &AppHandle, id: &str) -> Result<BinaryStatus, AppError
         return Ok(status_of(pkg));
     }
 
-    let dest_dir = package_dir(pkg)?;
-    std::fs::create_dir_all(&dest_dir)
-        .map_err(|e| AppError::Io(format!("could not create {}: {e}", dest_dir.display())))?;
-
-    let archive_bytes = download(app, pkg).await?;
-
-    emit_progress(
+    install_archive(
         app,
-        &InstallProgress {
-            id: pkg.id.to_string(),
-            stage: InstallStage::Verifying,
-            downloaded_bytes: archive_bytes.len() as u64,
-            total_bytes: Some(archive_bytes.len() as u64),
+        &ArchiveInstall {
+            id: pkg.id,
+            label: pkg.name,
+            download_url: pkg.download_url,
+            sha256: pkg.sha256,
+            dest_dir: package_dir(pkg)?,
+            exe_relative_path: pkg.exe_relative_path,
         },
-    );
-    verify_checksum(pkg, &archive_bytes)?;
+    )
+    .await?;
 
-    emit_progress(
-        app,
-        &InstallProgress {
-            id: pkg.id.to_string(),
-            stage: InstallStage::Extracting,
-            downloaded_bytes: archive_bytes.len() as u64,
-            total_bytes: Some(archive_bytes.len() as u64),
-        },
-    );
-
-    let extract_dir = dest_dir.clone();
-    tokio::task::spawn_blocking(move || extract(&archive_bytes, &extract_dir))
-        .await
-        .map_err(|e| AppError::Extract(format!("extraction task panicked: {e}")))??;
-
-    if !is_installed(pkg) {
-        return Err(AppError::Extract(format!(
-            "expected {} after extracting {}, but it was not found",
-            pkg.exe_relative_path, pkg.name
-        )));
-    }
-
-    let status = status_of(pkg);
-    emit_progress(
-        app,
-        &InstallProgress {
-            id: pkg.id.to_string(),
-            stage: InstallStage::Done,
-            downloaded_bytes: 0,
-            total_bytes: None,
-        },
-    );
-
-    Ok(status)
+    Ok(status_of(pkg))
 }
 
-async fn download(app: &AppHandle, pkg: &BinaryPackage) -> Result<Vec<u8>, AppError> {
-    let response = reqwest::get(pkg.download_url)
+async fn download(app: &AppHandle, id: &str, url: &str) -> Result<Vec<u8>, AppError> {
+    let response = reqwest::get(url)
         .await
-        .map_err(|e| AppError::Download(format!("{}: {e}", pkg.download_url)))?;
+        .map_err(|e| AppError::Download(format!("{url}: {e}")))?;
 
     if !response.status().is_success() {
         return Err(AppError::Download(format!(
-            "{} responded with {}",
-            pkg.download_url,
+            "{url} responded with {}",
             response.status()
         )));
     }
@@ -258,12 +448,12 @@ async fn download(app: &AppHandle, pkg: &BinaryPackage) -> Result<Vec<u8>, AppEr
     let mut stream = response.bytes_stream();
 
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| AppError::Download(format!("{}: {e}", pkg.download_url)))?;
+        let chunk = chunk.map_err(|e| AppError::Download(format!("{url}: {e}")))?;
         downloaded.extend_from_slice(&chunk);
         emit_progress(
             app,
             &InstallProgress {
-                id: pkg.id.to_string(),
+                id: id.to_string(),
                 stage: InstallStage::Downloading,
                 downloaded_bytes: downloaded.len() as u64,
                 total_bytes,
@@ -274,15 +464,15 @@ async fn download(app: &AppHandle, pkg: &BinaryPackage) -> Result<Vec<u8>, AppEr
     Ok(downloaded)
 }
 
-fn verify_checksum(pkg: &BinaryPackage, bytes: &[u8]) -> Result<(), AppError> {
+fn verify_checksum(id: &str, expected: &str, bytes: &[u8]) -> Result<(), AppError> {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     let actual = hex::encode(hasher.finalize());
 
-    if actual != pkg.sha256 {
+    if actual != expected {
         return Err(AppError::ChecksumMismatch {
-            id: pkg.id.to_string(),
-            expected: pkg.sha256.to_string(),
+            id: id.to_string(),
+            expected: expected.to_string(),
             actual,
         });
     }
@@ -333,6 +523,101 @@ fn extract(bytes: &[u8], dest_dir: &Path) -> Result<(), AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn version_is_read_out_of_an_official_archive_folder_name() {
+        // The shape a hand-extracted php.net zip actually leaves behind.
+        assert_eq!(
+            version_from_folder_name("php-8.4.25-nts-Win32-vs17-x64").as_deref(),
+            Some("8.4.25")
+        );
+        assert_eq!(
+            version_from_folder_name("php-7.4.33-nts-Win32-vc15-x64").as_deref(),
+            Some("7.4.33")
+        );
+        // Rezure's own installs are named by the bare version.
+        assert_eq!(
+            version_from_folder_name("8.3.33").as_deref(),
+            Some("8.3.33")
+        );
+        assert_eq!(version_from_folder_name("8.1").as_deref(), Some("8.1"));
+    }
+
+    #[test]
+    fn a_folder_name_with_no_version_reads_as_none() {
+        assert_eq!(version_from_folder_name("php"), None);
+        assert_eq!(version_from_folder_name("my-build"), None);
+        // A lone number is not a version — "8" tells us nothing to sort by.
+        assert_eq!(version_from_folder_name("php8"), None);
+    }
+
+    /// A trailing dot belongs to the surrounding name, not the version.
+    #[test]
+    fn a_trailing_dot_is_not_part_of_the_version() {
+        assert_eq!(version_from_folder_name("php-8.4.").as_deref(), Some("8.4"));
+    }
+
+    #[test]
+    fn versions_compare_by_number_not_by_string() {
+        use std::cmp::Ordering;
+        // The case a plain string compare gets wrong.
+        assert_eq!(compare_versions("8.10.0", "8.9.0"), Ordering::Greater);
+        assert_eq!(compare_versions("8.4.25", "8.4.3"), Ordering::Greater);
+        assert_eq!(compare_versions("8.3.33", "8.3.33"), Ordering::Equal);
+        assert_eq!(compare_versions("7.4.33", "8.0.30"), Ordering::Less);
+        // A missing segment reads as zero, so "8.4" sits below "8.4.1".
+        assert_eq!(compare_versions("8.4", "8.4.1"), Ordering::Less);
+    }
+
+    #[test]
+    fn discover_finds_a_dropped_in_folder_and_marks_it_unmanaged() {
+        // Runs against the real drop-in root — the point is to prove that a
+        // folder appearing there is all it takes, with no registration step.
+        let root = match user_bin_root() {
+            Ok(root) => root.join("php"),
+            Err(_) => return,
+        };
+        let dir = root.join("php-9.9.9-test-nts-Win32-x64");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("php.exe"), b"not a real binary").unwrap();
+
+        let found = discover("php", "php.exe");
+        let dropped = found.iter().find(|runtime| runtime.version == "9.9.9");
+
+        // Clean up before asserting, so a failure doesn't leave the fake
+        // version behind in the user's real folder.
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let dropped = dropped.expect("a folder in the drop-in root must be discovered");
+        assert!(
+            !dropped.managed,
+            "anything under the user's own bin folder is unmanaged"
+        );
+        assert!(dropped.exe.ends_with("php.exe"));
+    }
+
+    #[test]
+    fn discover_looks_one_level_into_a_nested_extraction() {
+        let root = match user_bin_root() {
+            Ok(root) => root.join("php"),
+            Err(_) => return,
+        };
+        // Unzipping without "extract here" leaves the archive's own folder
+        // in the middle — that shouldn't hide the install.
+        let outer = root.join("php-9.9.8-test");
+        let inner = outer.join("php-9.9.8-nts-Win32-vs17-x64");
+        std::fs::create_dir_all(&inner).unwrap();
+        std::fs::write(inner.join("php.exe"), b"not a real binary").unwrap();
+
+        let found = discover("php", "php.exe");
+        let nested = found.iter().find(|runtime| runtime.version == "9.9.8");
+        let exe = nested.map(|runtime| runtime.exe.clone());
+
+        let _ = std::fs::remove_dir_all(&outer);
+
+        assert!(nested.is_some(), "a nested extraction must still be found");
+        assert!(exe.unwrap().starts_with(&inner));
+    }
 
     #[test]
     fn manifest_entries_have_well_formed_checksums_and_urls() {

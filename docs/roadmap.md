@@ -29,6 +29,8 @@ Goal: a functional, installable release covering the essential local dev environ
 
 ### Phase 3.5 — Runtime Version Switching
 - Support multiple installed versions per bundled runtime (starting with PHP — the only one with real download/process infrastructure in place)
+- PHP versions are discovered by scanning two roots rather than listed in a fixed manifest: Rezure's own download cache, and a user-facing drop-in folder (`~/rezure/bin/php`) that works the way Laragon's `bin/` does
+- The installable-version list is read live from php.net's `releases.json`, so it carries a real SHA-256 per build and can't go stale — detail: [`php-versions.md`](php-versions.md)
 - "Switch" UI: pick which installed version is active, install additional versions on demand
 - Services and scaffolding (Composer/Laravel) resolve to whichever version is currently active
 - Node.js and Python rows are shown as not-yet-available rather than faked — no portable binary source exists for either yet; adding them means repeating Phase 2's binary-bundling work for a new runtime

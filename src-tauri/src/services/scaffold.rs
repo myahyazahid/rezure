@@ -15,7 +15,6 @@ use std::process::{Command, Stdio};
 
 use serde::Serialize;
 
-use super::binaries;
 use super::php_ini;
 use super::projects::www_root;
 use crate::utils::error::AppError;
@@ -259,14 +258,10 @@ async fn ensure_composer() -> Result<PathBuf, AppError> {
 async fn scaffold_laravel(target: &Path) -> Result<(), AppError> {
     // Whichever PHP version is currently active in the Switch UI — same
     // resolution `services::process` uses for the FastCGI service.
-    let php_pkg = super::php::active_package()?;
-    if !binaries::is_installed(php_pkg) {
-        return Err(AppError::BinaryNotInstalled(format!(
-            "{} {}",
-            php_pkg.name, php_pkg.version
-        )));
+    let php_exe = super::php::active_exe()?;
+    if !php_exe.is_file() {
+        return Err(AppError::BinaryNotInstalled("PHP".to_string()));
     }
-    let php_exe = binaries::exe_path(php_pkg)?;
     let ini_path = php_ini::ensure_php_ini(&php_exe)?;
     let composer_phar = ensure_composer().await?;
 

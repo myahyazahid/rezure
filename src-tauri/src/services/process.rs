@@ -13,7 +13,7 @@ use serde::Serialize;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use tauri::{AppHandle, Emitter};
 
-use super::binaries::{self, BinaryPackage};
+use super::binaries;
 use super::php_ini;
 use super::vhosts::{self, PHP_FASTCGI_PORT};
 use super::{Service, ServiceHandle, ServiceInfo, ServiceManager, ServiceStatus, CPU_HISTORY_LEN};
@@ -152,32 +152,45 @@ impl ProcessService {
         })
     }
 
-    /// Resolves which binary this service currently runs. Fixed for
-    /// nginx/MariaDB (one version each); for PHP this follows whatever
-    /// `services::php` currently reports as active, so a version switch
-    /// takes effect the next time the service starts.
-    fn package(&self) -> Result<&'static BinaryPackage, AppError> {
+    /// The version shown on the service card — for PHP, whichever one is
+    /// active right now, not a fixed manifest entry.
+    fn version(&self) -> String {
         match self.launch {
-            Launch::Nginx => binaries::find("nginx"),
-            Launch::Php => super::php::active_package(),
-            Launch::MariaDb { .. } => binaries::find("mariadb"),
+            Launch::Php => super::php::active_id(),
+            Launch::Nginx => binaries::find("nginx")
+                .map(|pkg| pkg.version.to_string())
+                .unwrap_or_default(),
+            Launch::MariaDb { .. } => binaries::find("mariadb")
+                .map(|pkg| pkg.version.to_string())
+                .unwrap_or_default(),
         }
     }
 
-    /// The binary that actually ends up running — `php` is the one case
-    /// where this differs from `binaries::exe_path`: the manifest points at
-    /// `php.exe`, but what gets spawned is `php-cgi.exe`, which ships
-    /// alongside it in the same zip. Shared by `command()` (to build the
-    /// spawn) and `reap_orphan()` (to recognize a leftover from a previous
-    /// run), so the two can never drift apart.
+    /// The binary that actually ends up running.
+    ///
+    /// nginx and MariaDB are one pinned manifest version each. PHP is
+    /// neither pinned nor necessarily in the manifest at all — it resolves
+    /// through `services::php`, which scans what's installed on disk (a
+    /// download or a folder the user dropped in) and follows whichever
+    /// version is currently active, so a switch takes effect the next time
+    /// the service starts. It's also the one case where the spawned binary
+    /// differs from the one that identifies the install: `php.exe` is what
+    /// gets found, `php-cgi.exe` beside it is what gets run.
+    ///
+    /// Shared by `command()` (to build the spawn) and `reap_orphan()` (to
+    /// recognize a leftover from a previous run), so the two can never
+    /// drift apart.
     fn resolved_exe(&self) -> Result<PathBuf, AppError> {
-        let exe = binaries::exe_path(self.package()?)?;
         match self.launch {
-            Launch::Php => Ok(exe
-                .parent()
-                .ok_or_else(|| AppError::Io("php.exe has no parent directory".to_string()))?
-                .join("php-cgi.exe")),
-            Launch::Nginx | Launch::MariaDb { .. } => Ok(exe),
+            Launch::Php => {
+                let exe = super::php::active_exe()?;
+                Ok(exe
+                    .parent()
+                    .ok_or_else(|| AppError::Io("php.exe has no parent directory".to_string()))?
+                    .join("php-cgi.exe"))
+            }
+            Launch::Nginx => binaries::exe_path(binaries::find("nginx")?),
+            Launch::MariaDb { .. } => binaries::exe_path(binaries::find("mariadb")?),
         }
     }
 
@@ -384,12 +397,9 @@ impl Service for ProcessService {
             }
         };
 
-        // Best-effort — `package()` only fails if a family has zero
-        // manifest entries, which the constructors already guard against.
-        let version = self
-            .package()
-            .map(|pkg| pkg.version.to_string())
-            .unwrap_or_default();
+        // Best-effort: an empty version just leaves the badge blank, which
+        // is the honest answer when nothing is installed to report on.
+        let version = self.version();
 
         ServiceInfo {
             id: self.id.to_string(),
@@ -412,7 +422,9 @@ impl Service for ProcessService {
             return Ok(self.info());
         }
 
-        if !binaries::is_installed(self.package()?) {
+        // Resolving the exe *is* the installed check now: for PHP there's no
+        // manifest entry to look up, just whatever the disk scan found.
+        if !self.resolved_exe().is_ok_and(|exe| exe.is_file()) {
             return Err(AppError::BinaryNotInstalled(self.name.to_string()));
         }
 
@@ -698,55 +710,124 @@ mod tests {
         assert_eq!(stopped.status, ServiceStatus::Stopped);
     }
 
-    /// Switches the active PHP version and confirms the *actual spawned
-    /// process* — not just what the code claims — points at that
-    /// version's own `php-cgi.exe`. Needs at least two PHP versions
-    /// installed. Run with:
-    /// `cargo test --lib services::process::tests::switching_php_version_changes_which_binary_actually_runs -- --ignored --nocapture`
+    /// The reload path in one assertion, with no processes involved: the
+    /// binary a spawn *would* use has to follow the active version, and be
+    /// that version's own `php-cgi.exe`.
+    ///
+    /// This is what makes the Switch page's auto-reload work at all — the
+    /// restart only lands on the new version because `resolved_exe`
+    /// re-resolves at spawn time instead of caching a path. Runs anywhere,
+    /// so it guards that property on every `cargo test`.
     #[test]
-    #[ignore]
-    fn switching_php_version_changes_which_binary_actually_runs() {
+    fn the_binary_a_spawn_would_use_follows_the_active_php_version() {
         use crate::services::php;
 
-        let versions = crate::services::binaries::family_packages("php");
-        let installed: Vec<_> = versions
-            .iter()
-            .filter(|pkg| crate::services::binaries::is_installed(pkg))
-            .collect();
-        assert!(
-            installed.len() >= 2,
-            "need at least 2 installed PHP versions to run this test"
-        );
+        let installed = php::installed();
+        if installed.len() < 2 {
+            // Nothing to switch between on this machine; the assertions
+            // below would be vacuous rather than wrong.
+            return;
+        }
 
         let original_active = php::active_id();
+        let service = ProcessService::php(no_op_sink()).unwrap();
 
-        for pkg in &installed {
-            php::set_active(pkg.id).unwrap();
+        for runtime in &installed {
+            php::set_active(&runtime.version).unwrap();
 
-            let service = ProcessService::php(no_op_sink()).unwrap();
-            service.start().unwrap();
-            std::thread::sleep(std::time::Duration::from_millis(300));
-
-            let output = Command::new("powershell")
-                .args([
-                    "-NoProfile",
-                    "-Command",
-                    "(Get-Process -Name php-cgi -ErrorAction SilentlyContinue).Path",
-                ])
-                .output()
-                .unwrap();
-            let running_path = String::from_utf8_lossy(&output.stdout).to_string();
-
-            service.stop().unwrap();
-
+            let exe = service.resolved_exe().unwrap();
             assert!(
-                running_path.contains(pkg.version),
-                "expected the running php-cgi to be under {}, got: {running_path}",
-                pkg.version
+                exe.ends_with("php-cgi.exe"),
+                "php runs as php-cgi, got {}",
+                exe.display()
+            );
+            assert!(
+                exe.starts_with(&runtime.dir),
+                "after switching to {}, the spawn should resolve inside {} — got {}",
+                runtime.version,
+                runtime.dir.display(),
+                exe.display()
             );
         }
 
         php::set_active(&original_active).unwrap();
+    }
+
+    /// Switches the active PHP version *while the service is running* and
+    /// confirms the actual spawned process — not just what the code claims
+    /// — moved to the new version's own `php-cgi.exe`.
+    ///
+    /// This is the mechanism behind the Switch page's auto-reload:
+    /// `commands::php::set_active_php_version` does exactly this pair
+    /// (`set_active` then `restart`) when the service is up. Needs at least
+    /// two installed PHP versions. Run with:
+    /// `cargo test --lib services::process::tests::switching_php_version_reloads_onto_the_new_binary -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn switching_php_version_reloads_onto_the_new_binary() {
+        use crate::services::php;
+
+        let installed = php::installed();
+        assert!(
+            installed.len() >= 2,
+            "need at least 2 installed PHP versions to run this test, found {}",
+            installed.len()
+        );
+
+        // Rezure itself holds this port whenever PHP is running, and this
+        // test needs to spawn its own — say so plainly instead of failing
+        // later with a bare PortInUse.
+        assert!(
+            std::net::TcpListener::bind(("127.0.0.1", PHP_FASTCGI_PORT)).is_ok(),
+            "port {PHP_FASTCGI_PORT} is busy — stop PHP in Rezure before running this test"
+        );
+
+        let original_active = php::active_id();
+        let service = ProcessService::php(no_op_sink()).unwrap();
+
+        // Start on the first version, then switch to each of the others
+        // without stopping first — the restart is what has to move it.
+        php::set_active(&installed[0].version).unwrap();
+        service.start().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        assert!(
+            running_php_cgi_path().contains(&installed[0].version),
+            "expected the service to start on {}, got: {}",
+            installed[0].version,
+            running_php_cgi_path()
+        );
+
+        for runtime in installed.iter().skip(1) {
+            php::set_active(&runtime.version).unwrap();
+            service.restart().unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(400));
+
+            let running = running_php_cgi_path();
+            println!("switched to {} -> {}", runtime.version, running.trim());
+            assert!(
+                running.contains(&runtime.version),
+                "after switching to {} the running php-cgi should be under it, got: {running}",
+                runtime.version
+            );
+        }
+
+        service.stop().unwrap();
+        php::set_active(&original_active).unwrap();
+    }
+
+    /// Path of whatever `php-cgi.exe` is running right now, straight from
+    /// the OS — the point is to check the real process, not our own record
+    /// of what we think we spawned.
+    fn running_php_cgi_path() -> String {
+        let output = Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "(Get-Process -Name php-cgi -ErrorAction SilentlyContinue).Path",
+            ])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&output.stdout).to_string()
     }
 
     /// The full pipeline for real: a project folder on disk -> vhost
