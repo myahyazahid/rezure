@@ -13,7 +13,7 @@ use serde::Serialize;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use tauri::{AppHandle, Emitter};
 
-use super::binaries::{self, BinaryPackage};
+use super::binaries;
 use super::php_ini;
 use super::vhosts::{self, PHP_FASTCGI_PORT};
 use super::{Service, ServiceHandle, ServiceInfo, ServiceManager, ServiceStatus, CPU_HISTORY_LEN};
@@ -152,32 +152,45 @@ impl ProcessService {
         })
     }
 
-    /// Resolves which binary this service currently runs. Fixed for
-    /// nginx/MariaDB (one version each); for PHP this follows whatever
-    /// `services::php` currently reports as active, so a version switch
-    /// takes effect the next time the service starts.
-    fn package(&self) -> Result<&'static BinaryPackage, AppError> {
+    /// The version shown on the service card — for PHP, whichever one is
+    /// active right now, not a fixed manifest entry.
+    fn version(&self) -> String {
         match self.launch {
-            Launch::Nginx => binaries::find("nginx"),
-            Launch::Php => super::php::active_package(),
-            Launch::MariaDb { .. } => binaries::find("mariadb"),
+            Launch::Php => super::php::active_id(),
+            Launch::Nginx => binaries::find("nginx")
+                .map(|pkg| pkg.version.to_string())
+                .unwrap_or_default(),
+            Launch::MariaDb { .. } => binaries::find("mariadb")
+                .map(|pkg| pkg.version.to_string())
+                .unwrap_or_default(),
         }
     }
 
-    /// The binary that actually ends up running — `php` is the one case
-    /// where this differs from `binaries::exe_path`: the manifest points at
-    /// `php.exe`, but what gets spawned is `php-cgi.exe`, which ships
-    /// alongside it in the same zip. Shared by `command()` (to build the
-    /// spawn) and `reap_orphan()` (to recognize a leftover from a previous
-    /// run), so the two can never drift apart.
+    /// The binary that actually ends up running.
+    ///
+    /// nginx and MariaDB are one pinned manifest version each. PHP is
+    /// neither pinned nor necessarily in the manifest at all — it resolves
+    /// through `services::php`, which scans what's installed on disk (a
+    /// download or a folder the user dropped in) and follows whichever
+    /// version is currently active, so a switch takes effect the next time
+    /// the service starts. It's also the one case where the spawned binary
+    /// differs from the one that identifies the install: `php.exe` is what
+    /// gets found, `php-cgi.exe` beside it is what gets run.
+    ///
+    /// Shared by `command()` (to build the spawn) and `reap_orphan()` (to
+    /// recognize a leftover from a previous run), so the two can never
+    /// drift apart.
     fn resolved_exe(&self) -> Result<PathBuf, AppError> {
-        let exe = binaries::exe_path(self.package()?)?;
         match self.launch {
-            Launch::Php => Ok(exe
-                .parent()
-                .ok_or_else(|| AppError::Io("php.exe has no parent directory".to_string()))?
-                .join("php-cgi.exe")),
-            Launch::Nginx | Launch::MariaDb { .. } => Ok(exe),
+            Launch::Php => {
+                let exe = super::php::active_exe()?;
+                Ok(exe
+                    .parent()
+                    .ok_or_else(|| AppError::Io("php.exe has no parent directory".to_string()))?
+                    .join("php-cgi.exe"))
+            }
+            Launch::Nginx => binaries::exe_path(binaries::find("nginx")?),
+            Launch::MariaDb { .. } => binaries::exe_path(binaries::find("mariadb")?),
         }
     }
 
@@ -384,12 +397,9 @@ impl Service for ProcessService {
             }
         };
 
-        // Best-effort — `package()` only fails if a family has zero
-        // manifest entries, which the constructors already guard against.
-        let version = self
-            .package()
-            .map(|pkg| pkg.version.to_string())
-            .unwrap_or_default();
+        // Best-effort: an empty version just leaves the badge blank, which
+        // is the honest answer when nothing is installed to report on.
+        let version = self.version();
 
         ServiceInfo {
             id: self.id.to_string(),
@@ -412,7 +422,9 @@ impl Service for ProcessService {
             return Ok(self.info());
         }
 
-        if !binaries::is_installed(self.package()?) {
+        // Resolving the exe *is* the installed check now: for PHP there's no
+        // manifest entry to look up, just whatever the disk scan found.
+        if !self.resolved_exe().is_ok_and(|exe| exe.is_file()) {
             return Err(AppError::BinaryNotInstalled(self.name.to_string()));
         }
 

@@ -1,7 +1,12 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import type { PhpVersion } from '@/types/php'
+import { listen } from '@tauri-apps/api/event'
+import type { PhpRelease, PhpVersion } from '@/types/php'
+import type { InstallProgress } from '@/types/binary'
+
+// Keep in sync with `PROGRESS_EVENT` in src-tauri/src/services/binaries.rs
+const PROGRESS_EVENT = 'binary://install-progress'
 
 function errorMessage(e: unknown): string {
   if (typeof e === 'string') return e
@@ -14,10 +19,34 @@ export const usePhpStore = defineStore('php', () => {
   const installingId = ref<string | null>(null)
   const error = ref<string | null>(null)
 
+  const catalog = ref<PhpRelease[]>([])
+  const catalogLoading = ref(false)
+  const catalogError = ref<string | null>(null)
+
+  const dropInDir = ref('')
+  const adding = ref(false)
+
+  /** Install progress, keyed by version — the backend emits the version as
+   *  the progress id for a PHP install. */
+  const progress = ref<Record<string, InstallProgress>>({})
+
+  listen<InstallProgress>(PROGRESS_EVENT, (event) => {
+    progress.value[event.payload.id] = event.payload
+  })
+
   const active = computed(() => versions.value.find((v) => v.active) ?? null)
 
   async function fetchAll() {
     versions.value = await invoke<PhpVersion[]>('list_php_versions')
+  }
+
+  async function fetchDropInDir() {
+    try {
+      dropInDir.value = await invoke<string>('php_drop_in_dir')
+    } catch {
+      // Only used as a label — a missing path isn't worth an error banner.
+      dropInDir.value = ''
+    }
   }
 
   async function setActive(id: string) {
@@ -29,19 +58,95 @@ export const usePhpStore = defineStore('php', () => {
     }
   }
 
-  /** Downloads a not-yet-installed PHP version (a `binaries::MANIFEST` entry). */
-  async function install(id: string) {
-    installingId.value = id
+  /** php.net's published Windows builds. `refresh` re-fetches instead of
+   *  reusing the copy the backend cached for this session. */
+  async function fetchCatalog(refresh = false) {
+    catalogLoading.value = true
+    catalogError.value = null
+    try {
+      catalog.value = await invoke<PhpRelease[]>('list_php_catalog', { refresh })
+    } catch (e) {
+      catalogError.value = errorMessage(e)
+      catalog.value = []
+    } finally {
+      catalogLoading.value = false
+    }
+  }
+
+  async function install(version: string) {
+    installingId.value = version
+    catalogError.value = null
     error.value = null
     try {
-      await invoke('install_binary', { id })
-      await fetchAll()
+      versions.value = await invoke<PhpVersion[]>('install_php_version', { version })
+      // Flip the just-installed entry over without a second network call.
+      const entry = catalog.value.find((release) => release.version === version)
+      if (entry) entry.installed = true
     } catch (e) {
-      error.value = errorMessage(e)
+      catalogError.value = errorMessage(e)
     } finally {
+      delete progress.value[version]
       installingId.value = null
     }
   }
 
-  return { versions, active, installingId, error, fetchAll, setActive, install }
+  /** Copies a PHP build the user already downloaded into the drop-in folder. */
+  async function addFromFolder(path: string) {
+    adding.value = true
+    catalogError.value = null
+    try {
+      versions.value = await invoke<PhpVersion[]>('add_php_from_folder', { path })
+      return true
+    } catch (e) {
+      catalogError.value = errorMessage(e)
+      return false
+    } finally {
+      adding.value = false
+    }
+  }
+
+  async function remove(version: string) {
+    error.value = null
+    try {
+      versions.value = await invoke<PhpVersion[]>('remove_php_version', { version })
+      const entry = catalog.value.find((release) => release.version === version)
+      if (entry) entry.installed = false
+    } catch (e) {
+      error.value = errorMessage(e)
+    }
+  }
+
+  async function openDropInDir() {
+    error.value = null
+    try {
+      await invoke('open_php_drop_in_dir')
+    } catch (e) {
+      error.value = errorMessage(e)
+    }
+  }
+
+  function progressFor(version: string) {
+    return progress.value[version] ?? null
+  }
+
+  return {
+    versions,
+    active,
+    installingId,
+    error,
+    catalog,
+    catalogLoading,
+    catalogError,
+    dropInDir,
+    adding,
+    fetchAll,
+    fetchDropInDir,
+    fetchCatalog,
+    setActive,
+    install,
+    addFromFolder,
+    remove,
+    openDropInDir,
+    progressFor,
+  }
 })

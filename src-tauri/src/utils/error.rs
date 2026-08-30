@@ -9,6 +9,9 @@ pub enum AppError {
     #[error("php version not installed: {0}")]
     PhpVersionNotFound(String),
 
+    #[error("PHP {0} is already installed")]
+    PhpVersionAlreadyInstalled(String),
+
     #[error("unknown binary package: {0}")]
     UnknownBinary(String),
 

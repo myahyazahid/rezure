@@ -9,6 +9,7 @@ pub mod db_clients;
 pub mod hosts;
 pub mod launcher;
 pub mod php;
+pub mod php_catalog;
 pub mod php_ini;
 pub mod process;
 pub mod projects;
