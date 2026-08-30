@@ -31,3 +31,16 @@ export interface PhpSwitchResult {
   restarted: boolean
   restartError: string | null
 }
+
+/** State of the optional "make Rezure's PHP the system `php`" link. */
+export interface PhpPathStatus {
+  /** The single directory Rezure puts on PATH. */
+  linkDir: string
+  onPath: boolean
+  /** Where the link currently points. */
+  target: string | null
+  /** Whether the link matches the active version. */
+  inSync: boolean
+  /** Other PHP installs already on PATH that enabling would override. */
+  conflicts: string[]
+}

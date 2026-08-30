@@ -113,6 +113,78 @@ page reports the failure separately: the active version really did change, and P
 down. Reporting it as a failed switch would leave the UI showing the old version as active
 while the backend had already moved on.
 
+### Scope: what the switch actually affects
+
+By default the active version reaches two places:
+
+| | Follows the switch? |
+|---|---|
+| `php-cgi` behind nginx — your `.test` sites | yes |
+| Composer, when scaffolding a Laravel project | yes |
+| `php` in your own terminals | only with the PATH link below |
+
+---
+
+## Making it system-wide (optional)
+
+**Switch → "Use Rezure's PHP everywhere"** puts the active version on your user PATH, so `php`
+resolves to it in every terminal.
+
+### How it works, and why not the obvious way
+
+Laragon switches by writing the *versioned* folder into PATH
+(`C:\laragon\bin\php\php-8.5.8-…`) and rewriting that entry on every switch. Rezure doesn't:
+rewriting PATH repeatedly is how PATH gets corrupted, already-open terminals never see the
+change, and two tools doing it end up fighting over who wrote last.
+
+Instead Rezure adds **one stable entry, once**:
+
+```
+%LOCALAPPDATA%\Rezure\current\php   →  junction  →  <active version's folder>
+```
+
+Switching re-points the junction. PATH is never touched again. And because the PATH string
+doesn't change, **terminals you already have open pick up the new version too** — they resolve
+`php` through the same directory, whose target moved underneath them.
+
+Two different moments, easy to confuse:
+
+| Action | Reaches already-open terminals? |
+|---|---|
+| **Enabling** — adds the entry to PATH | no — an open shell holds the environment it launched with, so open a new one |
+| **Switching versions** while enabled | yes — the entry is already in its PATH, only the target moved |
+
+A *junction*, specifically, not a symbolic link: directory junctions can be created without
+administrator rights, symlinks can't. (That's why nvm-windows, which uses a symlink, ships an
+`elevate.cmd`.) No UAC prompt, ever.
+
+### It takes over from Laragon or XAMPP — deliberately
+
+If another tool already puts `php` on your PATH, the card names it before you enable anything.
+Rezure inserts its entry **first**, so it wins. That's the point of the feature, but it means
+`php` system-wide stops being Laragon's and becomes Rezure's. **Disable** removes the entry and
+hands it straight back.
+
+Turning it off restores your PATH **byte for byte** — including a trailing `;` or any empty
+segment it happened to have. Rezure only ever adds and removes its own entry; it never
+reformats the rest.
+
+### Safety notes
+
+- The user PATH is read and written straight through the registry, preserving its value kind.
+  Reading it via `[Environment]::GetEnvironmentVariable(…, 'User')` expands `%VAR%` references,
+  and writing that back turns a `REG_EXPAND_SZ` entry into a literal — the classic way PATH
+  gets quietly mangled.
+- `WM_SETTINGCHANGE` is broadcast after a write, so newly-launched apps see it without a
+  sign-out.
+- The junction is replaced with `[IO.Directory]::Delete(link, $false)`, which removes only the
+  reparse point. `Remove-Item -Recurse` would follow the link and delete the real PHP install
+  on the other side.
+- Re-pointing works while PHP is running; the running process keeps its own binary and is
+  unaffected.
+
+---
+
 The active choice is in-memory for now (Phase 4's settings persistence hasn't landed), so a
 restart falls back to the newest installed version. It's also self-healing: if the active
 version's folder disappears — you deleted it from the drop-in root — the next lookup notices
@@ -134,6 +206,10 @@ drop-in root. Delete the old folder first, or just switch to it.
 **A version won't start.** The zip has to be a complete PHP build — `php-cgi.exe` lives beside
 `php.exe` and is what actually runs behind nginx. A folder with only `php.exe` in it will be
 listed but won't serve.
+
+**`php -v` in my terminal doesn't match Rezure.** The PATH link is off, or another tool
+(Laragon, XAMPP) sits ahead of it. Check the "Use Rezure's PHP everywhere" card — it lists what
+else provides `php`. `where php` shows the winner.
 
 **Which copy am I running?** The path is on each version in the Switch dropdown's tooltip, and
 `services::php::print_installed` prints the full picture:

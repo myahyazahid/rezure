@@ -8,6 +8,7 @@ import RuntimeSwitchRow, {
   type RuntimeVersionEntry,
 } from '@/components/services/RuntimeSwitchRow.vue'
 import InstallPhpVersionModal from '@/components/services/InstallPhpVersionModal.vue'
+import PhpPathLinkCard from '@/components/services/PhpPathLinkCard.vue'
 
 const phpStore = usePhpStore()
 const binariesStore = useBinariesStore()
@@ -30,6 +31,7 @@ async function switchPhp(id: string) {
 onMounted(() => {
   composerStore.fetchStatus()
   phpStore.fetchDropInDir()
+  phpStore.fetchPathStatus()
 })
 
 // PHP versions are discovered on disk, so everything listed is installed by
@@ -137,6 +139,10 @@ const composerVersions = computed<RuntimeVersionEntry[]>(() => [
         :versions="[]"
         disabled
       />
+    </div>
+
+    <div class="mt-3">
+      <PhpPathLinkCard />
     </div>
 
     <div class="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-neutral-400">

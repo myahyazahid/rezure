@@ -11,6 +11,7 @@ use tauri::State;
 use crate::services::binaries;
 use crate::services::php::{self, PhpVersionStatus};
 use crate::services::php_catalog::{self, PhpRelease};
+use crate::services::php_path::{self, PhpPathStatus};
 use crate::services::{ServiceManager, ServiceStatus};
 use crate::utils::error::AppError;
 
@@ -63,6 +64,16 @@ pub async fn set_active_php_version(
     manager: State<'_, ServiceManager>,
 ) -> Result<PhpSwitchResult, AppError> {
     let versions = php::set_active(&id)?;
+
+    // When the global PATH link is on, it has to follow the switch — that's
+    // the whole reason it exists. Best-effort: a link problem must not make
+    // the switch itself look like it failed, and `status()` reports the
+    // link as out of sync if this didn't take.
+    if php_path::status().map(|s| s.on_path).unwrap_or(false) {
+        if let Err(err) = php_path::sync() {
+            log::warn!("failed to re-point the PHP PATH link: {err}");
+        }
+    }
 
     let service = manager.find(PHP_SERVICE)?;
     if service.info().status != ServiceStatus::Running {
@@ -132,4 +143,31 @@ pub fn open_php_drop_in_dir() -> Result<(), AppError> {
             reason: e.to_string(),
         }
     })
+}
+
+/// Whether Rezure's PHP is on the user's PATH, where the link points, and
+/// which other PHP installs enabling it would override.
+#[tauri::command]
+pub async fn php_path_status() -> Result<PhpPathStatus, AppError> {
+    tokio::task::spawn_blocking(php_path::status)
+        .await
+        .map_err(joined)?
+}
+
+/// Puts Rezure's PHP first on the user's PATH.
+///
+/// The one action in Rezure that changes something outside the app, so it
+/// only ever runs from an explicit toggle — never as a side effect.
+#[tauri::command]
+pub async fn enable_php_path() -> Result<PhpPathStatus, AppError> {
+    tokio::task::spawn_blocking(php_path::enable)
+        .await
+        .map_err(joined)?
+}
+
+#[tauri::command]
+pub async fn disable_php_path() -> Result<PhpPathStatus, AppError> {
+    tokio::task::spawn_blocking(php_path::disable)
+        .await
+        .map_err(joined)?
 }

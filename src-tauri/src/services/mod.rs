@@ -11,6 +11,7 @@ pub mod launcher;
 pub mod php;
 pub mod php_catalog;
 pub mod php_ini;
+pub mod php_path;
 pub mod process;
 pub mod projects;
 pub mod scaffold;
