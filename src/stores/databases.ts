@@ -102,7 +102,8 @@ export const useDatabasesStore = defineStore('databases', () => {
     }
   }
 
-  /** Dumps to `~/rezure/dumps` and reports back where the file landed. */
+  /** Dumps to `C:
+ezure\dumps` and reports back where the file landed. */
   async function exportDatabase(name: string) {
     busy.value = name
     error.value = null

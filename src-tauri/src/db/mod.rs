@@ -15,6 +15,7 @@ use rusqlite::Connection;
 use rusqlite_migration::{Migrations, M};
 
 use crate::utils::error::AppError;
+use crate::utils::paths;
 
 fn migrations() -> &'static Migrations<'static> {
     static MIGRATIONS: OnceLock<Migrations> = OnceLock::new();
@@ -36,10 +37,7 @@ fn migrations() -> &'static Migrations<'static> {
 
 /// `%LOCALAPPDATA%\Rezure\rezure.db`.
 pub fn db_path() -> Result<PathBuf, AppError> {
-    let base = dirs::data_local_dir().ok_or_else(|| {
-        AppError::Database("could not resolve the local app data directory".to_string())
-    })?;
-    Ok(base.join("Rezure").join("rezure.db"))
+    paths::db_file()
 }
 
 /// Opens the database, creating and migrating it as needed.

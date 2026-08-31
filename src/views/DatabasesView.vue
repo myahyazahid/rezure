@@ -93,7 +93,7 @@ const busyLabel = computed(() => {
 const busyDetail = computed(() => {
   if (switchingProfile.value) return 'Pointing the server at a different data directory.'
   if (store.importingInto) return 'Reading the dump into the server.'
-  return 'Writing a .sql dump to ~/rezure/dumps.'
+  return 'Writing a .sql dump to C:\\rezure\\dumps.'
 })
 </script>
 

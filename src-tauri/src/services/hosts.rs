@@ -20,6 +20,7 @@ use std::process::Command;
 use super::projects::scan_projects;
 use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
+use crate::utils::paths;
 use crate::utils::powershell::quote_ps;
 
 const BEGIN_MARKER: &str = "# --- Rezure managed entries (do not edit below) ---";
@@ -33,10 +34,7 @@ pub fn hosts_file_path() -> PathBuf {
 /// module hands to the elevated copy step, and the tiny script that
 /// performs it.
 fn staging_dir() -> Result<PathBuf, AppError> {
-    let base = dirs::data_local_dir().ok_or_else(|| {
-        AppError::Io("could not resolve the local app data directory".to_string())
-    })?;
-    Ok(base.join("Rezure").join("data").join("hosts"))
+    Ok(paths::data()?.join("hosts"))
 }
 
 /// Domains currently inside Rezure's managed block, if any.

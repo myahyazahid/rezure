@@ -3,26 +3,27 @@
     Removes everything Rezure leaves behind outside its own install directory.
 
 .DESCRIPTION
-    Uninstalling the MSI removes the app, and nothing else. Rezure also writes
-    to four places the installer never tracked, because they belong to the user
-    rather than to the package:
+    Uninstalling the app removes the program files, and nothing else. Rezure
+    also owns three things the installer never tracked, because they belong to
+    the user rather than to the package:
 
+      * C:\rezure           - runtimes, service data, config, www, dumps and
+                              the SQLite database (override with $REZURE_HOME)
       * the user PATH entry pointing at the PHP junction
       * a managed block in the Windows hosts file
-      * %LOCALAPPDATA%\Rezure  - runtimes, nginx runtime state, its own MariaDB
-                                 data directory, and the SQLite database
-      * %APPDATA%\Rezure       - settings.json, profiles.json, links.json
-      * %USERPROFILE%\rezure   - drop-in binaries, SQL dumps, the www root
 
-    This script clears those. It never touches project source code, and never
-    touches a Laragon or XAMPP data directory that Rezure merely adopted.
+    The pre-1.0 locations (%LOCALAPPDATA%\Rezure, %APPDATA%\Rezure,
+    %USERPROFILE%\rezure) are cleaned too: an install that was never launched
+    after the single-folder move still keeps its data there.
+
+    This script never touches project source code, and never touches a Laragon
+    or XAMPP data directory that Rezure merely adopted.
 
 .PARAMETER Execute
     Actually delete. Without it the script only reports what it would do.
 
 .PARAMETER KeepDumps
-    Preserve %USERPROFILE%\rezure\dumps - exported .sql files are your data,
-    not Rezure's.
+    Preserve C:\rezure\dumps - exported .sql files are your data, not Rezure's.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts/uninstall-clean.ps1
@@ -39,12 +40,22 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$LocalRoot   = Join-Path $env:LOCALAPPDATA 'Rezure'
-$RoamingRoot = Join-Path $env:APPDATA     'Rezure'
-$HomeRoot    = Join-Path $env:USERPROFILE 'rezure'
-$DumpsDir    = Join-Path $HomeRoot 'dumps'
-$LinkDir     = Join-Path $LocalRoot 'current\php'
-$HostsFile   = Join-Path $env:WINDIR 'System32\drivers\etc\hosts'
+# Rezure keeps everything under one root. $env:REZURE_HOME overrides it, the
+# same way the app resolves it.
+$Root = if ($env:REZURE_HOME) { $env:REZURE_HOME } else { 'C:\rezure' }
+
+# The pre-1.0 locations. Still listed because an install that was never
+# launched after the move still has its data in them, and because a migration
+# that hit a locked file leaves part of it behind.
+$LegacyRoots = @(
+    (Join-Path $env:LOCALAPPDATA 'Rezure'),
+    (Join-Path $env:APPDATA     'Rezure'),
+    (Join-Path $env:USERPROFILE 'rezure')
+) | Where-Object { $_ -ne $Root }
+
+$DumpsDir  = Join-Path $Root 'dumps'
+$LinkDir   = Join-Path $Root 'current\php'
+$HostsFile = Join-Path $env:WINDIR 'System32\drivers\etc\hosts'
 
 $BeginMarker = '# --- Rezure managed entries (do not edit below) ---'
 $EndMarker   = '# --- Rezure managed entries end ---'
@@ -162,9 +173,13 @@ if (-not $hostsText -or $hostsText -notmatch [regex]::Escape($BeginMarker)) {
 # itself, so the PHP install it points at is left alone.
 Write-Step '4. Removing directory junctions'
 $junctions = @()
-foreach ($root in @($LocalRoot, $HomeRoot)) {
-    if (Test-Path $root) {
-        $junctions += Get-ChildItem $root -Recurse -Directory -Force -ErrorAction SilentlyContinue |
+# `$scanRoot`, not `$root`: PowerShell variable names are case-insensitive, so
+# a loop variable called `$root` is the same variable as `$Root` and leaves it
+# holding the last item scanned. That silently dropped the real root from the
+# delete list further down.
+foreach ($scanRoot in @($Root) + $LegacyRoots) {
+    if (Test-Path $scanRoot) {
+        $junctions += Get-ChildItem $scanRoot -Recurse -Directory -Force -ErrorAction SilentlyContinue |
             Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }
     }
 }
@@ -179,7 +194,7 @@ if (-not $junctions) {
 
 # --- 5. Delete the data directories -----------------------------------------
 Write-Step '5. Removing data directories'
-$targets = @($LocalRoot, $RoamingRoot, $HomeRoot)
+$targets = @($Root) + $LegacyRoots
 
 if ($KeepDumps -and (Test-Path $DumpsDir)) {
     $stash = Join-Path $env:USERPROFILE "rezure-dumps-kept-$(Get-Date -Format yyyyMMdd-HHmmss)"

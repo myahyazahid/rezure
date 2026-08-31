@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::services::db_engine::Engine;
 use crate::utils::error::AppError;
+use crate::utils::paths;
 
 /// Where a profile came from — label and icon only, never behaviour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -152,9 +153,7 @@ fn new_id() -> String {
 
 /// `%APPDATA%\Rezure\profiles.json`.
 pub fn path() -> Result<PathBuf, AppError> {
-    let base = dirs::config_dir()
-        .ok_or_else(|| AppError::Settings("could not resolve the config directory".to_string()))?;
-    Ok(base.join("Rezure").join("profiles.json"))
+    Ok(paths::etc()?.join("profiles.json"))
 }
 
 /// Reads the store, falling back to an empty one if it's missing or

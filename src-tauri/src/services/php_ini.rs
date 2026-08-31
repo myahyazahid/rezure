@@ -23,6 +23,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::utils::error::AppError;
+use crate::utils::paths;
 
 /// Enabled for every PHP process Rezure spawns — the FastCGI service
 /// (`services::process`) and Composer/scaffolding (`services::scaffold`) —
@@ -50,10 +51,7 @@ fn ini_value(path: &Path) -> String {
 }
 
 fn runtime_dir() -> Result<PathBuf, AppError> {
-    let base = dirs::data_local_dir().ok_or_else(|| {
-        AppError::Io("could not resolve the local app data directory".to_string())
-    })?;
-    Ok(base.join("Rezure").join("data").join("php"))
+    Ok(paths::data()?.join("php"))
 }
 
 /// Sessions and uploads both need a real writable directory of their own.

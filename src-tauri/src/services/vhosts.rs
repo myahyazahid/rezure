@@ -19,6 +19,7 @@ use super::binaries;
 use super::projects::{docroot, scan_projects};
 use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
+use crate::utils::paths;
 
 /// Must match the port `ProcessService::php()` binds `php-cgi` to.
 pub const PHP_FASTCGI_PORT: u16 = 9000;
@@ -27,10 +28,7 @@ pub const PHP_FASTCGI_PORT: u16 = 9000;
 /// config, logs, and temp directories (separate from the pristine
 /// extracted binary under `binaries::install_root()`).
 pub fn nginx_runtime_dir() -> Result<PathBuf, AppError> {
-    let base = dirs::data_local_dir().ok_or_else(|| {
-        AppError::Io("could not resolve the local app data directory".to_string())
-    })?;
-    Ok(base.join("Rezure").join("data").join("nginx"))
+    Ok(paths::data()?.join("nginx"))
 }
 
 pub fn vhosts_dir() -> Result<PathBuf, AppError> {

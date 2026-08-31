@@ -23,6 +23,7 @@ use super::vhosts::{self, PHP_FASTCGI_PORT};
 use super::{Service, ServiceHandle, ServiceInfo, ServiceManager, ServiceStatus, CPU_HISTORY_LEN};
 use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
+use crate::utils::paths;
 
 /// Event name the frontend subscribes to via `listen()` for a service's
 /// stdout/stderr, line by line, as it's produced.
@@ -104,10 +105,7 @@ pub struct ProcessService {
 /// default docroot, MariaDB's datadir), separate from the versioned binary
 /// cache under `binaries::install_root`.
 fn runtime_dir(id: &str) -> Result<PathBuf, AppError> {
-    let base = dirs::data_local_dir().ok_or_else(|| {
-        AppError::Io("could not resolve the local app data directory".to_string())
-    })?;
-    Ok(base.join("Rezure").join("data").join(id))
+    Ok(paths::data()?.join(id))
 }
 
 /// Where a service's last-known PID is recorded across app restarts.

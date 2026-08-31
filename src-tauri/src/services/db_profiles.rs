@@ -22,6 +22,7 @@ use super::db_engine::{self, Engine, SERVER_EXE};
 use crate::config::profiles::{self, NewProfile, Profile, ProfileSource, ProfileStore};
 use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
+use crate::utils::paths;
 
 /// Where Rezure's own datadir lives — the seed profile points here, and it
 /// stays the fallback a failed switch rolls back to.
@@ -30,14 +31,7 @@ use crate::utils::error::AppError;
 /// bundled MariaDB has always used, so an install that predates profiles
 /// keeps its existing databases instead of silently starting empty.
 pub fn rezure_datadir() -> Result<PathBuf, AppError> {
-    let base = dirs::data_local_dir().ok_or_else(|| {
-        AppError::Io("could not resolve the local app data directory".to_string())
-    })?;
-    Ok(base
-        .join("Rezure")
-        .join("data")
-        .join("mariadb")
-        .join("data"))
+    Ok(paths::data()?.join("mariadb").join("data"))
 }
 
 fn store_cell() -> &'static Mutex<ProfileStore> {

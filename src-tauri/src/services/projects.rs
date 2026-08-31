@@ -15,6 +15,7 @@ use super::hosts;
 use crate::config::links;
 use crate::db::projects::{ProjectInfo, ProjectKind};
 use crate::utils::error::AppError;
+use crate::utils::paths;
 
 fn domain_suffix_cell() -> &'static Mutex<String> {
     static SUFFIX: OnceLock<Mutex<String>> = OnceLock::new();
@@ -40,9 +41,7 @@ pub fn set_domain_suffix(suffix: &str) {
 /// install gets an empty folder created here rather than an error, so
 /// there's always somewhere to drop a project into.
 pub fn www_root() -> Result<PathBuf, AppError> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| AppError::Io("could not resolve the home directory".to_string()))?;
-    Ok(home.join("rezure").join("www"))
+    paths::www()
 }
 
 /// Every project Rezure knows about, sorted by name: the folders inside

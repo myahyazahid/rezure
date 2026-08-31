@@ -12,6 +12,7 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 
 use crate::utils::error::AppError;
+use crate::utils::paths;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -73,9 +74,7 @@ impl Default for Settings {
 
 /// `%APPDATA%\Rezure\settings.json`.
 pub fn path() -> Result<PathBuf, AppError> {
-    let base = dirs::config_dir()
-        .ok_or_else(|| AppError::Settings("could not resolve the config directory".to_string()))?;
-    Ok(base.join("Rezure").join("settings.json"))
+    Ok(paths::etc()?.join("settings.json"))
 }
 
 /// Reads settings from disk, falling back to defaults if the file is

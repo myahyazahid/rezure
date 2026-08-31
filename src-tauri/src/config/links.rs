@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::utils::error::AppError;
+use crate::utils::paths;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -126,9 +127,7 @@ pub fn id_for(path: &str, name: &str) -> String {
 
 /// `%APPDATA%\Rezure\links.json`.
 pub fn path() -> Result<PathBuf, AppError> {
-    let base = dirs::config_dir()
-        .ok_or_else(|| AppError::Settings("could not resolve the config directory".to_string()))?;
-    Ok(base.join("Rezure").join("links.json"))
+    Ok(paths::etc()?.join("links.json"))
 }
 
 /// Reads the registry, falling back to empty if it's missing or unreadable

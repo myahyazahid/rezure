@@ -29,6 +29,7 @@ use super::db_profiles;
 use super::projects::scan_projects;
 use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
+use crate::utils::paths;
 
 pub const HOST: &str = "127.0.0.1";
 pub const USER: &str = "root";
@@ -293,9 +294,7 @@ pub fn drop_database(name: &str) -> Result<(), AppError> {
 /// predictable path is easier to reach from a terminal afterwards than a
 /// location the user has to remember choosing.
 pub fn dumps_dir() -> Result<PathBuf, AppError> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| AppError::Io("could not resolve the home directory".to_string()))?;
-    Ok(home.join("rezure").join("dumps"))
+    paths::dumps()
 }
 
 /// Dumps `name` to a timestamped `.sql` file and returns its path.

@@ -9,7 +9,7 @@ there: put it in the `www` folder, or point Rezure at it wherever it already liv
 
 | | Scanned | Linked |
 |---|---|---|
-| Where it lives | `%USERPROFILE%\rezure\www\<name>` | anywhere else |
+| Where it lives | `C:\rezure\www\<name>` | anywhere else |
 | How it's added | drop the folder in | **Add folder** on the Projects page |
 | How it's removed | move the folder out | **Remove** (the folder is left alone) |
 | Recorded in | nothing — the folder *is* the record | `%APPDATA%\Rezure\links.json` |

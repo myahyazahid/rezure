@@ -24,6 +24,7 @@ use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::utils::error::AppError;
+use crate::utils::paths;
 
 /// A downloadable portable binary package.
 #[derive(Debug, Clone, Copy)]
@@ -114,28 +115,22 @@ pub fn family_packages(family: &str) -> Vec<&'static BinaryPackage> {
     MANIFEST.iter().filter(|pkg| pkg.family == family).collect()
 }
 
-/// `%LOCALAPPDATA%\Rezure\bin` — where Rezure's own downloads land,
-/// created lazily on first install.
+/// `C:\rezure\bin` — where Rezure's own downloads land, created lazily on
+/// first install.
 pub fn install_root() -> Result<PathBuf, AppError> {
-    let base = dirs::data_local_dir().ok_or_else(|| {
-        AppError::Io("could not resolve the local app data directory".to_string())
-    })?;
-    Ok(base.join("Rezure").join("bin"))
+    paths::bin()
 }
 
-/// `%USERPROFILE%\rezure\bin` — the drop-in folder, for runtimes the user
-/// downloaded themselves.
+/// `C:\rezure\custom` — the drop-in folder, for runtimes the user downloaded
+/// themselves.
 ///
-/// Deliberately next to `~\rezure\www` and `~\rezure\dumps` rather than
-/// buried in `AppData`: this one is meant to be opened in Explorer and
-/// dropped into, the way Laragon's `bin\` is. The filesystem is the whole
-/// registry — there is no list of custom paths to persist and keep in
-/// sync, so a folder appearing here *is* an installed version, and
-/// deleting it uninstalls one.
+/// Sits beside `www` and `dumps` in the one visible Rezure folder rather than
+/// buried in `AppData`: this one is meant to be opened in Explorer and dropped
+/// into, the way Laragon's `bin\` is. The filesystem is the whole registry —
+/// there is no list of custom paths to persist and keep in sync, so a folder
+/// appearing here *is* an installed version, and deleting it uninstalls one.
 pub fn user_bin_root() -> Result<PathBuf, AppError> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| AppError::Io("could not resolve the home directory".to_string()))?;
-    Ok(home.join("rezure").join("bin"))
+    paths::custom_bin()
 }
 
 /// One runtime version found on disk, from either root.

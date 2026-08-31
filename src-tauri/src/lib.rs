@@ -90,6 +90,69 @@ pub fn run() {
                         .build(),
                 )?;
             }
+            // First, before *anything* resolves a path: an install from
+            // before the single-folder layout still has its runtimes, config
+            // and projects in the three old OS locations. Reading the new
+            // paths without moving those first would look exactly like data
+            // loss — an empty project list, and MariaDB bootstrapping a fresh
+            // datadir on top of databases that are still on disk.
+            let moved = utils::migrate::run();
+            if moved > 0 {
+                log::info!("moved {moved} location(s) into {:?}", utils::paths::home());
+            }
+
+            // The PATH side of the same migration, run once and then marked.
+            // These read the registry through PowerShell, so leaving them on
+            // every launch would add real startup latency for a repair that
+            // only ever applies to an install predating the layout change.
+            if moved > 0 || utils::migrate::needs_startup_repairs() {
+                // Order matters: the second check can't see the problem the
+                // first one fixes. PATH may still name the pre-move link
+                // directory, and `status()` looks for the *current* one — so it
+                // would report the feature as simply off, leaving a dead entry
+                // sitting in front of every other PHP on the machine.
+                let path_ok = match services::php_path::repair_legacy_entry() {
+                    Ok(true) => {
+                        log::info!("PATH now points at the current PHP link");
+                        true
+                    }
+                    Ok(false) => true,
+                    Err(err) => {
+                        log::warn!("could not repair the PHP entry in PATH: {err}");
+                        false
+                    }
+                };
+
+                // A junction stores an absolute target, so moving `bin` leaves
+                // it aimed at a directory that no longer exists. Until it's
+                // rebuilt, `php` resolves to nothing in every terminal, and the
+                // only other thing that rebuilds it is the user switching
+                // versions — which they have no reason to do.
+                let link_ok = match services::php_path::status() {
+                    Ok(status) if status.on_path && !status.in_sync => {
+                        log::info!("the PHP link is stale; re-pointing it at the active version");
+                        match services::php_path::sync() {
+                            Ok(()) => true,
+                            Err(err) => {
+                                log::warn!("could not re-point the PHP link: {err}");
+                                false
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        log::warn!("could not read the PHP link status: {err}");
+                        false
+                    }
+                    _ => true,
+                };
+
+                // Only marked when both actually succeeded, so a repair that
+                // failed is retried rather than silently abandoned.
+                if path_ok && link_ok {
+                    utils::migrate::mark_startup_repairs_done();
+                }
+            }
+
             // Before anything else reads installed-binary state: copies
             // Nginx/PHP in from the installer's bundled resources if this is
             // a fresh install that hasn't downloaded them itself yet — see
