@@ -84,6 +84,19 @@ pub fn run() {
             if let Some(version) = &settings.active_php_version {
                 let _ = services::php::set_active(version);
             }
+            // Restoring the choice is only half of it: `services::php`'s
+            // `set_active` moves in-memory state, while the junction on the
+            // user's PATH lives on disk and can outlast the session that
+            // pointed it (a switch interrupted by a crash, a version added
+            // by unzipping it into the drop-in folder). Re-pointing here
+            // also gives the restored version the `php.ini` a terminal's
+            // `php` needs — see `services::php_ini`. Best-effort, and
+            // skipped entirely when the user never opted into the switch.
+            if services::php_path::status().is_ok_and(|s| s.on_path) {
+                if let Err(err) = services::php_path::sync() {
+                    log::warn!("failed to re-point the PHP PATH link on startup: {err}");
+                }
+            }
             app.manage(config::settings::SettingsState::new(settings));
 
             match db::init() {
