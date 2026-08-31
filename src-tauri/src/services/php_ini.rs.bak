@@ -29,13 +29,6 @@ const EXTENSIONS: &[&str] = &[
     "zip",
 ];
 
-/// PHP on Windows treats `\` in ini values inconsistently depending on
-/// what follows it, so every generated path uses forward slashes, which
-/// Windows accepts everywhere.
-fn ini_value(path: &Path) -> String {
-    path.display().to_string().replace('\\', "/")
-}
-
 fn runtime_dir() -> Result<PathBuf, AppError> {
     let base = dirs::data_local_dir().ok_or_else(|| {
         AppError::Io("could not resolve the local app data directory".to_string())
@@ -54,20 +47,15 @@ pub fn ensure_php_ini(php_exe: &Path) -> Result<PathBuf, AppError> {
     fs::create_dir_all(&dir)
         .map_err(|e| AppError::Io(format!("could not create {}: {e}", dir.display())))?;
 
-    // Sessions and uploads both need a real writable directory of their
-    // own. PHP's fallback when these are unset is the system temp dir,
-    // which Windows' own cleanup is free to empty out from under a
-    // running project.
-    let tmp = dir.join("tmp");
-    fs::create_dir_all(&tmp)
-        .map_err(|e| AppError::Io(format!("could not create {}: {e}", tmp.display())))?;
-
     let extension_dir = php_exe
         .parent()
         .map(|dir| dir.join("ext"))
         .ok_or_else(|| AppError::Io("php.exe has no parent directory".to_string()))?;
 
-    let mut ini = format!("extension_dir = \"{}\"\n", ini_value(&extension_dir));
+    let mut ini = format!(
+        "extension_dir = \"{}\"\n",
+        extension_dir.display().to_string().replace('\\', "/")
+    );
     for extension in EXTENSIONS {
         ini.push_str(&format!("extension={extension}\n"));
     }
@@ -75,20 +63,6 @@ pub fn ensure_php_ini(php_exe: &Path) -> Result<PathBuf, AppError> {
     ini.push_str("upload_max_filesize = 64M\n");
     ini.push_str("post_max_size = 64M\n");
     ini.push_str("max_execution_time = 300\n");
-    // Without buffering, any stray byte a project emits before its
-    // response — a space after a `?>`, a BOM, a warning — flushes PHP's
-    // header block early, and every `header()`/`setcookie()` after that is
-    // discarded silently. The symptom is a login that succeeds but never
-    // sticks, because `Set-Cookie` never reaches the browser. Laragon
-    // buffers (its php.ini derives from `php.ini-development`), so
-    // projects moving over from it depend on this being on.
-    ini.push_str("output_buffering = 4096\n");
-    ini.push_str(&format!("session.save_path = \"{}\"\n", ini_value(&tmp)));
-    ini.push_str(&format!("upload_tmp_dir = \"{}\"\n", ini_value(&tmp)));
-    ini.push_str(&format!("sys_temp_dir = \"{}\"\n", ini_value(&tmp)));
-    // PHP emits a warning on every date call while this is unset. Laravel
-    // overrides it per-app, so UTC is only ever the floor.
-    ini.push_str("date.timezone = UTC\n");
 
     let ini_path = dir.join("php.ini");
     fs::write(&ini_path, ini)
@@ -119,33 +93,6 @@ mod tests {
         assert!(content.contains("extension_dir"));
         assert!(!content.contains('\\'), "paths must use forward slashes");
 
-        // Both tests write the same php.ini, so neither owns the cleanup.
-        let _ = fs::remove_file(&ini_path);
-    }
-    /// The one directive a Laragon-era project silently depends on: without
-    /// it, a stray byte before the response drops `Set-Cookie` and logins
-    /// never stick.
-    #[test]
-    fn ensure_php_ini_buffers_output_and_points_php_at_a_real_temp_dir() {
-        let fake_php_exe = std::env::temp_dir()
-            .join(format!("rezure-test-phpini-buf-{}", std::process::id()))
-            .join("php.exe");
-
-        let ini_path = ensure_php_ini(&fake_php_exe).unwrap();
-        let content = fs::read_to_string(&ini_path).unwrap();
-        let tmp = runtime_dir().unwrap().join("tmp");
-
-        assert!(content.contains("output_buffering = 4096"));
-        assert!(content.contains("date.timezone = UTC"));
-        for directive in ["session.save_path", "upload_tmp_dir", "sys_temp_dir"] {
-            assert!(
-                content.contains(&format!("{directive} = \"{}\"", ini_value(&tmp))),
-                "missing {directive}"
-            );
-        }
-        assert!(tmp.is_dir(), "the temp dir php.ini points at must exist");
-
-        // Both tests write the same php.ini, so neither owns the cleanup.
-        let _ = fs::remove_file(&ini_path);
+        fs::remove_file(&ini_path).unwrap();
     }
 }
