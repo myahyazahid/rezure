@@ -27,7 +27,7 @@ const DOMAIN_SUFFIXES = ['test', 'local', 'dev'] as const
 </script>
 
 <template>
-  <section class="max-w-2xl">
+  <section>
     <h1 class="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Settings</h1>
     <p class="mt-1 text-sm text-neutral-500">Configure paths, ports, and PHP versions.</p>
 
@@ -37,22 +37,30 @@ const DOMAIN_SUFFIXES = ['test', 'local', 'dev'] as const
 
     <div class="mt-6">
       <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">General</h2>
-      <p class="mt-0.5 text-xs text-neutral-500">How Rezure starts and what it does in the background.</p>
+      <p class="mt-0.5 text-xs text-neutral-500">
+        How Rezure starts and what it does in the background.
+      </p>
 
       <div
         class="mt-3 divide-y divide-neutral-200/80 rounded-2xl border border-neutral-200 bg-white dark:divide-neutral-800 dark:border-neutral-800 dark:bg-neutral-900/60"
       >
         <div class="flex items-center justify-between gap-4 p-4">
           <div>
-            <p class="font-semibold text-neutral-900 dark:text-neutral-100">Start Rezure with Windows</p>
-            <p class="mt-0.5 text-xs text-neutral-500">Services boot in the background at sign-in.</p>
+            <p class="font-semibold text-neutral-900 dark:text-neutral-100">
+              Start Rezure with Windows
+            </p>
+            <p class="mt-0.5 text-xs text-neutral-500">
+              Services boot in the background at sign-in.
+            </p>
           </div>
           <button
             type="button"
             role="switch"
             :aria-checked="settingsStore.startWithWindows"
             class="relative h-6 w-11 shrink-0 rounded-full transition"
-            :class="settingsStore.startWithWindows ? 'bg-red-600' : 'bg-neutral-200 dark:bg-neutral-700'"
+            :class="
+              settingsStore.startWithWindows ? 'bg-red-600' : 'bg-neutral-200 dark:bg-neutral-700'
+            "
             @click="settingsStore.setStartWithWindows(!settingsStore.startWithWindows)"
           >
             <span
@@ -64,7 +72,9 @@ const DOMAIN_SUFFIXES = ['test', 'local', 'dev'] as const
 
         <div class="flex items-center justify-between gap-4 p-4">
           <div>
-            <p class="font-semibold text-neutral-900 dark:text-neutral-100">Keep running in tray on close</p>
+            <p class="font-semibold text-neutral-900 dark:text-neutral-100">
+              Keep running in tray on close
+            </p>
             <p class="mt-0.5 text-xs text-neutral-500">Closing the window leaves services up.</p>
           </div>
           <button
@@ -72,7 +82,9 @@ const DOMAIN_SUFFIXES = ['test', 'local', 'dev'] as const
             role="switch"
             :aria-checked="settingsStore.keepInTrayOnClose"
             class="relative h-6 w-11 shrink-0 rounded-full transition"
-            :class="settingsStore.keepInTrayOnClose ? 'bg-red-600' : 'bg-neutral-200 dark:bg-neutral-700'"
+            :class="
+              settingsStore.keepInTrayOnClose ? 'bg-red-600' : 'bg-neutral-200 dark:bg-neutral-700'
+            "
             @click="settingsStore.setKeepInTrayOnClose(!settingsStore.keepInTrayOnClose)"
           >
             <span
@@ -84,15 +96,21 @@ const DOMAIN_SUFFIXES = ['test', 'local', 'dev'] as const
 
         <div class="flex items-center justify-between gap-4 p-4">
           <div>
-            <p class="font-semibold text-neutral-900 dark:text-neutral-100">Notify when a service crashes</p>
-            <p class="mt-0.5 text-xs text-neutral-500">A tray toast the moment a process exits unexpectedly.</p>
+            <p class="font-semibold text-neutral-900 dark:text-neutral-100">
+              Notify when a service crashes
+            </p>
+            <p class="mt-0.5 text-xs text-neutral-500">
+              A tray toast the moment a process exits unexpectedly.
+            </p>
           </div>
           <button
             type="button"
             role="switch"
             :aria-checked="settingsStore.notifyOnCrash"
             class="relative h-6 w-11 shrink-0 rounded-full transition"
-            :class="settingsStore.notifyOnCrash ? 'bg-red-600' : 'bg-neutral-200 dark:bg-neutral-700'"
+            :class="
+              settingsStore.notifyOnCrash ? 'bg-red-600' : 'bg-neutral-200 dark:bg-neutral-700'
+            "
             @click="settingsStore.setNotifyOnCrash(!settingsStore.notifyOnCrash)"
           >
             <span
@@ -118,7 +136,9 @@ const DOMAIN_SUFFIXES = ['test', 'local', 'dev'] as const
               Only applies to new or resynced projects — existing ones keep their current domain.
             </p>
           </div>
-          <div class="flex shrink-0 gap-1 rounded-full border border-neutral-200 p-0.5 dark:border-neutral-700">
+          <div
+            class="flex shrink-0 gap-1 rounded-full border border-neutral-200 p-0.5 dark:border-neutral-700"
+          >
             <button
               v-for="suffix in DOMAIN_SUFFIXES"
               :key="suffix"
@@ -138,7 +158,9 @@ const DOMAIN_SUFFIXES = ['test', 'local', 'dev'] as const
 
         <div class="flex items-center justify-between gap-4 p-4">
           <div>
-            <p class="font-semibold text-neutral-900 dark:text-neutral-100">Auto-write hosts entries</p>
+            <p class="font-semibold text-neutral-900 dark:text-neutral-100">
+              Auto-write hosts entries
+            </p>
             <p class="mt-0.5 text-xs text-neutral-500">
               Syncs once at startup so new projects resolve without an extra UAC prompt each time.
             </p>
@@ -148,7 +170,9 @@ const DOMAIN_SUFFIXES = ['test', 'local', 'dev'] as const
             role="switch"
             :aria-checked="settingsStore.autoWriteHosts"
             class="relative h-6 w-11 shrink-0 rounded-full transition"
-            :class="settingsStore.autoWriteHosts ? 'bg-red-600' : 'bg-neutral-200 dark:bg-neutral-700'"
+            :class="
+              settingsStore.autoWriteHosts ? 'bg-red-600' : 'bg-neutral-200 dark:bg-neutral-700'
+            "
             @click="settingsStore.setAutoWriteHosts(!settingsStore.autoWriteHosts)"
           >
             <span
@@ -163,7 +187,9 @@ const DOMAIN_SUFFIXES = ['test', 'local', 'dev'] as const
     <div
       class="mt-6 rounded-2xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900/60"
     >
-      <div class="flex items-center justify-between gap-4 border-b border-neutral-200/80 p-4 dark:border-neutral-800">
+      <div
+        class="flex items-center justify-between gap-4 border-b border-neutral-200/80 p-4 dark:border-neutral-800"
+      >
         <div>
           <p class="font-semibold text-neutral-900 dark:text-neutral-100">Default port</p>
           <p class="mt-0.5 text-xs text-neutral-500">Used to pre-fill new virtual hosts.</p>
@@ -190,7 +216,9 @@ const DOMAIN_SUFFIXES = ['test', 'local', 'dev'] as const
           role="switch"
           :aria-checked="settingsStore.shareUsageData"
           class="relative h-6 w-11 shrink-0 rounded-full transition"
-          :class="settingsStore.shareUsageData ? 'bg-red-600' : 'bg-neutral-200 dark:bg-neutral-700'"
+          :class="
+            settingsStore.shareUsageData ? 'bg-red-600' : 'bg-neutral-200 dark:bg-neutral-700'
+          "
           @click="settingsStore.setShareUsageData(!settingsStore.shareUsageData)"
         >
           <span
@@ -202,7 +230,9 @@ const DOMAIN_SUFFIXES = ['test', 'local', 'dev'] as const
     </div>
 
     <div class="mt-6">
-      <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Where things live</h2>
+      <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+        Where things live
+      </h2>
       <p class="mt-0.5 text-xs text-neutral-500">
         Read-only — Rezure scans these folders directly, so there's nothing to redirect.
       </p>

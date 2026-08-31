@@ -3,8 +3,24 @@ use tauri::State;
 use crate::db::projects::ProjectInfo;
 use crate::db::{self, DbState};
 use crate::services::scaffold::ProjectTemplate;
-use crate::services::{hosts, launcher, projects, scaffold, vhosts};
+use crate::services::{hosts, launcher, projects, scaffold, vhosts, ServiceManager, ServiceStatus};
 use crate::utils::error::AppError;
+
+/// Makes a project just created, linked or unlinked live immediately
+/// instead of waiting for nginx's next full restart. Skipped silently when
+/// nginx isn't running — there's nothing to reload, and the vhost files
+/// on disk are already correct for whenever it does start.
+fn reload_nginx_if_running(manager: &ServiceManager) {
+    let Ok(nginx) = manager.find("nginx") else {
+        return;
+    };
+    if nginx.info().status != ServiceStatus::Running {
+        return;
+    }
+    if let Err(err) = vhosts::reload() {
+        log::warn!("failed to reload nginx after a project change: {err}");
+    }
+}
 
 #[tauri::command]
 pub fn list_projects(db_state: State<'_, DbState>) -> Result<Vec<ProjectInfo>, AppError> {
@@ -73,8 +89,19 @@ pub fn www_root() -> Result<String, AppError> {
 /// while (Laravel resolves and downloads its Composer dependencies over
 /// the network) — the frontend shows a pending state for the duration.
 #[tauri::command]
-pub async fn create_project(name: String, template: String) -> Result<(), AppError> {
-    scaffold::create_project(&name, &template).await
+pub async fn create_project(
+    name: String,
+    template: String,
+    manager: State<'_, ServiceManager>,
+) -> Result<(), AppError> {
+    scaffold::create_project(&name, &template).await?;
+    // The new project needs a vhost before it can serve; best-effort, same
+    // reasoning as `link_project` below.
+    if let Err(err) = vhosts::sync_vhosts() {
+        log::warn!("failed to sync nginx vhosts after creating a project: {err}");
+    }
+    reload_nginx_if_running(&manager);
+    Ok(())
 }
 
 #[tauri::command]
@@ -138,6 +165,7 @@ pub fn link_project(
     path: String,
     name: Option<String>,
     domain: Option<String>,
+    manager: State<'_, ServiceManager>,
 ) -> Result<(), AppError> {
     projects::link(&path, name, domain)?;
     // The new project needs a vhost before it can serve; best-effort, since
@@ -145,16 +173,18 @@ pub fn link_project(
     if let Err(err) = vhosts::sync_vhosts() {
         log::warn!("failed to sync nginx vhosts after linking: {err}");
     }
+    reload_nginx_if_running(&manager);
     Ok(())
 }
 
 /// Forgets a linked project. The folder and everything in it is left
 /// exactly as it was — this only removes Rezure's pointer to it.
 #[tauri::command]
-pub fn unlink_project(id: String) -> Result<(), AppError> {
+pub fn unlink_project(id: String, manager: State<'_, ServiceManager>) -> Result<(), AppError> {
     projects::unlink(&id)?;
     if let Err(err) = vhosts::sync_vhosts() {
         log::warn!("failed to sync nginx vhosts after unlinking: {err}");
     }
+    reload_nginx_if_running(&manager);
     Ok(())
 }

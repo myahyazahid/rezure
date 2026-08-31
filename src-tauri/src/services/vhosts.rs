@@ -13,6 +13,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use super::binaries;
 use super::projects::{docroot, scan_projects};
@@ -152,9 +153,9 @@ fn vhost_config(domain: &str, project_root: &Path, stack: &str, fastcgi_params: 
 
 /// Rewrites every project's vhost to match the current scan of
 /// `projects::www_root()`, deleting `.conf` files for projects that no
-/// longer exist. Returns how many vhosts are active. Nginx only picks up
-/// *new* files on its next start (no live reload yet), but existing ones
-/// are always kept current.
+/// longer exist. Returns how many vhosts are active. Only rewrites the
+/// files on disk — call [`reload`] afterward to make a running nginx
+/// actually pick up the change.
 pub fn sync_vhosts() -> Result<usize, AppError> {
     let vhosts = vhosts_dir()?;
     ensure_dir(&vhosts)?;
@@ -198,6 +199,37 @@ pub fn sync_vhosts() -> Result<usize, AppError> {
     }
 
     Ok(current.len())
+}
+
+/// Tells a running nginx to reload its config — picks up a project just
+/// added or removed immediately instead of waiting for nginx's next full
+/// restart. Callers are expected to check the service is actually running
+/// first (see `commands::projects`'s callers): asking a stopped nginx to
+/// reload just fails, harmlessly but noisily.
+pub fn reload() -> Result<(), AppError> {
+    let nginx_exe = binaries::exe_path(binaries::find("nginx")?)?;
+    let config_path = ensure_main_config(&nginx_exe)?;
+    let runtime = nginx_runtime_dir()?;
+
+    let status = Command::new(&nginx_exe)
+        .arg("-s")
+        .arg("reload")
+        .arg("-c")
+        .arg(&config_path)
+        .arg("-p")
+        .arg(&runtime)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|e| AppError::Io(format!("could not run nginx -s reload: {e}")))?;
+
+    if !status.success() {
+        return Err(AppError::Io(format!(
+            "nginx -s reload exited with {status}"
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
