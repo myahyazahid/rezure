@@ -27,6 +27,7 @@ use serde::Serialize;
 use super::db_engine;
 use super::db_profiles;
 use super::projects::scan_projects;
+use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
 
 pub const HOST: &str = "127.0.0.1";
@@ -181,6 +182,7 @@ fn query(sql: &str) -> Result<Vec<Vec<String>>, AppError> {
     let output = Command::new(client(db_engine::CLIENT_EXE)?)
         .args(base_args())
         .args(["--batch", "--skip-column-names", "-e", sql])
+        .hidden()
         .output()
         .map_err(|e| AppError::DatabaseQueryFailed(e.to_string()))?;
 
@@ -313,6 +315,7 @@ pub fn export_database(name: &str) -> Result<PathBuf, AppError> {
         .args(base_args())
         .args(["--databases", name])
         .stdout(file)
+        .hidden()
         .output()
         .map_err(|e| AppError::DatabaseQueryFailed(e.to_string()))?;
 
@@ -341,6 +344,7 @@ pub fn import_sql(name: &str, file: &Path) -> Result<(), AppError> {
         .args(base_args())
         .arg(name)
         .stdin(input)
+        .hidden()
         .output()
         .map_err(|e| AppError::DatabaseQueryFailed(e.to_string()))?;
 

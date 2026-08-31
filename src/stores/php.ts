@@ -33,6 +33,11 @@ export const usePhpStore = defineStore('php', () => {
    *  service was reloaded onto the new version. */
   const notice = ref<string | null>(null)
 
+  /** The version id currently being switched to, or null. A switch re-points
+   *  the PATH junction and reloads the running PHP service, so it is slow
+   *  enough to need the busy overlay. */
+  const switching = ref<string | null>(null)
+
   /** Install progress, keyed by version — the backend emits the version as
    *  the progress id for a PHP install. */
   const progress = ref<Record<string, InstallProgress>>({})
@@ -65,6 +70,7 @@ export const usePhpStore = defineStore('php', () => {
   async function setActive(id: string) {
     error.value = null
     notice.value = null
+    switching.value = id
     try {
       const result = await invoke<PhpSwitchResult>('set_active_php_version', { id })
       versions.value = result.versions
@@ -85,6 +91,8 @@ export const usePhpStore = defineStore('php', () => {
     } catch (e) {
       error.value = errorMessage(e)
       return null
+    } finally {
+      switching.value = null
     }
   }
 
@@ -207,6 +215,7 @@ export const usePhpStore = defineStore('php', () => {
     dropInDir,
     adding,
     notice,
+    switching,
     pathStatus,
     pathBusy,
     fetchAll,

@@ -6,8 +6,36 @@ import BasePill from '@/components/common/BasePill.vue'
 import ProjectActionButtons from '@/components/projects/ProjectActionButtons.vue'
 import NewProjectModal from '@/components/projects/NewProjectModal.vue'
 import LinkProjectModal from '@/components/projects/LinkProjectModal.vue'
+import BusyOverlay from '@/components/common/BusyOverlay.vue'
 
 const store = useProjectsStore()
+
+/**
+ * The three slow paths on this page, most disruptive first.
+ *
+ * Scaffolding is by far the longest — Composer resolves and downloads a whole
+ * dependency tree over the network — so it leads. The hosts sync is last
+ * because Windows puts its own consent dialog on top anyway; the overlay is
+ * there for the stretch before and after that prompt.
+ */
+const busy = computed(() => {
+  if (store.creating) {
+    return {
+      label: 'Creating project…',
+      detail: 'Composer is downloading dependencies — this can take a few minutes.',
+    }
+  }
+  if (store.linking) {
+    return { label: 'Adding project…', detail: 'Writing its vhost and reloading nginx.' }
+  }
+  if (store.syncingHosts) {
+    return {
+      label: 'Waiting for admin approval…',
+      detail: 'Windows is asking permission to edit the hosts file.',
+    }
+  }
+  return null
+})
 
 const search = ref('')
 const viewMode = ref<'grid' | 'list'>('list')
@@ -56,7 +84,7 @@ function domainTitle(hasHostsEntry: boolean) {
 /** `lastOpenedAt` is unix seconds from the backend; `null` until a project
  *  has been opened (site, folder, or terminal) at least once. */
 function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: number }) {
-  if (project.lastOpenedAt === null) return null
+  if (project.lastOpenedAt === null) return 'Not opened yet'
   const diffMs = Date.now() - project.lastOpenedAt * 1000
   const days = Math.floor(diffMs / 86_400_000)
   const when = days <= 0 ? 'today' : days === 1 ? '1 day ago' : `${days} days ago`
@@ -65,8 +93,12 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
 </script>
 
 <template>
-  <section>
-    <div class="flex items-start justify-between gap-4">
+  <!-- Fills the main area exactly and scrolls the list inside itself, rather
+       than growing and letting the whole page scroll. With enough projects
+       the header, search and view toggle would otherwise scroll off the top
+       just when they're most needed. -->
+  <section class="flex h-full flex-col">
+    <div class="flex shrink-0 items-start justify-between gap-4">
       <div>
         <h1 class="text-[28px] leading-tight font-bold tracking-tight">Projects</h1>
         <p class="mt-1 text-sm text-neutral-500">
@@ -108,7 +140,13 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
           title="Serve a project from a folder outside your www directory"
           @click="showLinkProjectModal = true"
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="h-4 w-4"
+          >
             <path
               stroke-linecap="round"
               stroke-linejoin="round"
@@ -146,6 +184,8 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
 
     <NewProjectModal v-if="showNewProjectModal" @close="showNewProjectModal = false" />
     <LinkProjectModal v-if="showLinkProjectModal" @close="showLinkProjectModal = false" />
+
+    <BusyOverlay :show="busy !== null" :label="busy?.label ?? ''" :detail="busy?.detail ?? ''" />
 
     <!-- Says plainly that nothing is deleted. "Remove" next to a folder path
          reads as destructive unless the opposite is stated. -->
@@ -190,7 +230,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
       {{ store.linkError }}
     </p>
 
-    <div class="mt-5 flex flex-wrap items-center gap-3">
+    <div class="mt-5 flex shrink-0 flex-wrap items-center gap-3">
       <SearchInput
         v-model="search"
         placeholder="Search projects or domains"
@@ -240,7 +280,10 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
       <span class="shrink-0 text-sm text-neutral-500">{{ filteredProjects.length }} projects</span>
     </div>
 
-    <div v-if="filteredProjects.length === 0" class="mt-8 text-center text-sm text-neutral-500">
+    <div
+      v-if="filteredProjects.length === 0"
+      class="mt-8 shrink-0 text-center text-sm text-neutral-500"
+    >
       <template v-if="store.projects.length === 0">
         No projects yet — create one, or drop a folder into your www directory.
       </template>
@@ -249,7 +292,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
 
     <div
       v-else-if="viewMode === 'grid'"
-      class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3"
+      class="mt-5 grid min-h-0 flex-1 grid-cols-1 content-start gap-3 overflow-y-auto pr-1 sm:grid-cols-2 xl:grid-cols-3"
     >
       <div
         v-for="project in filteredProjects"
@@ -257,7 +300,9 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
         class="rounded-2xl border border-neutral-200 bg-white p-4 transition hover:border-neutral-300 dark:border-neutral-800 dark:bg-neutral-900/60 dark:hover:border-neutral-700"
       >
         <div class="flex items-start justify-between gap-2">
-          <p class="flex min-w-0 items-center gap-2 truncate font-semibold text-neutral-900 dark:text-neutral-100">
+          <p
+            class="flex min-w-0 items-center gap-2 truncate font-semibold text-neutral-900 dark:text-neutral-100"
+          >
             <span class="truncate">{{ project.name }}</span>
             <span
               v-if="project.kind === 'linked'"
@@ -270,7 +315,10 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
           <BasePill class="shrink-0">{{ project.stack }}</BasePill>
         </div>
         <p class="mt-1 truncate font-mono text-xs text-neutral-500">{{ project.path }}</p>
-        <p v-if="project.missing" class="mt-0.5 truncate text-xs text-amber-600 dark:text-amber-400">
+        <p
+          v-if="project.missing"
+          class="mt-0.5 truncate text-xs text-amber-600 dark:text-amber-400"
+        >
           Folder not found — it may have moved, or be on a drive that isn't connected.
         </p>
         <p v-else-if="lastOpenedLabel(project)" class="mt-0.5 truncate text-xs text-neutral-400">
@@ -301,10 +349,16 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
             v-if="project.kind === 'linked'"
             type="button"
             title="Remove from Rezure (the folder is left alone)"
-            class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-neutral-200 text-neutral-400 transition hover:border-red-300 hover:text-red-600 dark:border-neutral-700 dark:hover:border-red-500/40 dark:hover:text-red-400"
+            class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-neutral-200 text-neutral-400 transition hover:border-red-300 hover:text-red-600 dark:border-neutral-700 dark:hover:border-red-500/40 dark:hover:text-red-400"
             @click="confirmingUnlink = project.id"
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              class="h-4 w-4"
+            >
               <path stroke-linecap="round" d="M18.4 5.6 5.6 18.4M5.6 5.6l12.8 12.8" />
             </svg>
           </button>
@@ -314,73 +368,94 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
 
     <div
       v-else
-      class="mt-5 overflow-hidden rounded-2xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900/60"
+      class="mt-5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900/60"
     >
+      <!-- Column headings stay put; only the rows below them move. -->
       <div
-        class="flex items-center gap-3 border-b border-neutral-200 bg-neutral-50/80 px-5 py-3 text-[11px] font-semibold tracking-wide text-neutral-400 uppercase dark:border-neutral-800 dark:bg-neutral-900/40"
+        class="flex shrink-0 items-center gap-3 border-b border-neutral-200 bg-neutral-50/80 px-5 py-3 text-[11px] font-semibold tracking-wide text-neutral-400 uppercase dark:border-neutral-800 dark:bg-neutral-900/40"
       >
         <span class="flex-1">Project</span>
         <span class="w-44 shrink-0">Domain</span>
         <span class="w-28 shrink-0">Stack</span>
-        <span class="w-44 shrink-0 text-right">Actions</span>
+        <span class="w-56 shrink-0 text-right">Actions</span>
       </div>
 
-      <div
-        v-for="project in filteredProjects"
-        :key="project.id"
-        class="flex items-center gap-3 border-b border-neutral-200/70 px-5 py-3.5 transition last:border-b-0 hover:bg-neutral-50 dark:border-neutral-800/70 dark:hover:bg-neutral-800/30"
-      >
-        <div class="min-w-0 flex-1">
-          <p class="flex items-center gap-2 truncate font-semibold text-neutral-900 dark:text-neutral-100">
-            {{ project.name }}
-            <!-- Only linked projects carry a badge: a project in www is the
-                 norm and doesn't need labelling. -->
-            <span
-              v-if="project.kind === 'linked'"
-              class="shrink-0 rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-neutral-500 uppercase dark:bg-neutral-800 dark:text-neutral-400"
-              title="Served from a folder outside your www directory"
-            >
-              Linked
-            </span>
-          </p>
-          <p class="truncate font-mono text-xs text-neutral-500">{{ project.path }}</p>
-          <p v-if="project.missing" class="truncate text-xs text-amber-600 dark:text-amber-400">
-            Folder not found — it may have moved, or be on a drive that isn't connected.
-          </p>
-          <p v-else-if="lastOpenedLabel(project)" class="truncate text-xs text-neutral-400">
-            {{ lastOpenedLabel(project) }}
-          </p>
-        </div>
-        <span
-          class="w-44 shrink-0 truncate font-mono text-xs"
-          :class="domainClass(project.hasHostsEntry)"
-          :title="domainTitle(project.hasHostsEntry)"
+      <div class="min-h-0 flex-1 overflow-y-auto">
+        <div
+          v-for="project in filteredProjects"
+          :key="project.id"
+          class="flex items-center gap-3 border-b border-neutral-200/70 px-5 py-3.5 transition last:border-b-0 hover:bg-neutral-50 dark:border-neutral-800/70 dark:hover:bg-neutral-800/30"
         >
-          {{ project.domain }}
-        </span>
-        <span class="w-28 shrink-0">
-          <BasePill>{{ project.stack }}</BasePill>
-        </span>
-        <div class="flex w-44 shrink-0 items-center justify-end gap-1">
-          <ProjectActionButtons
-            v-if="!project.missing"
-            :project-id="project.id"
-            :domain="project.domain"
-            :path="project.path"
-          />
-          <!-- Unlink only exists for linked projects: a scanned one is
-               removed by moving its folder out of www, not from here. -->
-          <button
-            v-if="project.kind === 'linked'"
-            type="button"
-            title="Remove from Rezure (the folder is left alone)"
-            class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-neutral-200 text-neutral-400 transition hover:border-red-300 hover:text-red-600 dark:border-neutral-700 dark:hover:border-red-500/40 dark:hover:text-red-400"
-            @click="confirmingUnlink = project.id"
+          <div class="min-w-0 flex-1">
+            <p
+              class="flex items-center gap-2 truncate font-semibold text-neutral-900 dark:text-neutral-100"
+            >
+              {{ project.name }}
+              <!-- Only linked projects carry a badge: a project in www is the
+                 norm and doesn't need labelling. -->
+              <span
+                v-if="project.kind === 'linked'"
+                class="shrink-0 rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-neutral-500 uppercase dark:bg-neutral-800 dark:text-neutral-400"
+                title="Served from a folder outside your www directory"
+              >
+                Linked
+              </span>
+            </p>
+            <p class="truncate font-mono text-xs text-neutral-500">{{ project.path }}</p>
+            <!-- Always three lines, so every row is the same height. Leaving
+                 this one out for never-opened projects made the list ragged,
+                 and rows changed height the first time you opened one. -->
+            <p v-if="project.missing" class="truncate text-xs text-amber-600 dark:text-amber-400">
+              Folder not found — it may have moved, or be on a drive that isn't connected.
+            </p>
+            <p v-else class="truncate text-xs text-neutral-400">
+              {{ lastOpenedLabel(project) }}
+            </p>
+          </div>
+          <span
+            class="w-44 shrink-0 truncate font-mono text-xs"
+            :class="domainClass(project.hasHostsEntry)"
+            :title="domainTitle(project.hasHostsEntry)"
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
-              <path stroke-linecap="round" d="M18.4 5.6 5.6 18.4M5.6 5.6l12.8 12.8" />
-            </svg>
-          </button>
+            {{ project.domain }}
+          </span>
+          <span class="w-28 shrink-0">
+            <BasePill>{{ project.stack }}</BasePill>
+          </span>
+          <!-- Every control keeps its column across all rows. The buttons used
+               to be dropped rather than hidden, so a row without an unlink
+               button pushed Open to the right and the actions never lined up
+               down the list. -->
+          <div class="flex w-56 shrink-0 items-center justify-end gap-1">
+            <ProjectActionButtons
+              :class="project.missing ? 'invisible' : ''"
+              :project-id="project.id"
+              :domain="project.domain"
+              :path="project.path"
+            />
+            <!-- Unlink only exists for linked projects: a scanned one is
+               removed by moving its folder out of www, not from here. The
+               empty slot keeps the button column aligned on the other rows.
+               `h-9 w-9` matches its siblings — it used to be a size smaller. -->
+            <button
+              v-if="project.kind === 'linked'"
+              type="button"
+              title="Remove from Rezure (the folder is left alone)"
+              class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-neutral-200 text-neutral-400 transition hover:border-red-300 hover:text-red-600 dark:border-neutral-700 dark:hover:border-red-500/40 dark:hover:text-red-400"
+              @click="confirmingUnlink = project.id"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                class="h-4 w-4"
+              >
+                <path stroke-linecap="round" d="M18.4 5.6 5.6 18.4M5.6 5.6l12.8 12.8" />
+              </svg>
+            </button>
+            <span v-else class="h-9 w-9 shrink-0" aria-hidden="true"></span>
+          </div>
         </div>
       </div>
     </div>

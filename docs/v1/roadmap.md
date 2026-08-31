@@ -16,6 +16,10 @@ Goal: a functional, installable release covering the essential local dev environ
 
 ### Phase 2 — Service Manager (Core Feature)
 - Bundle portable binaries: Apache/Nginx, PHP (at least one version), MySQL/MariaDB
+  - Nginx and the default PHP version (8.3.33) ship pre-staged inside the installer
+    (`scripts/stage-bundled-binaries.ps1` + `tauri.conf.json`'s `bundle.resources`),
+    so web serving works with zero manual downloads right after install. MariaDB and
+    every other PHP version stay on-demand-only, as originally implemented.
 - Implement start/stop process control in Rust (`tokio` + `sysinfo`)
 - UI: start/stop buttons per service with status indicators
 - Port conflict detection before starting a service

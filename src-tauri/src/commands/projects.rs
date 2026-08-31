@@ -22,15 +22,37 @@ fn reload_nginx_if_running(manager: &ServiceManager) {
     }
 }
 
+/// Brings the vhost files up to date with what's on disk and, when that
+/// actually changed something, makes a running nginx pick it up.
+///
+/// The `changed` check is what lets this be safe to call from
+/// `list_projects`, which runs on every visit to the Projects page: without
+/// it, simply opening that page would cycle nginx's workers.
+///
+/// Best-effort throughout — a vhost hiccup should leave a warning in the log,
+/// not fail the command the user actually asked for.
+fn sync_vhosts_and_reload(manager: &ServiceManager, context: &str) {
+    match vhosts::sync_vhosts() {
+        Ok(sync) => {
+            if sync.changed {
+                reload_nginx_if_running(manager);
+            }
+        }
+        Err(err) => log::warn!("failed to sync nginx vhosts {context}: {err}"),
+    }
+}
+
 #[tauri::command]
-pub fn list_projects(db_state: State<'_, DbState>) -> Result<Vec<ProjectInfo>, AppError> {
+pub fn list_projects(
+    db_state: State<'_, DbState>,
+    manager: State<'_, ServiceManager>,
+) -> Result<Vec<ProjectInfo>, AppError> {
     let mut detected = projects::scan_projects()?;
 
-    // Best-effort — a vhost-sync hiccup shouldn't stop the project list
-    // itself from loading.
-    if let Err(err) = vhosts::sync_vhosts() {
-        log::warn!("failed to sync nginx vhosts: {err}");
-    }
+    // A folder dropped into `www` by hand shows up in this scan and nowhere
+    // else, so this is the only place its vhost gets written — and without
+    // the reload nginx would keep 404ing it until its next restart.
+    sync_vhosts_and_reload(&manager, "while listing projects");
 
     // Best-effort, same reasoning: a SQLite hiccup shouldn't stop the list
     // from loading, just leave it without history for this call.
@@ -66,8 +88,15 @@ pub fn list_projects(db_state: State<'_, DbState>) -> Result<Vec<ProjectInfo>, A
 ///
 /// Returns `true` if the hosts file changed, `false` if it was already up
 /// to date (no elevation prompt is shown in that case at all).
+///
+/// Syncs the vhosts too. A domain in the hosts file only resolves to
+/// something once nginx has a matching `server` block, so doing one without
+/// the other leaves the user on a connection-refused page having done
+/// everything the UI asked of them.
 #[tauri::command]
-pub async fn sync_hosts() -> Result<bool, AppError> {
+pub async fn sync_hosts(manager: State<'_, ServiceManager>) -> Result<bool, AppError> {
+    sync_vhosts_and_reload(&manager, "while syncing hosts");
+
     tokio::task::spawn_blocking(hosts::sync_hosts_entries)
         .await
         .map_err(|e| AppError::HostsUpdateFailed(format!("background task panicked: {e}")))?
@@ -95,12 +124,8 @@ pub async fn create_project(
     manager: State<'_, ServiceManager>,
 ) -> Result<(), AppError> {
     scaffold::create_project(&name, &template).await?;
-    // The new project needs a vhost before it can serve; best-effort, same
-    // reasoning as `link_project` below.
-    if let Err(err) = vhosts::sync_vhosts() {
-        log::warn!("failed to sync nginx vhosts after creating a project: {err}");
-    }
-    reload_nginx_if_running(&manager);
+    // The new project needs a vhost before it can serve.
+    sync_vhosts_and_reload(&manager, "after creating a project");
     Ok(())
 }
 
@@ -168,12 +193,8 @@ pub fn link_project(
     manager: State<'_, ServiceManager>,
 ) -> Result<(), AppError> {
     projects::link(&path, name, domain)?;
-    // The new project needs a vhost before it can serve; best-effort, since
-    // a sync problem shouldn't undo a link the user just made.
-    if let Err(err) = vhosts::sync_vhosts() {
-        log::warn!("failed to sync nginx vhosts after linking: {err}");
-    }
-    reload_nginx_if_running(&manager);
+    // The newly linked project needs a vhost before it can serve.
+    sync_vhosts_and_reload(&manager, "after linking");
     Ok(())
 }
 
@@ -182,9 +203,6 @@ pub fn link_project(
 #[tauri::command]
 pub fn unlink_project(id: String, manager: State<'_, ServiceManager>) -> Result<(), AppError> {
     projects::unlink(&id)?;
-    if let Err(err) = vhosts::sync_vhosts() {
-        log::warn!("failed to sync nginx vhosts after unlinking: {err}");
-    }
-    reload_nginx_if_running(&manager);
+    sync_vhosts_and_reload(&manager, "after unlinking");
     Ok(())
 }

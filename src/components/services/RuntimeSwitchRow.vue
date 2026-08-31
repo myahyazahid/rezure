@@ -7,7 +7,7 @@ export interface RuntimeVersionEntry {
   installed: boolean
 }
 
-const props = withDefaults(
+withDefaults(
   defineProps<{
     icon: string
     name: string
@@ -17,8 +17,12 @@ const props = withDefaults(
     installingId?: string | null
     /** For runtimes with no bundled binary source yet (Node.js, Python). */
     disabled?: boolean
+    /** A switch is in flight. Distinct from `disabled`: the row stays fully
+     *  visible and keeps reporting its version — only picking another one is
+     *  refused, so a second click can't race the switch already running. */
+    busy?: boolean
   }>(),
-  { installingId: null, disabled: false },
+  { installingId: null, disabled: false, busy: false },
 )
 
 const emit = defineEmits<{ select: [id: string]; install: [id: string] }>()
@@ -70,7 +74,8 @@ function pick(entry: RuntimeVersionEntry) {
     <div v-if="!disabled" class="relative shrink-0">
       <button
         type="button"
-        class="flex items-center gap-1.5 rounded-full border border-neutral-200 bg-white/70 px-3 py-1.5 font-mono text-sm font-semibold text-neutral-700 transition hover:bg-white dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
+        class="flex items-center gap-1.5 rounded-full border border-neutral-200 bg-white/70 px-3 py-1.5 font-mono text-sm font-semibold text-neutral-700 transition hover:bg-white disabled:cursor-wait disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
+        :disabled="busy"
         @click="open = !open"
       >
         {{ activeVersion ?? '—' }}

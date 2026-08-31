@@ -90,6 +90,13 @@ pub fn run() {
                         .build(),
                 )?;
             }
+            // Before anything else reads installed-binary state: copies
+            // Nginx/PHP in from the installer's bundled resources if this is
+            // a fresh install that hasn't downloaded them itself yet — see
+            // `services::binaries`'s module doc. A local file copy, fast
+            // enough to do synchronously here.
+            services::binaries::seed_bundled(app.handle());
+
             // Needs a live `AppHandle` (to emit `service://log` events),
             // which only exists once the app is actually starting up.
             app.manage(services::real_services(app.handle().clone()));

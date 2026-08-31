@@ -67,7 +67,9 @@ async function addManual() {
         is never copied, moved or converted.
       </p>
 
-      <p v-if="store.error" class="mt-3 text-sm text-red-600 dark:text-red-400">{{ store.error }}</p>
+      <p v-if="store.error" class="mt-3 text-sm text-red-600 dark:text-red-400">
+        {{ store.error }}
+      </p>
 
       <template v-if="!manual">
         <p v-if="store.detecting" class="mt-5 text-sm text-neutral-500">Looking for other tools…</p>
@@ -86,15 +88,15 @@ async function addManual() {
                 <p class="mt-0.5 text-xs text-neutral-500">
                   {{ ENGINE_LABEL[found.engine] }} {{ found.version }}
                 </p>
-                <p class="mt-1 truncate font-mono text-xs text-neutral-400" :title="found.datadirPath">
+                <p
+                  class="mt-1 truncate font-mono text-xs text-neutral-400"
+                  :title="found.datadirPath"
+                >
                   {{ found.datadirPath }}
                 </p>
                 <!-- Worth stating: without its own build, this datadir
                      can't be opened at all. -->
-                <p
-                  v-if="!found.binaryDir"
-                  class="mt-1 text-xs text-amber-600 dark:text-amber-400"
-                >
+                <p v-if="!found.binaryDir" class="mt-1 text-xs text-amber-600 dark:text-amber-400">
                   No server binary found beside it — you'll need a matching
                   {{ ENGINE_LABEL[found.engine] }} {{ found.version }} build.
                 </p>

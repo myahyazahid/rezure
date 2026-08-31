@@ -71,7 +71,13 @@ async function confirm() {
           :disabled="checking"
           @click="pickFolder"
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="h-5 w-5"
+          >
             <path
               stroke-linecap="round"
               stroke-linejoin="round"
@@ -98,7 +104,8 @@ async function confirm() {
             {{ preview.path }}
           </p>
           <p class="mt-1.5 text-xs text-neutral-500">
-            Detected as <strong class="text-neutral-700 dark:text-neutral-200">{{ preview.stack }}</strong>
+            Detected as
+            <strong class="text-neutral-700 dark:text-neutral-200">{{ preview.stack }}</strong>
             <!-- Worth showing: Laravel is served from public/, so the folder
                  nginx uses isn't always the one that was picked. -->
             <template v-if="preview.docroot !== preview.path">
@@ -106,7 +113,10 @@ async function confirm() {
               <span class="font-mono">{{ preview.docroot.split(/[\\/]/).pop() }}/</span>
             </template>
           </p>
-          <p v-if="preview.stack === 'Unknown'" class="mt-1.5 text-xs text-amber-600 dark:text-amber-400">
+          <p
+            v-if="preview.stack === 'Unknown'"
+            class="mt-1.5 text-xs text-amber-600 dark:text-amber-400"
+          >
             No framework markers found here — it'll still be served as static files.
           </p>
         </div>
@@ -133,10 +143,7 @@ async function confirm() {
             />
           </div>
         </div>
-        <p
-          v-if="preview.domainAdjusted"
-          class="mt-1.5 text-xs text-neutral-500"
-        >
+        <p v-if="preview.domainAdjusted" class="mt-1.5 text-xs text-neutral-500">
           The obvious name was already taken by another project, so this one was numbered.
         </p>
       </template>

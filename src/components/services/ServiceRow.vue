@@ -301,7 +301,10 @@ function requestForceStop() {
 
       <!-- A system process can't be killed, so it gets an explanation and no
            button — offering one that always fails would be worse than none. -->
-      <p v-if="blocker.kind === 'system'" class="mt-2 text-xs text-neutral-600 dark:text-neutral-300">
+      <p
+        v-if="blocker.kind === 'system'"
+        class="mt-2 text-xs text-neutral-600 dark:text-neutral-300"
+      >
         This one has to be stopped as a Windows service; Rezure can't end it.
       </p>
 
@@ -323,10 +326,7 @@ function requestForceStop() {
         </button>
         <!-- Killing someone else's server is a different decision from
              reclaiming our own leftover, so it's labelled as one. -->
-        <span
-          v-if="blocker.kind === 'foreign'"
-          class="text-xs text-amber-700 dark:text-amber-300"
-        >
+        <span v-if="blocker.kind === 'foreign'" class="text-xs text-amber-700 dark:text-amber-300">
           This isn't Rezure's — make sure you don't need it running.
         </span>
       </div>
@@ -343,8 +343,8 @@ function requestForceStop() {
         Force stop {{ service.name }}?
       </p>
       <p class="mt-1 text-xs text-amber-800 dark:text-amber-300">
-        It won't be given the chance to close its data directory, so the next start has to run
-        crash recovery. Use <strong>Stop</strong> instead unless it's unresponsive.
+        It won't be given the chance to close its data directory, so the next start has to run crash
+        recovery. Use <strong>Stop</strong> instead unless it's unresponsive.
       </p>
       <div class="mt-3 flex gap-2">
         <button

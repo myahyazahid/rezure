@@ -41,3 +41,14 @@ __screenshots__/
 # Rust / Tauri
 src-tauri/target/
 src-tauri/gen/schemas/
+
+# Binaries staged for bundling into the installer (see scripts/stage-bundled-binaries.ps1) —
+# fetched from each project's official distribution at build time, never committed.
+# The two folders themselves (plus their .gitkeep) stay tracked so `tauri.conf.json`'s
+# `bundle.resources` always has a real path to point at, even on a fresh clone that
+# hasn't run the staging script yet — only their downloaded contents are ignored.
+src-tauri/bundled-bin/**
+!src-tauri/bundled-bin/nginx/
+!src-tauri/bundled-bin/nginx/.gitkeep
+!src-tauri/bundled-bin/php/
+!src-tauri/bundled-bin/php/.gitkeep

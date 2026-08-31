@@ -1,11 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import type {
-  DbProfileStatus,
-  DetectedDatadir,
-  SwitchResult,
-} from '@/types/dbProfile'
+import type { DbProfileStatus, DetectedDatadir, SwitchResult } from '@/types/dbProfile'
 
 function errorMessage(e: unknown): string {
   if (typeof e === 'string') return e
@@ -110,9 +106,13 @@ export const useDbProfilesStore = defineStore('dbProfiles', () => {
       const result = await invoke<SwitchResult>('switch_db_profile', { id })
       profiles.value = result.profiles
       const name = result.profiles.find((p) => p.id === id)?.name ?? 'that profile'
-      notice.value = result.restarted
-        ? `Now serving ${name}.`
-        : `${name} is active — it'll be used the next time the database starts.`
+      if (result.running) {
+        notice.value = `Now serving ${name}.`
+      } else {
+        // The profile did switch — this is about the server that wouldn't
+        // come up on it, so it can't be reported as a failed switch.
+        error.value = `Switched to ${name}, but the server didn't start: ${result.startError}`
+      }
       return true
     } catch (e) {
       error.value = errorMessage(e)

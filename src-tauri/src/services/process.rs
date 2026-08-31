@@ -21,6 +21,7 @@ use super::db_profiles;
 use super::php_ini;
 use super::vhosts::{self, PHP_FASTCGI_PORT};
 use super::{Service, ServiceHandle, ServiceInfo, ServiceManager, ServiceStatus, CPU_HISTORY_LEN};
+use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
 
 /// Event name the frontend subscribes to via `listen()` for a service's
@@ -322,9 +323,16 @@ impl ProcessService {
 
         // Piped, not inherited: a GUI-subsystem build has no console handles
         // to inherit, and piping is what lets us stream lines out below.
+        //
+        // `hidden()` on top of that because piping the streams is not enough
+        // on Windows: nginx, php-cgi and mysqld are console-subsystem exes,
+        // so without `CREATE_NO_WINDOW` each one pops its own console window
+        // when it starts. Applied here, at the one place every service's
+        // command is finalized, so no launch arm can forget it.
         cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stderr(Stdio::piped())
+            .hidden();
         Ok(cmd)
     }
 
@@ -485,6 +493,7 @@ fn request_graceful_shutdown(server_exe: &Path, port: u16) -> bool {
             database::USER,
             "shutdown",
         ])
+        .hidden()
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -752,6 +761,7 @@ pub(super) fn kill_process_tree(pid: u32) {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
+        .hidden()
         .status()
         .map(|status| status.success())
         .unwrap_or(false);
@@ -763,6 +773,7 @@ pub(super) fn kill_process_tree(pid: u32) {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
+            .hidden()
             .status();
     }
 }

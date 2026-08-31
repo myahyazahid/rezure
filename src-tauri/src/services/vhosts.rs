@@ -17,6 +17,7 @@ use std::process::{Command, Stdio};
 
 use super::binaries;
 use super::projects::{docroot, scan_projects};
+use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
 
 /// Must match the port `ProcessService::php()` binds `php-cgi` to.
@@ -151,12 +152,25 @@ fn vhost_config(domain: &str, project_root: &Path, stack: &str, fastcgi_params: 
     )
 }
 
+/// What a [`sync_vhosts`] pass did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VhostSync {
+    /// How many vhosts are active.
+    pub active: usize,
+    /// Whether any `.conf` was actually written or deleted.
+    ///
+    /// The point of tracking this is that `sync_vhosts` runs on every visit
+    /// to the Projects page. Reloading nginx unconditionally would cycle its
+    /// workers each time the user opened a tab; reloading only on a real
+    /// change makes the reload free when nothing moved.
+    pub changed: bool,
+}
+
 /// Rewrites every project's vhost to match the current scan of
 /// `projects::www_root()`, deleting `.conf` files for projects that no
-/// longer exist. Returns how many vhosts are active. Only rewrites the
-/// files on disk — call [`reload`] afterward to make a running nginx
-/// actually pick up the change.
-pub fn sync_vhosts() -> Result<usize, AppError> {
+/// longer exist. Only touches the files on disk — call [`reload`] afterward,
+/// when [`VhostSync::changed`] is set, to make a running nginx pick it up.
+pub fn sync_vhosts() -> Result<VhostSync, AppError> {
     let vhosts = vhosts_dir()?;
     ensure_dir(&vhosts)?;
     let fastcgi_params = nginx_conf_dir()?.join("fastcgi_params");
@@ -171,6 +185,8 @@ pub fn sync_vhosts() -> Result<usize, AppError> {
     let current_ids: std::collections::HashSet<&str> =
         current.iter().map(|p| p.id.as_str()).collect();
 
+    let mut changed = false;
+
     // Drop vhosts for projects that no longer exist on disk.
     if let Ok(entries) = fs::read_dir(&vhosts) {
         for entry in entries.flatten() {
@@ -180,8 +196,11 @@ pub fn sync_vhosts() -> Result<usize, AppError> {
                 .and_then(|s| s.to_str())
                 .map(|stem| !current_ids.contains(stem))
                 .unwrap_or(false);
-            if is_stale && path.extension().is_some_and(|ext| ext == "conf") {
-                let _ = fs::remove_file(&path);
+            if is_stale
+                && path.extension().is_some_and(|ext| ext == "conf")
+                && fs::remove_file(&path).is_ok()
+            {
+                changed = true;
             }
         }
     }
@@ -194,11 +213,21 @@ pub fn sync_vhosts() -> Result<usize, AppError> {
             &fastcgi_params,
         );
         let path = vhosts.join(format!("{}.conf", project.id));
+
+        // Compared before writing, so an unchanged project neither churns the
+        // file's mtime nor reports a change nginx would have to reload for.
+        if fs::read_to_string(&path).ok().as_deref() == Some(config.as_str()) {
+            continue;
+        }
         fs::write(&path, config)
             .map_err(|e| AppError::Io(format!("could not write {}: {e}", path.display())))?;
+        changed = true;
     }
 
-    Ok(current.len())
+    Ok(VhostSync {
+        active: current.len(),
+        changed,
+    })
 }
 
 /// Tells a running nginx to reload its config — picks up a project just
@@ -221,6 +250,7 @@ pub fn reload() -> Result<(), AppError> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
+        .hidden()
         .status()
         .map_err(|e| AppError::Io(format!("could not run nginx -s reload: {e}")))?;
 

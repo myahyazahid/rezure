@@ -20,6 +20,7 @@ use serde::Serialize;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
 use super::binaries;
+use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
 
 /// What kind of thing is holding the port, which decides what Rezure offers
@@ -70,6 +71,7 @@ impl PortHolder {
 fn listening_pid(port: u16) -> Option<u32> {
     let output = Command::new("netstat")
         .args(["-ano", "-p", "TCP"])
+        .hidden()
         .output()
         .ok()?;
     let text = String::from_utf8_lossy(&output.stdout);

@@ -82,10 +82,14 @@ pub fn remove_db_profile(id: String) -> Result<Vec<ProfileStatus>, AppError> {
 #[serde(rename_all = "camelCase")]
 pub struct SwitchResult {
     pub profiles: Vec<ProfileStatus>,
-    /// True when the server was running and came back up on the new
-    /// profile. False when it was stopped to begin with — the switch still
-    /// took, it just takes effect on the next start.
-    pub restarted: bool,
+    /// True when the server is up and serving the new profile.
+    pub running: bool,
+    /// Set when the profile switched but the server wouldn't start on it.
+    ///
+    /// Only reachable when nothing was running beforehand: if a server that
+    /// *was* running fails to come back, the whole switch is rolled back and
+    /// this returns an error instead.
+    pub start_error: Option<String>,
 }
 
 /// Points the one running server at a different datadir.
@@ -99,10 +103,16 @@ pub struct SwitchResult {
 /// 2. **Stop cleanly.** `ProcessService::stop` asks the server to shut down
 ///    and only force-kills if it won't — see its doc comment.
 /// 3. **Point and start.** The datadir, port and binary are all re-resolved
-///    from the now-active profile at spawn time.
-/// 4. **Roll back on failure.** If the new profile won't start, the previous
-///    one is made active again and restarted, so a failed switch leaves a
-///    working database rather than none. The error says both things.
+///    from the now-active profile at spawn time. The server is started even
+///    if it was stopped beforehand: picking a profile is the user saying they
+///    want to use that database, and leaving it down strands them on "the
+///    server isn't running" with a manual trip to Services as the only way on.
+/// 4. **Roll back on failure.** If the new profile won't start *and the user
+///    had a working server before*, the previous profile is made active again
+///    and restarted, so a failed switch leaves a database rather than none.
+///    When nothing was running to begin with there is nothing to restore, so
+///    the chosen profile stays selected and the start failure is reported on
+///    its own — undoing the user's choice there would help no one.
 #[tauri::command]
 pub async fn switch_db_profile(
     id: String,
@@ -130,15 +140,17 @@ pub async fn switch_db_profile(
 
         db_profiles::set_active(&id)?;
 
-        if !was_running {
-            return Ok(false);
-        }
-
         match service.start() {
-            Ok(_) => Ok(true),
+            Ok(_) => Ok((true, None)),
             Err(start_err) => {
-                // The new profile won't come up. Put the old one back and
-                // restart it, so the user isn't left with nothing running.
+                // Nothing was running, so there is no working database to
+                // restore — and the profile the user picked is still the one
+                // they want. Keep it and report why it wouldn't come up.
+                if !was_running {
+                    return Ok((false, Some(start_err.to_string())));
+                }
+
+                // They had a working database a moment ago. Put it back.
                 let restored = previous.as_ref().map(|p| p.name.clone());
                 if let Some(previous) = &previous {
                     let _ = db_profiles::set_active(&previous.id);
@@ -156,8 +168,10 @@ pub async fn switch_db_profile(
     .await
     .map_err(joined)?;
 
+    let (running, start_error) = switched?;
     Ok(SwitchResult {
         profiles: db_profiles::list(),
-        restarted: switched?,
+        running,
+        start_error,
     })
 }

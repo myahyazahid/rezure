@@ -20,6 +20,7 @@ use serde::Serialize;
 use super::binaries::{self, InstalledRuntime};
 use super::db_engine::{self, Engine, SERVER_EXE};
 use crate::config::profiles::{self, NewProfile, Profile, ProfileSource, ProfileStore};
+use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
 
 /// Where Rezure's own datadir lives — the seed profile points here, and it
@@ -265,6 +266,7 @@ fn server_exe_in(dir: &Path) -> Option<PathBuf> {
 fn identify_server(exe: &Path) -> Option<(Engine, String)> {
     let output = std::process::Command::new(exe)
         .arg("--version")
+        .hidden()
         .output()
         .ok()?;
     let text = String::from_utf8_lossy(&output.stdout).to_string();
@@ -623,6 +625,7 @@ fn dir_with_server(dir: &Path) -> Option<String> {
 fn server_version(exe: &Path) -> Option<String> {
     let output = std::process::Command::new(exe)
         .arg("--version")
+        .hidden()
         .output()
         .ok()?;
     let text = String::from_utf8_lossy(&output.stdout);

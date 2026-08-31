@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onActivated } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 
 const settingsStore = useSettingsStore()
 
-onMounted(() => {
+// `onActivated`, not `onMounted`: the view is kept alive, so it mounts once
+// and this is what runs on every return to the page. It fires on the first
+// mount too, so nothing is lost by the swap.
+onActivated(() => {
   settingsStore.fetchAll()
   settingsStore.fetchStoragePaths()
 })

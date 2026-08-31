@@ -10,8 +10,15 @@ export const useServicesStore = defineStore('services', () => {
 
   const runningCount = computed(() => services.value.filter((s) => s.status === 'running').length)
 
+  /** True while any service is mid start/stop/restart. Drives the busy
+   *  overlay: a bulk action leaves the window looking frozen otherwise,
+   *  because spawning nginx, php-cgi and mysqld takes real seconds. */
+  const busy = computed(() => pendingIds.value.size > 0)
+
   async function fetchAll() {
-    loading.value = true
+    // Spinner only on a first load — a refetch leaves the current rows up so
+    // the dashboard doesn't blank out on the way back to it.
+    loading.value = services.value.length === 0
     try {
       services.value = await invoke<ServiceInfo[]>('list_services')
     } finally {
@@ -77,6 +84,7 @@ export const useServicesStore = defineStore('services', () => {
     services,
     loading,
     runningCount,
+    busy,
     fetchAll,
     start,
     stop,

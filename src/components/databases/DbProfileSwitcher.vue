@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useDbProfilesStore } from '@/stores/dbProfiles'
+import { useServicesStore } from '@/stores/services'
+import { useDatabasesStore } from '@/stores/databases'
 import { ENGINE_LABEL, SOURCE_LABEL } from '@/types/dbProfile'
 import type { DbProfileStatus } from '@/types/dbProfile'
 import AddDbProfileModal from './AddDbProfileModal.vue'
 
 const store = useDbProfilesStore()
+const servicesStore = useServicesStore()
+const databasesStore = useDatabasesStore()
 
 const open = ref(false)
 const showAddModal = ref(false)
@@ -28,10 +32,18 @@ function describe(profile: DbProfileStatus) {
   return parts.join(' · ')
 }
 
+/**
+ * Switching points the server at a different data directory, which means
+ * stopping it — so both the running-service count in the sidebar and the
+ * schema list on this page describe the old server the moment it's done.
+ * Nothing polls either of them, so they're re-read here rather than left to
+ * go stale until the user happens to navigate away and back.
+ */
 async function choose(profile: DbProfileStatus) {
   if (profile.active || !profile.binaryAvailable) return
   open.value = false
   await store.switchTo(profile.id)
+  await Promise.all([servicesStore.fetchAll(), databasesStore.fetchAll()])
 }
 
 function openAddModal() {
@@ -53,12 +65,21 @@ onMounted(store.fetchAll)
     >
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
         <ellipse cx="12" cy="6" rx="8" ry="3" />
-        <path stroke-linecap="round" d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6" />
+        <path
+          stroke-linecap="round"
+          d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"
+        />
       </svg>
       <span class="max-w-[12rem] truncate">
         {{ store.switchingId ? 'Switching…' : activeLabel }}
       </span>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="h-3.5 w-3.5">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2.5"
+        class="h-3.5 w-3.5"
+      >
         <path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6" />
       </svg>
     </button>
@@ -118,7 +139,13 @@ onMounted(store.fetchAll)
         class="flex w-full items-center gap-2 border-t border-neutral-200 px-4 py-3 text-left text-sm font-semibold text-red-600 transition hover:bg-neutral-50 dark:border-neutral-700 dark:text-red-400 dark:hover:bg-neutral-800/60"
         @click="openAddModal"
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="h-4 w-4">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.5"
+          class="h-4 w-4"
+        >
           <path stroke-linecap="round" d="M12 5v14M5 12h14" />
         </svg>
         Add data directory

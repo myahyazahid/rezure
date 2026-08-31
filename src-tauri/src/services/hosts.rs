@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::projects::scan_projects;
+use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
 use crate::utils::powershell::quote_ps;
 
@@ -180,6 +181,9 @@ fn elevate_copy(staged: &Path, dest: &Path) -> Result<(), AppError> {
             "-Command",
             &elevation_launcher(&script_path),
         ])
+        // The UAC prompt this launcher raises is its own elevated window —
+        // hiding this console doesn't hide the consent dialog.
+        .hidden()
         .status()
         .map_err(|e| AppError::HostsUpdateFailed(e.to_string()))?;
 

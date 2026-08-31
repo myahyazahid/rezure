@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onActivated, ref } from 'vue'
 import { usePhpStore } from '@/stores/php'
 import { useBinariesStore } from '@/stores/binaries'
 import { useServicesStore } from '@/stores/services'
@@ -9,6 +9,7 @@ import RuntimeSwitchRow, {
 } from '@/components/services/RuntimeSwitchRow.vue'
 import InstallPhpVersionModal from '@/components/services/InstallPhpVersionModal.vue'
 import PhpPathLinkCard from '@/components/services/PhpPathLinkCard.vue'
+import BusyOverlay from '@/components/common/BusyOverlay.vue'
 
 const phpStore = usePhpStore()
 const binariesStore = useBinariesStore()
@@ -28,7 +29,8 @@ async function switchPhp(id: string) {
   if (result?.restarted) await servicesStore.fetchAll()
 }
 
-onMounted(() => {
+// Kept-alive view: fires on first mount and on every return to the page.
+onActivated(() => {
   composerStore.fetchStatus()
   phpStore.fetchDropInDir()
   phpStore.fetchPathStatus()
@@ -102,6 +104,7 @@ const composerVersions = computed<RuntimeVersionEntry[]>(() => [
         :installed-count="phpInstalledCount"
         :versions="phpVersions"
         :installing-id="phpStore.installingId"
+        :busy="phpStore.switching !== null"
         @select="switchPhp"
         @install="phpStore.install"
       />
@@ -167,5 +170,11 @@ const composerVersions = computed<RuntimeVersionEntry[]>(() => [
       Node.js and Python aren't available yet — Rezure doesn't bundle a portable runtime for either,
       so there's nothing installable to switch between.
     </p>
+
+    <BusyOverlay
+      :show="phpStore.switching !== null"
+      label="Switching PHP…"
+      :detail="`Re-pointing the PATH link and reloading the service onto ${phpStore.switching}.`"
+    />
   </section>
 </template>

@@ -36,7 +36,21 @@ onMounted(() => {
     <div class="flex min-h-0 flex-1">
       <AppSidebar />
       <main class="min-w-0 flex-1 overflow-y-auto px-6 py-5">
-        <RouterView />
+        <!--
+          Kept alive so switching pages is instant. Without this every route
+          unmounts on the way out and remounts on the way back, which re-runs
+          its `onMounted` fetch — and those fetches shell out to real binaries
+          (the MariaDB client, `php -r`), so the page you just left came back
+          blank for a few hundred milliseconds every single time.
+
+          Views refresh on `onActivated` instead, which repaints the cached
+          screen immediately and updates it underneath.
+        -->
+        <RouterView v-slot="{ Component }">
+          <KeepAlive>
+            <component :is="Component" />
+          </KeepAlive>
+        </RouterView>
       </main>
     </div>
   </div>

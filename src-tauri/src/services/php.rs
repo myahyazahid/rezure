@@ -32,6 +32,7 @@ use tauri::AppHandle;
 use super::binaries::{self, ArchiveInstall, InstalledRuntime};
 use super::php_catalog;
 use super::php_ini;
+use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
 
 const FAMILY: &str = "php";
@@ -244,6 +245,7 @@ fn locate_php_root(source: &Path) -> Option<PathBuf> {
 fn read_php_version(exe: &Path) -> Result<String, AppError> {
     let output = Command::new(exe)
         .args(["-r", "echo PHP_VERSION;"])
+        .hidden()
         .output()
         .map_err(|e| AppError::Io(format!("could not run {}: {e}", exe.display())))?;
 

@@ -17,6 +17,7 @@ use serde::Serialize;
 
 use super::php_ini;
 use super::projects::www_root;
+use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -277,6 +278,7 @@ async fn scaffold_laravel(target: &Path) -> Result<(), AppError> {
             .arg("--prefer-dist")
             .arg("--no-interaction")
             .stdin(Stdio::null())
+            .hidden()
             .output()
             .map_err(|e| AppError::ScaffoldFailed(format!("could not run composer: {e}")))?;
 

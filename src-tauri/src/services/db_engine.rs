@@ -25,6 +25,7 @@ use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
+use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
 
 /// The server binary. Same name on both engines — see the module docs.
@@ -117,11 +118,13 @@ impl Engine {
             Engine::MariaDb => Command::new(bin_dir.join("mariadb-install-db.exe"))
                 .current_dir(bin_dir)
                 .arg(format!("--datadir={}", data_dir.display()))
+                .hidden()
                 .output(),
             Engine::MySql => Command::new(server_exe)
                 .current_dir(bin_dir)
                 .arg("--initialize-insecure")
                 .arg(format!("--datadir={}", data_dir.display()))
+                .hidden()
                 .output(),
         }
         .map_err(|e| AppError::ProcessBootstrapFailed {

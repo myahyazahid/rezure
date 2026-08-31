@@ -40,7 +40,10 @@ export interface DetectedDatadir {
 
 export interface SwitchResult {
   profiles: DbProfileStatus[]
-  restarted: boolean
+  /** Whether the server is up and serving the newly selected profile. */
+  running: boolean
+  /** Set when the profile switched but the server wouldn't start on it. */
+  startError: string | null
 }
 
 export const ENGINE_LABEL: Record<DbEngine, string> = {
