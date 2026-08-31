@@ -21,6 +21,39 @@ pub struct Settings {
     /// Mirrors `services::php`'s in-memory active version so it survives a
     /// restart. `None` until the user has switched at least once.
     pub active_php_version: Option<String>,
+    /// Registers Rezure with Windows to launch at sign-in, via
+    /// `tauri-plugin-autostart`. Kept here (rather than only asking the OS)
+    /// so the Settings toggle reflects intent even if `lib.rs`'s startup
+    /// reconciliation hasn't run yet.
+    #[serde(default)]
+    pub start_with_windows: bool,
+    /// When true, closing the main window hides it instead of quitting —
+    /// services keep running and the app is reachable from the tray icon.
+    #[serde(default)]
+    pub keep_in_tray_on_close: bool,
+    /// Shows an OS notification the moment a running service is found to
+    /// have exited on its own (see `services::process::ProcessService`'s
+    /// crash sink).
+    #[serde(default)]
+    pub notify_on_crash: bool,
+    /// Suffix (no leading dot) appended to a project's folder/link name to
+    /// build its local domain — `"test"`, `"local"` or `"dev"`. Only affects
+    /// domains resolved from here on; a project already served under the
+    /// previous suffix keeps its existing hosts entry and vhost until it's
+    /// resynced.
+    #[serde(default = "default_domain_suffix")]
+    pub domain_suffix: String,
+    /// When true, `lib.rs`'s startup runs one background hosts-file sync so
+    /// new project domains resolve without a manual "Sync hosts" click —
+    /// still at most one UAC prompt per session, never mid-workflow. See
+    /// `services::hosts`'s module doc for why sync is otherwise never
+    /// automatic.
+    #[serde(default)]
+    pub auto_write_hosts: bool,
+}
+
+fn default_domain_suffix() -> String {
+    "test".to_string()
 }
 
 impl Default for Settings {
@@ -29,6 +62,11 @@ impl Default for Settings {
             default_port: 80,
             share_usage_data: false,
             active_php_version: None,
+            start_with_windows: false,
+            keep_in_tray_on_close: false,
+            notify_on_crash: false,
+            domain_suffix: default_domain_suffix(),
+            auto_write_hosts: false,
         }
     }
 }
@@ -112,6 +150,27 @@ mod tests {
         assert_eq!(settings.default_port, 80);
         assert!(!settings.share_usage_data);
         assert_eq!(settings.active_php_version, None);
+        assert!(!settings.start_with_windows);
+        assert!(!settings.keep_in_tray_on_close);
+        assert!(!settings.notify_on_crash);
+        assert_eq!(settings.domain_suffix, "test");
+        assert!(!settings.auto_write_hosts);
+    }
+
+    /// A `settings.json` written before these fields existed must still load
+    /// cleanly, picking up their defaults rather than failing to parse.
+    #[test]
+    fn settings_file_missing_new_fields_falls_back_to_their_defaults() {
+        let path = temp_path("legacy");
+        std::fs::write(
+            &path,
+            r#"{"defaultPort":80,"shareUsageData":false,"activePhpVersion":null}"#,
+        )
+        .unwrap();
+        let settings = load_from(&path);
+        assert!(!settings.start_with_windows);
+        assert_eq!(settings.domain_suffix, "test");
+        std::fs::remove_file(&path).unwrap();
     }
 
     #[test]
@@ -130,12 +189,22 @@ mod tests {
             default_port: 8080,
             share_usage_data: true,
             active_php_version: Some("8.3.33".to_string()),
+            start_with_windows: true,
+            keep_in_tray_on_close: true,
+            notify_on_crash: true,
+            domain_suffix: "local".to_string(),
+            auto_write_hosts: true,
         };
         save_to(&path, &settings).unwrap();
         let loaded = load_from(&path);
         assert_eq!(loaded.default_port, 8080);
         assert!(loaded.share_usage_data);
         assert_eq!(loaded.active_php_version.as_deref(), Some("8.3.33"));
+        assert!(loaded.start_with_windows);
+        assert!(loaded.keep_in_tray_on_close);
+        assert!(loaded.notify_on_crash);
+        assert_eq!(loaded.domain_suffix, "local");
+        assert!(loaded.auto_write_hosts);
         std::fs::remove_file(&path).unwrap();
     }
 }

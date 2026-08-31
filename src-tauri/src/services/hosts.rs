@@ -6,9 +6,12 @@
 //! other line — including anything the user added themselves — is
 //! preserved byte-for-byte. Writing to the real file needs admin rights,
 //! which Windows can only grant through an interactive UAC prompt a human
-//! has to click through; this is deliberately never triggered
-//! automatically (e.g. as a side effect of listing projects) — only from
-//! an explicit `sync_hosts` command the user chooses to run.
+//! has to click through; this is deliberately never triggered as a side
+//! effect of routine actions like listing projects — only from an explicit
+//! `sync_hosts` command the user chooses to run, or (opt-in, at most once
+//! per app launch) `lib.rs`'s startup when `Settings.auto_write_hosts` is
+//! on, so a session's worth of new projects can still resolve without a
+//! manual sync every time.
 
 use std::fs;
 use std::path::{Path, PathBuf};

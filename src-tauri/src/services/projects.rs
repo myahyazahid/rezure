@@ -6,6 +6,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -14,6 +15,26 @@ use super::hosts;
 use crate::config::links;
 use crate::db::projects::{ProjectInfo, ProjectKind};
 use crate::utils::error::AppError;
+
+fn domain_suffix_cell() -> &'static Mutex<String> {
+    static SUFFIX: OnceLock<Mutex<String>> = OnceLock::new();
+    SUFFIX.get_or_init(|| Mutex::new("test".to_string()))
+}
+
+/// The suffix (no leading dot) new domains are built with — process-wide
+/// in-memory state, the same pattern `services::php` uses for its active
+/// version: cheap to read on every scan rather than re-reading
+/// `Settings.domain_suffix` from disk each time (see `CLAUDE.md`'s "config
+/// is a single source of truth" rule). `commands::settings::update_settings`
+/// and `lib.rs`'s startup restore are what keep this in sync with the
+/// persisted setting.
+pub fn domain_suffix() -> String {
+    domain_suffix_cell().lock().unwrap().clone()
+}
+
+pub fn set_domain_suffix(suffix: &str) {
+    *domain_suffix_cell().lock().unwrap() = suffix.to_string();
+}
 
 /// `%USERPROFILE%\rezure\www` — where Rezure looks for projects. A fresh
 /// install gets an empty folder created here rather than an error, so
@@ -112,7 +133,7 @@ fn scan_www() -> Result<Vec<ProjectInfo>, AppError> {
             continue;
         }
 
-        let domain = format!("{folder_name}.test");
+        let domain = format!("{folder_name}.{}", domain_suffix());
         projects.push(ProjectInfo {
             id: folder_name.to_string(),
             name: folder_name.to_string(),
@@ -185,24 +206,25 @@ fn reject_dangerous_root(path: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Picks a free `.test` domain for `name`, appending `-2`, `-3`… only if
-/// the obvious one is taken.
+/// Picks a free domain for `name` under the current `domain_suffix()`,
+/// appending `-2`, `-3`… only if the obvious one is taken.
 fn free_domain(base_slug: &str, taken: &[String]) -> (String, bool) {
+    let suffix = domain_suffix();
     let is_free = |candidate: &str| !taken.iter().any(|d| d.eq_ignore_ascii_case(candidate));
 
-    let first = format!("{base_slug}.test");
+    let first = format!("{base_slug}.{suffix}");
     if is_free(&first) {
         return (first, false);
     }
     for n in 2..100 {
-        let candidate = format!("{base_slug}-{n}.test");
+        let candidate = format!("{base_slug}-{n}.{suffix}");
         if is_free(&candidate) {
             return (candidate, true);
         }
     }
     // Practically unreachable; a suffixed fallback still beats a clash.
     (
-        format!("{base_slug}-{}.test", links::id_for(base_slug, "x")),
+        format!("{base_slug}-{}.{suffix}", links::id_for(base_slug, "x")),
         true,
     )
 }

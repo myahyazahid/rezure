@@ -13,6 +13,11 @@ export const useSettingsStore = defineStore('settings', () => {
   const defaultPort = ref(80)
   const shareUsageData = ref(false)
   const activePhpVersion = ref<string | null>(null)
+  const startWithWindows = ref(false)
+  const keepInTrayOnClose = ref(false)
+  const notifyOnCrash = ref(false)
+  const domainSuffix = ref('test')
+  const autoWriteHosts = ref(false)
 
   const storagePaths = ref<StoragePaths | null>(null)
   const error = ref<string | null>(null)
@@ -22,6 +27,11 @@ export const useSettingsStore = defineStore('settings', () => {
     defaultPort.value = settings.defaultPort
     shareUsageData.value = settings.shareUsageData
     activePhpVersion.value = settings.activePhpVersion
+    startWithWindows.value = settings.startWithWindows
+    keepInTrayOnClose.value = settings.keepInTrayOnClose
+    notifyOnCrash.value = settings.notifyOnCrash
+    domainSuffix.value = settings.domainSuffix
+    autoWriteHosts.value = settings.autoWriteHosts
   }
 
   async function fetchAll() {
@@ -58,11 +68,21 @@ export const useSettingsStore = defineStore('settings', () => {
 
   const setDefaultPort = (port: number) => update({ defaultPort: port })
   const setShareUsageData = (share: boolean) => update({ shareUsageData: share })
+  const setStartWithWindows = (enabled: boolean) => update({ startWithWindows: enabled })
+  const setKeepInTrayOnClose = (enabled: boolean) => update({ keepInTrayOnClose: enabled })
+  const setNotifyOnCrash = (enabled: boolean) => update({ notifyOnCrash: enabled })
+  const setDomainSuffix = (suffix: string) => update({ domainSuffix: suffix })
+  const setAutoWriteHosts = (enabled: boolean) => update({ autoWriteHosts: enabled })
 
   return {
     defaultPort,
     shareUsageData,
     activePhpVersion,
+    startWithWindows,
+    keepInTrayOnClose,
+    notifyOnCrash,
+    domainSuffix,
+    autoWriteHosts,
     storagePaths,
     error,
     saving,
@@ -70,5 +90,10 @@ export const useSettingsStore = defineStore('settings', () => {
     fetchStoragePaths,
     setDefaultPort,
     setShareUsageData,
+    setStartWithWindows,
+    setKeepInTrayOnClose,
+    setNotifyOnCrash,
+    setDomainSuffix,
+    setAutoWriteHosts,
   }
 })

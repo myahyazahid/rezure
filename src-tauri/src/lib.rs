@@ -4,13 +4,30 @@ mod db;
 mod services;
 mod utils;
 
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::Manager;
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
+
+/// Restores and focuses the main window — shared by the tray menu's "Show"
+/// item and a left-click on the tray icon itself.
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            None,
+        ))
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             commands::services::list_services,
             commands::services::start_service,
@@ -97,7 +114,92 @@ pub fn run() {
                     log::warn!("failed to re-point the PHP PATH link on startup: {err}");
                 }
             }
+            services::projects::set_domain_suffix(&settings.domain_suffix);
+            // Reconciles the persisted flag against the OS's actual autostart
+            // registration — the two can drift if the user removes the
+            // startup entry from Windows Settings directly. Best-effort,
+            // same reasoning as the PHP-path re-point above: this must never
+            // block startup.
+            let autolaunch = app.autolaunch();
+            match autolaunch.is_enabled() {
+                Ok(enabled) if enabled != settings.start_with_windows => {
+                    let result = if settings.start_with_windows {
+                        autolaunch.enable()
+                    } else {
+                        autolaunch.disable()
+                    };
+                    if let Err(err) = result {
+                        log::warn!("failed to reconcile autostart on startup: {err}");
+                    }
+                }
+                Ok(_) => {}
+                Err(err) => log::warn!("failed to read the current autostart state: {err}"),
+            }
+
+            // Opt-in, at most once per session — see `Settings::auto_write_hosts`'s
+            // doc comment and `services::hosts`'s module doc for why this is
+            // the one place sync ever runs without an explicit user action.
+            if settings.auto_write_hosts {
+                tauri::async_runtime::spawn(async {
+                    match tokio::task::spawn_blocking(services::hosts::sync_hosts_entries).await {
+                        Ok(Ok(_)) => {}
+                        Ok(Err(err)) => log::warn!("startup hosts sync failed: {err}"),
+                        Err(err) => log::warn!("startup hosts sync task panicked: {err}"),
+                    }
+                });
+            }
+
             app.manage(config::settings::SettingsState::new(settings));
+
+            let show_item = MenuItem::with_id(app, "show", "Show Rezure", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let tray_menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+
+            TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => show_main_window(app),
+                    "quit" => {
+                        if let Some(manager) = app.try_state::<services::ServiceManager>() {
+                            manager.stop_all();
+                        }
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        show_main_window(tray.app_handle());
+                    }
+                })
+                .build(app)?;
+
+            // Only intercepts the close when `keep_in_tray_on_close` is on —
+            // otherwise the request falls through unchanged to the existing
+            // `RunEvent::ExitRequested` handler below, which still runs
+            // `stop_all()` on a normal quit.
+            if let Some(window) = app.get_webview_window("main") {
+                let window_handle = window.clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        let keep_in_tray = window_handle
+                            .app_handle()
+                            .try_state::<config::settings::SettingsState>()
+                            .is_some_and(|s| s.0.lock().unwrap().keep_in_tray_on_close);
+                        if keep_in_tray {
+                            api.prevent_close();
+                            let _ = window_handle.hide();
+                        }
+                    }
+                });
+            }
 
             match db::init() {
                 Ok(conn) => {

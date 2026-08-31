@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use super::binaries;
 use super::database;
@@ -53,6 +53,18 @@ fn no_op_sink() -> LogSink {
     Arc::new(|_id, _stream, _line| {})
 }
 
+/// Called with a service's id when [`ProcessService::poll_pid`] finds its
+/// tracked child gone without `stop()`/`force_stop()` having taken it first
+/// — the one case that can only mean the process exited on its own. Same
+/// callback shape as [`LogSink`] and for the same reason: `ProcessService`
+/// stays constructible (and testable) without a live `AppHandle`, with
+/// `real_services` the only place that wires it to a real notification.
+pub type CrashSink = Arc<dyn Fn(&str) + Send + Sync>;
+
+fn no_op_crash_sink() -> CrashSink {
+    Arc::new(|_id| {})
+}
+
 /// Per-service launch recipe, applied once the binary is confirmed installed.
 enum Launch {
     /// Runs with Rezure's own generated config (`services::vhosts`), which
@@ -81,6 +93,7 @@ pub struct ProcessService {
     port: u16,
     launch: Launch,
     log_sink: LogSink,
+    crash_sink: CrashSink,
     child: Mutex<Option<Child>>,
     sys: Mutex<System>,
     cpu_history: Mutex<Vec<u8>>,
@@ -119,6 +132,7 @@ impl ProcessService {
             port: 80,
             launch: Launch::Nginx,
             log_sink,
+            crash_sink: no_op_crash_sink(),
             child: Mutex::new(None),
             sys: Mutex::new(System::new()),
             cpu_history: Mutex::new(Vec::new()),
@@ -136,6 +150,7 @@ impl ProcessService {
             port: PHP_FASTCGI_PORT,
             launch: Launch::Php,
             log_sink,
+            crash_sink: no_op_crash_sink(),
             child: Mutex::new(None),
             sys: Mutex::new(System::new()),
             cpu_history: Mutex::new(Vec::new()),
@@ -156,10 +171,21 @@ impl ProcessService {
             port: 3306,
             launch: Launch::Database,
             log_sink,
+            crash_sink: no_op_crash_sink(),
             child: Mutex::new(None),
             sys: Mutex::new(System::new()),
             cpu_history: Mutex::new(Vec::new()),
         })
+    }
+
+    /// Attaches the callback fired when this service is found to have
+    /// crashed. A separate step from construction (rather than another
+    /// constructor parameter) so the sixteen existing test call sites that
+    /// only care about `log_sink` don't all need updating for a callback
+    /// they never exercise.
+    pub fn with_crash_sink(mut self, crash_sink: CrashSink) -> Self {
+        self.crash_sink = crash_sink;
+        self
     }
 
     /// The version shown on the service card — for PHP and the database,
@@ -324,20 +350,27 @@ impl ProcessService {
     }
 
     /// Checks whether the tracked child is still alive, reaping it (and
-    /// returning `None`) if it has exited — whether from a `stop()` or a
-    /// crash, `std::process` can't tell the difference after the fact.
+    /// returning `None`) if it has exited.
+    ///
+    /// `stop()`/`force_stop()` always take the child out of this `Mutex`
+    /// themselves before waiting on it, so by the time this can observe
+    /// `try_wait()` reporting an exit, the process was never handed to
+    /// either of them — the one way that happens is the process dying on
+    /// its own, which is exactly what `crash_sink` is for.
     fn poll_pid(&self) -> Option<u32> {
         let mut child_guard = self.child.lock().unwrap();
-        let still_running = child_guard
-            .as_mut()
-            .map(|child| matches!(child.try_wait(), Ok(None)))
-            .unwrap_or(false);
-
-        if still_running {
-            child_guard.as_ref().map(|child| child.id())
-        } else {
-            *child_guard = None;
-            None
+        match child_guard.as_mut().map(|child| child.try_wait()) {
+            Some(Ok(None)) => child_guard.as_ref().map(|child| child.id()),
+            Some(Ok(Some(_status))) => {
+                *child_guard = None;
+                drop(child_guard);
+                (self.crash_sink)(self.id);
+                None
+            }
+            Some(Err(_)) | None => {
+                *child_guard = None;
+                None
+            }
         }
     }
 
@@ -739,21 +772,63 @@ pub(super) fn kill_process_tree(pid: u32) {
 /// ids drift apart, which `tests::every_service_matches_the_manifest`
 /// catches at build time.
 pub fn real_services(app: AppHandle) -> ServiceManager {
+    let log_app = app.clone();
     let sink: LogSink = Arc::new(move |service_id, stream, line| {
         let payload = ServiceLogLine {
             service_id: service_id.to_string(),
             stream,
             line: line.to_string(),
         };
-        if let Err(err) = app.emit(LOG_EVENT, payload) {
+        if let Err(err) = log_app.emit(LOG_EVENT, payload) {
             log::warn!("failed to emit service log line: {err}");
         }
     });
 
+    let crash_sink: CrashSink = Arc::new(move |service_id| {
+        // Looked up lazily (rather than at construction) since
+        // `SettingsState` isn't managed yet at the point `real_services` is
+        // called from `lib.rs`'s `setup()` — by the time a crash can
+        // actually happen the app is fully up.
+        let Some(settings) = app.try_state::<crate::config::settings::SettingsState>() else {
+            return;
+        };
+        if !settings.0.lock().unwrap().notify_on_crash {
+            return;
+        }
+        let name = match service_id {
+            "nginx" => "Nginx",
+            "php" => "PHP",
+            "mariadb" => "Database",
+            other => other,
+        };
+        use tauri_plugin_notification::NotificationExt;
+        if let Err(err) = app
+            .notification()
+            .builder()
+            .title("Rezure")
+            .body(format!("{name} stopped unexpectedly"))
+            .show()
+        {
+            log::warn!("failed to show crash notification for {service_id}: {err}");
+        }
+    });
+
     let services: Vec<ServiceHandle> = vec![
-        Arc::new(ProcessService::nginx(sink.clone()).expect("nginx must be in binaries::MANIFEST")),
-        Arc::new(ProcessService::php(sink.clone()).expect("php must be in binaries::MANIFEST")),
-        Arc::new(ProcessService::mariadb(sink).expect("mariadb must be in binaries::MANIFEST")),
+        Arc::new(
+            ProcessService::nginx(sink.clone())
+                .expect("nginx must be in binaries::MANIFEST")
+                .with_crash_sink(crash_sink.clone()),
+        ),
+        Arc::new(
+            ProcessService::php(sink.clone())
+                .expect("php must be in binaries::MANIFEST")
+                .with_crash_sink(crash_sink.clone()),
+        ),
+        Arc::new(
+            ProcessService::mariadb(sink)
+                .expect("mariadb must be in binaries::MANIFEST")
+                .with_crash_sink(crash_sink),
+        ),
     ];
     ServiceManager::new(services)
 }
