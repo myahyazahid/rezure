@@ -153,6 +153,35 @@ pub fn run() {
                 }
             }
 
+            // Every installed version, not just the active one, and
+            // deliberately *outside* the one-time gate above.
+            //
+            // Each PHP folder carries its own `php.ini` holding an absolute
+            // `extension_dir`, so moving the folder leaves the path inside it
+            // aimed at where it used to be — and PHP answers that by loading no
+            // extensions at all. The user only discovers it when they switch to
+            // that version and `php -v` prints a wall of warnings.
+            //
+            // Ungated because this reads a handful of small files and shells
+            // out to nothing, and because an install that already ran the gated
+            // repairs on an earlier build would otherwise never be fixed.
+            {
+                let mut repaired = 0;
+                for runtime in services::php::installed() {
+                    match services::php_ini::repair_extension_dir(&runtime.dir) {
+                        Ok(true) => repaired += 1,
+                        Ok(false) => {}
+                        Err(err) => log::warn!(
+                            "could not repair php.ini in {}: {err}",
+                            runtime.dir.display()
+                        ),
+                    }
+                }
+                if repaired > 0 {
+                    log::info!("repaired extension_dir in {repaired} php.ini file(s)");
+                }
+            }
+
             // Before anything else reads installed-binary state: copies
             // Nginx/PHP in from the installer's bundled resources if this is
             // a fresh install that hasn't downloaded them itself yet — see
