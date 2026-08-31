@@ -37,6 +37,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use super::php;
+use super::php_ini;
 use crate::utils::error::AppError;
 use crate::utils::powershell::{quote_ps, run};
 
@@ -201,6 +202,17 @@ pub fn sync() -> Result<(), AppError> {
         .parent()
         .ok_or_else(|| AppError::Io("the active PHP has no parent directory".to_string()))?
         .to_path_buf();
+
+    // Behind the junction, PATH resolves `php` to this folder directly —
+    // Rezure's `-c` ini never enters the picture — and PHP reads only the
+    // ini sitting next to `php.exe`. Versions installed before Rezure
+    // wrote one still have none, so this heals them on the switch that
+    // first exposes them, ahead of the up-to-date check below.
+    match php_ini::ensure_cli_php_ini(&target) {
+        Ok(Some(path)) => log::info!("wrote {}", path.display()),
+        Ok(None) => {}
+        Err(err) => log::warn!("could not write php.ini in {}: {err}", target.display()),
+    }
 
     if junction_target(&link)
         .is_some_and(|current| same_dir(&current, &target.display().to_string()))

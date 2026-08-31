@@ -31,6 +31,7 @@ use tauri::AppHandle;
 
 use super::binaries::{self, ArchiveInstall, InstalledRuntime};
 use super::php_catalog;
+use super::php_ini;
 use crate::utils::error::AppError;
 
 const FAMILY: &str = "php";
@@ -147,6 +148,7 @@ pub async fn install(app: &AppHandle, version: &str) -> Result<Vec<PhpVersionSta
     let dest_dir = binaries::install_root()?
         .join(FAMILY)
         .join(&release.version);
+    let php_dir = dest_dir.clone();
 
     binaries::install_archive(
         app,
@@ -161,6 +163,7 @@ pub async fn install(app: &AppHandle, version: &str) -> Result<Vec<PhpVersionSta
     )
     .await?;
 
+    write_cli_php_ini(&php_dir);
     Ok(list())
 }
 
@@ -203,7 +206,25 @@ fn add_from_folder_blocking(source: &Path) -> Result<(), AppError> {
         let _ = std::fs::remove_dir_all(&dest);
         return Err(err);
     }
+
+    write_cli_php_ini(&dest);
     Ok(())
+}
+
+/// Gives a freshly installed version the `php.ini` the official zip leaves
+/// out, so `php` from a terminal has its extensions from the first run —
+/// without it, PHP loads none at all and Laravel reports "could not find
+/// driver" the moment a project talks to MySQL.
+///
+/// Best-effort: an install that produced a working `php.exe` is a
+/// successful install, and [`super::php_path::sync`] writes the ini again
+/// on the next switch if this didn't take.
+fn write_cli_php_ini(php_dir: &Path) {
+    match php_ini::ensure_cli_php_ini(php_dir) {
+        Ok(Some(path)) => log::info!("wrote {}", path.display()),
+        Ok(None) => {}
+        Err(err) => log::warn!("could not write php.ini in {}: {err}", php_dir.display()),
+    }
 }
 
 fn locate_php_root(source: &Path) -> Option<PathBuf> {
