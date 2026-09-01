@@ -427,6 +427,39 @@ mod tests {
             );
         }
 
+        // Each PHP folder's own `php.ini` holds an absolute `extension_dir`,
+        // so the move left them naming a folder that is no longer there — and
+        // PHP responds by loading no extensions at all.
+        for runtime in crate::services::php::installed() {
+            let repaired = crate::services::php_ini::repair_extension_dir(&runtime.dir)
+                .expect("php.ini must be repairable");
+            println!("php {} ini repaired={repaired}", runtime.version);
+
+            let ini = runtime.dir.join("php.ini");
+            if let Ok(content) = std::fs::read_to_string(&ini) {
+                for line in content.lines() {
+                    let trimmed = line.trim_start();
+                    if trimmed.starts_with(';') || !trimmed.starts_with("extension_dir") {
+                        continue;
+                    }
+                    let value = trimmed
+                        .split_once('=')
+                        .map(|(_, v)| v.trim().trim_matches('"').to_string())
+                        .unwrap_or_default();
+                    // An `ext` folder can legitimately be absent from a build
+                    // that ships no extensions; what must never happen is the
+                    // ini naming a directory that isn't there.
+                    if runtime.dir.join("ext").is_dir() {
+                        assert!(
+                            Path::new(&value).is_dir(),
+                            "php {} names an extension_dir that does not exist: {value}",
+                            runtime.version
+                        );
+                    }
+                }
+            }
+        }
+
         // The failure this whole module exists to prevent: a profile naming a
         // datadir that isn't there reads as "brand new" to `needs_bootstrap`,
         // which then initialises an empty one over the top.

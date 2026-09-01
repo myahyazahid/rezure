@@ -156,19 +156,25 @@ pub fn ensure_php_ini(php_exe: &Path) -> Result<PathBuf, AppError> {
 
 /// Writes `php.ini` into a PHP install folder, so the `php` a user types
 /// into their own terminal loads the same extensions Rezure's own
-/// processes get. Returns the path when one was written, or `None` when
-/// the install already had an ini.
+/// processes get. Returns the path when one was written or repaired, and
+/// `None` when the install's ini was already correct.
 ///
-/// Only written when missing, never overwritten: this file sits in a
-/// folder the user can open, and a hand-tuned ini (a raised
-/// `memory_limit`, an extra extension, Xdebug) is theirs to keep. Unlike
-/// the `-c` copy there's no staleness to correct — this one lives beside
-/// the very `php.exe` it configures, so its `extension_dir` can't drift
-/// onto another version.
+/// Never overwritten wholesale: this file sits in a folder the user can open,
+/// and a hand-tuned ini (a raised `memory_limit`, an extra extension, Xdebug)
+/// is theirs to keep. Only `extension_dir` is corrected, by
+/// [`repair_extension_dir`].
+///
+/// That correction exists because the obvious assumption turned out to be
+/// wrong. This ini sits beside the very `php.exe` it configures, so its
+/// `extension_dir` looks like it cannot drift — but the value is *absolute*,
+/// and moving the install folder carries the file along while leaving the path
+/// inside it pointing at where the folder used to be. PHP answers that by
+/// loading no extensions at all.
 pub fn ensure_cli_php_ini(php_dir: &Path) -> Result<Option<PathBuf>, AppError> {
     let ini_path = php_dir.join("php.ini");
     if ini_path.exists() {
-        return Ok(None);
+        // Present, but not necessarily still correct — see below.
+        return repair_extension_dir(php_dir).map(|repaired| repaired.then_some(ini_path));
     }
 
     let tmp = ensure_tmp_dir()?;
@@ -178,9 +184,154 @@ pub fn ensure_cli_php_ini(php_dir: &Path) -> Result<Option<PathBuf>, AppError> {
     Ok(Some(ini_path))
 }
 
+/// Reads the directory an existing ini's `extension_dir` names, if it has one.
+fn declared_extension_dir(ini: &str) -> Option<&str> {
+    ini.lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with(';'))
+        .find_map(|line| {
+            let value = line.strip_prefix("extension_dir")?.trim_start();
+            let value = value.strip_prefix('=')?.trim();
+            Some(value.trim_matches('"').trim())
+        })
+}
+
+/// Points a stale `extension_dir` back at the DLLs it was meant to name.
+///
+/// This ini lives *inside* the version folder it configures, so moving that
+/// folder carries the file along with an absolute path baked into it. PHP then
+/// loads no extensions at all — `curl`, `mbstring` and `pdo_mysql` simply
+/// vanish, and every startup warning names a directory that isn't there.
+///
+/// Only that one directive is rewritten. The rest of the file may well be the
+/// user's own, and [`ensure_cli_php_ini`] deliberately never clobbers it.
+///
+/// A relative value is repaired too: PHP resolves one against the *working
+/// directory* of whatever invoked it, so a bare `ext` breaks the moment
+/// `php artisan` is run from a project folder — the exact case this ini exists
+/// to serve.
+pub fn repair_extension_dir(php_dir: &Path) -> Result<bool, AppError> {
+    let ini_path = php_dir.join("php.ini");
+    let Ok(existing) = fs::read_to_string(&ini_path) else {
+        return Ok(false);
+    };
+
+    let correct = extension_dir(php_dir);
+    // Nothing to point at — a half-installed version. Leave it alone rather
+    // than writing a path that is just as wrong in a different way.
+    if !correct.is_dir() {
+        return Ok(false);
+    }
+
+    let Some(declared) = declared_extension_dir(&existing) else {
+        return Ok(false);
+    };
+    let declared_path = Path::new(declared);
+    if declared_path.is_absolute() && declared_path.is_dir() {
+        return Ok(false);
+    }
+
+    let replacement = format!("extension_dir = \"{}\"", ini_value(&correct));
+    let repaired = existing
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim_start();
+            if !trimmed.starts_with(';') && trimmed.starts_with("extension_dir") {
+                replacement.as_str()
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    fs::write(&ini_path, format!("{repaired}\n"))
+        .map_err(|e| AppError::Io(format!("could not write {}: {e}", ini_path.display())))?;
+
+    log::info!(
+        "repaired extension_dir in {}: {declared} -> {}",
+        ini_path.display(),
+        ini_value(&correct)
+    );
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A PHP folder with an `ext/` directory and the ini content given.
+    fn fake_php_dir(label: &str, ini: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "rezure-test-inirepair-{}-{label}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("ext")).unwrap();
+        fs::write(dir.join("php.ini"), ini).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_stale_extension_dir_is_repointed_at_the_real_ext_folder() {
+        let dir = fake_php_dir(
+            "stale",
+            "extension_dir = \"C:/gone/away/ext\"\nextension=curl\nmemory_limit = 256M\n",
+        );
+
+        assert!(repair_extension_dir(&dir).unwrap(), "must report a repair");
+
+        let content = fs::read_to_string(dir.join("php.ini")).unwrap();
+        assert!(content.contains(&ini_value(&dir.join("ext"))));
+        assert!(!content.contains("C:/gone/away/ext"));
+        // Everything else the file said has to survive.
+        assert!(content.contains("extension=curl"));
+        assert!(content.contains("memory_limit = 256M"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_relative_extension_dir_is_made_absolute() {
+        // PHP resolves a relative one against the caller's working directory,
+        // so `php artisan` from a project folder would load nothing.
+        let dir = fake_php_dir("relative", "extension_dir = \"ext\"\n");
+        assert!(repair_extension_dir(&dir).unwrap());
+        assert!(fs::read_to_string(dir.join("php.ini"))
+            .unwrap()
+            .contains(&ini_value(&dir.join("ext"))));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_correct_extension_dir_is_left_untouched() {
+        let dir = fake_php_dir("ok", "placeholder\n");
+        let good = format!(
+            "extension_dir = \"{}\"\nextension=curl\n",
+            ini_value(&dir.join("ext"))
+        );
+        fs::write(dir.join("php.ini"), &good).unwrap();
+
+        assert!(!repair_extension_dir(&dir).unwrap(), "nothing to repair");
+        assert_eq!(fs::read_to_string(dir.join("php.ini")).unwrap(), good);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_commented_out_extension_dir_is_not_treated_as_the_setting() {
+        let dir = fake_php_dir("commented", "");
+        let ini = format!(
+            ";extension_dir = \"C:/gone/ext\"\nextension_dir = \"{}\"\n",
+            ini_value(&dir.join("ext"))
+        );
+        fs::write(dir.join("php.ini"), &ini).unwrap();
+
+        assert!(!repair_extension_dir(&dir).unwrap());
+        assert_eq!(fs::read_to_string(dir.join("php.ini")).unwrap(), ini);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn ensure_php_ini_enables_every_required_extension() {
