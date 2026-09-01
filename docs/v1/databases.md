@@ -12,8 +12,8 @@ Rezure runs its **own** MariaDB server with its own data directory:
 
 | | |
 |---|---|
-| Binary | `%LOCALAPPDATA%\Rezure\bin\mariadb\<version>\...\bin\mariadbd.exe` |
-| Data directory | `%LOCALAPPDATA%\Rezure\data\mariadb\data` |
+| Binary | `C:\rezure\bin\mariadb\<version>\...\bin\mariadbd.exe` |
+| Data directory | `C:\rezure\data\mariadb\data` |
 | Bootstrapped by | `mariadb-install-db`, on first start |
 
 It is **not** connected to a Laragon, XAMPP, or system-wide MySQL install. Those keep their
@@ -101,7 +101,7 @@ set `opens_database` honestly — the UI relies on it.
 **Export** on a row runs `mariadb-dump` and writes a timestamped file to:
 
 ```
-%USERPROFILE%\rezure\dumps\<database>-<YYYYMMDD-HHMMSS>.sql
+C:\rezure\dumps\<database>-<YYYYMMDD-HHMMSS>.sql
 ```
 
 A fixed, documented folder rather than a save dialog: an export is usually one step of

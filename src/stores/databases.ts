@@ -21,6 +21,12 @@ export const useDatabasesStore = defineStore('databases', () => {
   const collations = ref<string[]>([])
 
   const loading = ref(false)
+  /** True for the whole of any `fetchAll`, first load or not.
+   *
+   *  Separate from `loading`, which is deliberately false on a refetch so the
+   *  existing rows stay on screen. The manual Refresh button still needs to
+   *  show it is doing something, and `loading` can't tell it. */
+  const refreshing = ref(false)
   const error = ref<string | null>(null)
   const notice = ref<string | null>(null)
   /** Name of the database a long-running action is currently working on,
@@ -31,6 +37,9 @@ export const useDatabasesStore = defineStore('databases', () => {
   const createError = ref<string | null>(null)
   const importing = ref(false)
   const importError = ref<string | null>(null)
+  /** Which database an import is loading into, for the busy label. `importing`
+   *  stays the boolean the modal's own controls read. */
+  const importingInto = ref<string | null>(null)
 
   const serverDown = computed(() => error.value !== null && CONNECTION_REFUSED.test(error.value))
   const totalTables = computed(() => databases.value.reduce((sum, db) => sum + db.tableCount, 0))
@@ -42,7 +51,13 @@ export const useDatabasesStore = defineStore('databases', () => {
   )
 
   async function fetchAll() {
-    loading.value = true
+    // Stale-while-revalidate: only a first load, with nothing on screen yet,
+    // shows the spinner. A refetch keeps the rows visible and swaps them when
+    // the answer arrives — otherwise every visit to this page flashes
+    // "Reading schemas…" over a list that was already correct.
+    const firstLoad = databases.value.length === 0
+    loading.value = firstLoad
+    refreshing.value = true
     error.value = null
     try {
       const [list, info, found] = await Promise.all([
@@ -58,6 +73,7 @@ export const useDatabasesStore = defineStore('databases', () => {
       databases.value = []
     } finally {
       loading.value = false
+      refreshing.value = false
     }
   }
 
@@ -86,7 +102,8 @@ export const useDatabasesStore = defineStore('databases', () => {
     }
   }
 
-  /** Dumps to `~/rezure/dumps` and reports back where the file landed. */
+  /** Dumps to `C:
+ezure\dumps` and reports back where the file landed. */
   async function exportDatabase(name: string) {
     busy.value = name
     error.value = null
@@ -103,6 +120,7 @@ export const useDatabasesStore = defineStore('databases', () => {
 
   async function importSql(name: string, file: string) {
     importing.value = true
+    importingInto.value = name
     importError.value = null
     try {
       await invoke('import_sql', { name, file })
@@ -114,6 +132,7 @@ export const useDatabasesStore = defineStore('databases', () => {
       return false
     } finally {
       importing.value = false
+      importingInto.value = null
     }
   }
 
@@ -141,6 +160,7 @@ export const useDatabasesStore = defineStore('databases', () => {
     clients,
     collations,
     loading,
+    refreshing,
     error,
     notice,
     busy,
@@ -148,6 +168,7 @@ export const useDatabasesStore = defineStore('databases', () => {
     createError,
     importing,
     importError,
+    importingInto,
     serverDown,
     totalTables,
     preferredClient,

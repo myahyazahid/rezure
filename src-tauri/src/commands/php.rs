@@ -8,6 +8,7 @@ use tauri::AppHandle;
 use serde::Serialize;
 use tauri::State;
 
+use crate::config::settings::{self, SettingsState};
 use crate::services::binaries;
 use crate::services::php::{self, PhpVersionStatus};
 use crate::services::php_catalog::{self, PhpRelease};
@@ -62,8 +63,20 @@ pub fn list_php_versions() -> Vec<PhpVersionStatus> {
 pub async fn set_active_php_version(
     id: String,
     manager: State<'_, ServiceManager>,
+    settings: State<'_, SettingsState>,
 ) -> Result<PhpSwitchResult, AppError> {
     let versions = php::set_active(&id)?;
+
+    // Persisted so the choice survives a restart — best-effort: the switch
+    // itself already succeeded, so a settings-write failure shouldn't turn
+    // into a failed command, just an unpersisted choice for this session.
+    {
+        let mut current = settings.0.lock().unwrap();
+        current.active_php_version = Some(id.clone());
+        if let Err(err) = settings::save(&current) {
+            log::warn!("failed to persist the active PHP version: {err}");
+        }
+    }
 
     // When the global PATH link is on, it has to follow the switch — that's
     // the whole reason it exists. Best-effort: a link problem must not make

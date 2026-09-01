@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import type { ProjectInfo, ProjectTemplate } from '@/types/project'
+import type { LinkPreview, ProjectInfo, ProjectTemplate } from '@/types/project'
 
 function errorMessage(e: unknown): string {
   if (typeof e === 'string') return e
@@ -19,6 +19,8 @@ export const useProjectsStore = defineStore('projects', () => {
   const wwwRoot = ref('')
   const creating = ref(false)
   const createError = ref<string | null>(null)
+  const linking = ref(false)
+  const linkError = ref<string | null>(null)
 
   const allHostsReady = computed(
     () => projects.value.length > 0 && projects.value.every((p) => p.hasHostsEntry),
@@ -99,8 +101,49 @@ export const useProjectsStore = defineStore('projects', () => {
     }
   }
 
+  /** Validates a folder and reports what linking it would produce. Throws
+   *  with a readable reason when the path can't be used. */
+  function previewLink(path: string) {
+    return invoke<LinkPreview>('preview_project_link', { path })
+  }
+
+  /** Registers a folder outside www as a project. Records the path only —
+   *  nothing inside the folder is touched. */
+  async function linkProject(path: string, name?: string, domain?: string) {
+    linking.value = true
+    linkError.value = null
+    try {
+      await invoke('link_project', { path, name: name ?? null, domain: domain ?? null })
+      await fetchAll()
+      return true
+    } catch (e) {
+      linkError.value = errorMessage(e)
+      return false
+    } finally {
+      linking.value = false
+    }
+  }
+
+  /** Forgets a linked project. The folder itself is left alone. */
+  async function unlinkProject(id: string) {
+    linkError.value = null
+    try {
+      await invoke('unlink_project', { id })
+      await fetchAll()
+      return true
+    } catch (e) {
+      linkError.value = errorMessage(e)
+      return false
+    }
+  }
+
   return {
     projects,
+    linking,
+    linkError,
+    previewLink,
+    linkProject,
+    unlinkProject,
     syncingHosts,
     hostsError,
     openError,

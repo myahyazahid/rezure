@@ -6,16 +6,21 @@
 //! other line — including anything the user added themselves — is
 //! preserved byte-for-byte. Writing to the real file needs admin rights,
 //! which Windows can only grant through an interactive UAC prompt a human
-//! has to click through; this is deliberately never triggered
-//! automatically (e.g. as a side effect of listing projects) — only from
-//! an explicit `sync_hosts` command the user chooses to run.
+//! has to click through; this is deliberately never triggered as a side
+//! effect of routine actions like listing projects — only from an explicit
+//! `sync_hosts` command the user chooses to run, or (opt-in, at most once
+//! per app launch) `lib.rs`'s startup when `Settings.auto_write_hosts` is
+//! on, so a session's worth of new projects can still resolve without a
+//! manual sync every time.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::projects::scan_projects;
+use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
+use crate::utils::paths;
 use crate::utils::powershell::quote_ps;
 
 const BEGIN_MARKER: &str = "# --- Rezure managed entries (do not edit below) ---";
@@ -29,10 +34,7 @@ pub fn hosts_file_path() -> PathBuf {
 /// module hands to the elevated copy step, and the tiny script that
 /// performs it.
 fn staging_dir() -> Result<PathBuf, AppError> {
-    let base = dirs::data_local_dir().ok_or_else(|| {
-        AppError::Io("could not resolve the local app data directory".to_string())
-    })?;
-    Ok(base.join("Rezure").join("data").join("hosts"))
+    Ok(paths::data()?.join("hosts"))
 }
 
 /// Domains currently inside Rezure's managed block, if any.
@@ -177,6 +179,9 @@ fn elevate_copy(staged: &Path, dest: &Path) -> Result<(), AppError> {
             "-Command",
             &elevation_launcher(&script_path),
         ])
+        // The UAC prompt this launcher raises is its own elevated window —
+        // hiding this console doesn't hide the consent dialog.
+        .hidden()
         .status()
         .map_err(|e| AppError::HostsUpdateFailed(e.to_string()))?;
 
@@ -204,6 +209,9 @@ fn elevate_copy(staged: &Path, dest: &Path) -> Result<(), AppError> {
 /// already up to date (in which case no UAC prompt is shown at all — the
 /// comparison happens before elevation is ever triggered).
 pub fn sync_hosts_entries() -> Result<bool, AppError> {
+    // Missing folders keep their hosts entry: it costs nothing, and losing
+    // it every time an external drive is unplugged would mean re-running an
+    // admin prompt to get it back.
     let mut domains: Vec<String> = scan_projects()?.into_iter().map(|p| p.domain).collect();
     domains.sort();
     domains.dedup();

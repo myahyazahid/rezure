@@ -4,6 +4,7 @@
 
 use std::process::Command;
 
+use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
 
 /// Wraps `s` as a single-quoted PowerShell string literal, doubling any
@@ -25,6 +26,7 @@ pub fn quote_ps(s: &str) -> String {
 pub fn run(script: &str, what: &str) -> Result<String, AppError> {
     let output = Command::new("powershell")
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .hidden()
         .output()
         .map_err(|e| AppError::Io(format!("could not run powershell: {e}")))?;
 

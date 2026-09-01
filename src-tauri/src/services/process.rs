@@ -8,16 +8,22 @@ use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use super::binaries;
+use super::database;
+use super::db_engine;
+use super::db_profiles;
 use super::php_ini;
 use super::vhosts::{self, PHP_FASTCGI_PORT};
 use super::{Service, ServiceHandle, ServiceInfo, ServiceManager, ServiceStatus, CPU_HISTORY_LEN};
+use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
+use crate::utils::paths;
 
 /// Event name the frontend subscribes to via `listen()` for a service's
 /// stdout/stderr, line by line, as it's produced.
@@ -49,6 +55,18 @@ fn no_op_sink() -> LogSink {
     Arc::new(|_id, _stream, _line| {})
 }
 
+/// Called with a service's id when [`ProcessService::poll_pid`] finds its
+/// tracked child gone without `stop()`/`force_stop()` having taken it first
+/// — the one case that can only mean the process exited on its own. Same
+/// callback shape as [`LogSink`] and for the same reason: `ProcessService`
+/// stays constructible (and testable) without a live `AppHandle`, with
+/// `real_services` the only place that wires it to a real notification.
+pub type CrashSink = Arc<dyn Fn(&str) + Send + Sync>;
+
+fn no_op_crash_sink() -> CrashSink {
+    Arc::new(|_id| {})
+}
+
 /// Per-service launch recipe, applied once the binary is confirmed installed.
 enum Launch {
     /// Runs with Rezure's own generated config (`services::vhosts`), which
@@ -62,9 +80,12 @@ enum Launch {
     /// request (i.e. an Nginx vhost) — visiting the port directly does
     /// nothing, unlike the old built-in-server mode.
     Php,
-    /// `mysqld --datadir=<dir> --port=<port>`; the data directory is
-    /// bootstrapped with `mariadb-install-db` the first time it's started.
-    MariaDb { data_dir: PathBuf },
+    /// `mysqld --datadir=<dir> --port=<port>`, where all three of the binary,
+    /// the datadir and the port come from whichever profile is active (see
+    /// `services::db_profiles`) — resolved at spawn time, not construction,
+    /// which is what makes switching profiles take effect on restart. An
+    /// empty datadir is bootstrapped first, per engine.
+    Database,
 }
 
 pub struct ProcessService {
@@ -74,6 +95,7 @@ pub struct ProcessService {
     port: u16,
     launch: Launch,
     log_sink: LogSink,
+    crash_sink: CrashSink,
     child: Mutex<Option<Child>>,
     sys: Mutex<System>,
     cpu_history: Mutex<Vec<u8>>,
@@ -83,10 +105,7 @@ pub struct ProcessService {
 /// default docroot, MariaDB's datadir), separate from the versioned binary
 /// cache under `binaries::install_root`.
 fn runtime_dir(id: &str) -> Result<PathBuf, AppError> {
-    let base = dirs::data_local_dir().ok_or_else(|| {
-        AppError::Io("could not resolve the local app data directory".to_string())
-    })?;
-    Ok(base.join("Rezure").join("data").join(id))
+    Ok(paths::data()?.join(id))
 }
 
 /// Where a service's last-known PID is recorded across app restarts.
@@ -112,6 +131,7 @@ impl ProcessService {
             port: 80,
             launch: Launch::Nginx,
             log_sink,
+            crash_sink: no_op_crash_sink(),
             child: Mutex::new(None),
             sys: Mutex::new(System::new()),
             cpu_history: Mutex::new(Vec::new()),
@@ -129,40 +149,79 @@ impl ProcessService {
             port: PHP_FASTCGI_PORT,
             launch: Launch::Php,
             log_sink,
+            crash_sink: no_op_crash_sink(),
             child: Mutex::new(None),
             sys: Mutex::new(System::new()),
             cpu_history: Mutex::new(Vec::new()),
         })
     }
 
+    /// The database service. Keeps the `mariadb` id it has always had — the
+    /// frontend and stored logs key off it — while everything it actually
+    /// runs now follows the active profile, which may well be MySQL.
     pub fn mariadb(log_sink: LogSink) -> Result<Self, AppError> {
         binaries::find("mariadb")?;
         Ok(Self {
             id: "mariadb",
-            name: "MariaDB",
+            name: "Database",
             category: "Database",
+            // Fallback only, for when no profile is resolvable — the real
+            // port comes from the active profile via `current_port`.
             port: 3306,
-            launch: Launch::MariaDb {
-                data_dir: runtime_dir("mariadb")?.join("data"),
-            },
+            launch: Launch::Database,
             log_sink,
+            crash_sink: no_op_crash_sink(),
             child: Mutex::new(None),
             sys: Mutex::new(System::new()),
             cpu_history: Mutex::new(Vec::new()),
         })
     }
 
-    /// The version shown on the service card — for PHP, whichever one is
-    /// active right now, not a fixed manifest entry.
+    /// Attaches the callback fired when this service is found to have
+    /// crashed. A separate step from construction (rather than another
+    /// constructor parameter) so the sixteen existing test call sites that
+    /// only care about `log_sink` don't all need updating for a callback
+    /// they never exercise.
+    pub fn with_crash_sink(mut self, crash_sink: CrashSink) -> Self {
+        self.crash_sink = crash_sink;
+        self
+    }
+
+    /// The version shown on the service card — for PHP and the database,
+    /// whichever one is active right now, not a fixed manifest entry.
     fn version(&self) -> String {
         match self.launch {
             Launch::Php => super::php::active_id(),
             Launch::Nginx => binaries::find("nginx")
                 .map(|pkg| pkg.version.to_string())
                 .unwrap_or_default(),
-            Launch::MariaDb { .. } => binaries::find("mariadb")
-                .map(|pkg| pkg.version.to_string())
+            Launch::Database => db_profiles::active()
+                .map(|profile| profile.version)
                 .unwrap_or_default(),
+        }
+    }
+
+    /// The name shown on the service card. For the database this follows the
+    /// active profile's engine, so a card reading "MariaDB" while MySQL is
+    /// running can't happen.
+    fn display_name(&self) -> String {
+        match self.launch {
+            Launch::Database => db_profiles::active()
+                .map(|profile| profile.engine.label().to_string())
+                .unwrap_or_else(|| self.name.to_string()),
+            _ => self.name.to_string(),
+        }
+    }
+
+    /// The port this service actually binds. Fixed for nginx and PHP; for
+    /// the database it follows the active profile, which is what lets one
+    /// profile sit on 3306 while another uses a different port.
+    fn current_port(&self) -> u16 {
+        match self.launch {
+            Launch::Database => db_profiles::active()
+                .map(|profile| profile.port)
+                .unwrap_or(self.port),
+            _ => self.port,
         }
     }
 
@@ -190,7 +249,13 @@ impl ProcessService {
                     .join("php-cgi.exe"))
             }
             Launch::Nginx => binaries::exe_path(binaries::find("nginx")?),
-            Launch::MariaDb { .. } => binaries::exe_path(binaries::find("mariadb")?),
+            // Resolved through the active profile, so a switch to a MySQL
+            // profile spawns MySQL's own `mysqld.exe`, not MariaDB's.
+            Launch::Database => {
+                let profile = db_profiles::active()
+                    .ok_or_else(|| AppError::BinaryNotInstalled("Database".to_string()))?;
+                db_profiles::resolve_server_exe(&profile)
+            }
         }
     }
 
@@ -216,11 +281,38 @@ impl ProcessService {
                     .arg(format!("127.0.0.1:{}", self.port));
                 cmd
             }
-            Launch::MariaDb { data_dir } => {
-                ensure_mariadb_data_dir(&exe, data_dir)?;
+            Launch::Database => {
+                let profile = db_profiles::active()
+                    .ok_or_else(|| AppError::BinaryNotInstalled("Database".to_string()))?;
+                let data_dir = PathBuf::from(&profile.datadir_path);
+
+                // Only ever writes into a folder that's empty — an adopted
+                // datadir already holds someone's data and is opened as-is.
+                if db_engine::needs_bootstrap(&data_dir) {
+                    profile.engine.bootstrap(&exe, &data_dir)?;
+                }
+
                 let mut cmd = Command::new(&exe);
+
+                // `--defaults-file` has to come first — mysqld rejects it in
+                // any other position. It carries the settings the datadir was
+                // created under, `plugin_dir` above all: without it the server
+                // can't load Aria, and an Aria `mysql.db` privilege table then
+                // reads as "Incorrect file format 'db'" and startup aborts.
+                // This is why Laragon and XAMPP both pass it, and why adopting
+                // their data means adopting their config too.
+                if let Some(defaults) = &profile.defaults_file {
+                    cmd.arg(format!("--defaults-file={defaults}"));
+                }
+
+                // Everything after the defaults file overrides it, which is
+                // what makes a per-profile port work even though the adopted
+                // `my.ini` names one of its own.
+                if let Some(basedir) = exe.parent().and_then(|bin| bin.parent()) {
+                    cmd.arg(format!("--basedir={}", basedir.display()));
+                }
                 cmd.arg(format!("--datadir={}", data_dir.display()))
-                    .arg(format!("--port={}", self.port))
+                    .arg(format!("--port={}", profile.port))
                     .arg("--bind-address=127.0.0.1")
                     .arg("--console");
                 cmd
@@ -229,9 +321,16 @@ impl ProcessService {
 
         // Piped, not inherited: a GUI-subsystem build has no console handles
         // to inherit, and piping is what lets us stream lines out below.
+        //
+        // `hidden()` on top of that because piping the streams is not enough
+        // on Windows: nginx, php-cgi and mysqld are console-subsystem exes,
+        // so without `CREATE_NO_WINDOW` each one pops its own console window
+        // when it starts. Applied here, at the one place every service's
+        // command is finalized, so no launch arm can forget it.
         cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stderr(Stdio::piped())
+            .hidden();
         Ok(cmd)
     }
 
@@ -240,7 +339,7 @@ impl ProcessService {
     fn bind_addr(&self) -> &'static str {
         match self.launch {
             Launch::Nginx => "0.0.0.0",
-            Launch::Php | Launch::MariaDb { .. } => "127.0.0.1",
+            Launch::Php | Launch::Database => "127.0.0.1",
         }
     }
 
@@ -257,20 +356,27 @@ impl ProcessService {
     }
 
     /// Checks whether the tracked child is still alive, reaping it (and
-    /// returning `None`) if it has exited — whether from a `stop()` or a
-    /// crash, `std::process` can't tell the difference after the fact.
+    /// returning `None`) if it has exited.
+    ///
+    /// `stop()`/`force_stop()` always take the child out of this `Mutex`
+    /// themselves before waiting on it, so by the time this can observe
+    /// `try_wait()` reporting an exit, the process was never handed to
+    /// either of them — the one way that happens is the process dying on
+    /// its own, which is exactly what `crash_sink` is for.
     fn poll_pid(&self) -> Option<u32> {
         let mut child_guard = self.child.lock().unwrap();
-        let still_running = child_guard
-            .as_mut()
-            .map(|child| matches!(child.try_wait(), Ok(None)))
-            .unwrap_or(false);
-
-        if still_running {
-            child_guard.as_ref().map(|child| child.id())
-        } else {
-            *child_guard = None;
-            None
+        match child_guard.as_mut().map(|child| child.try_wait()) {
+            Some(Ok(None)) => child_guard.as_ref().map(|child| child.id()),
+            Some(Ok(Some(_status))) => {
+                *child_guard = None;
+                drop(child_guard);
+                (self.crash_sink)(self.id);
+                None
+            }
+            Some(Err(_)) | None => {
+                *child_guard = None;
+                None
+            }
         }
     }
 
@@ -328,57 +434,126 @@ fn spawn_log_reader(
 /// the exact address the service itself will bind to is the check this
 /// can actually make reliably.
 fn ensure_port_available(addr: &str, port: u16, name: &str) -> Result<(), AppError> {
-    TcpListener::bind((addr, port))
-        .map(|_| ())
-        .map_err(|_| AppError::PortInUse {
-            port,
-            name: name.to_string(),
-        })
-}
-
-/// Bootstraps MariaDB's system tables via `mariadb-install-db` the first
-/// time it's started — `mysqld` refuses to run against an empty datadir.
-fn ensure_mariadb_data_dir(exe: &Path, data_dir: &Path) -> Result<(), AppError> {
-    let already_initialized = data_dir
-        .read_dir()
-        .map(|mut entries| entries.next().is_some())
-        .unwrap_or(false);
-    if already_initialized {
+    if TcpListener::bind((addr, port)).is_ok() {
         return Ok(());
     }
 
-    fs::create_dir_all(data_dir)
-        .map_err(|e| AppError::Io(format!("could not create {}: {e}", data_dir.display())))?;
+    // Naming the holder turns a dead end into something actionable — most
+    // often it's one of Rezure's own orphans, which it can simply take back.
+    Err(match super::ports::holder(port) {
+        Some(holder) => AppError::PortInUseBy {
+            port,
+            name: name.to_string(),
+            holder: holder.description,
+        },
+        None => AppError::PortInUse {
+            port,
+            name: name.to_string(),
+        },
+    })
+}
 
-    let bin_dir = exe
-        .parent()
-        .ok_or_else(|| AppError::ProcessBootstrapFailed {
-            name: "MariaDB".to_string(),
-            reason: "could not locate the mariadb bin directory".to_string(),
-        })?;
-    let installer = bin_dir.join("mariadb-install-db.exe");
+/// How long a database server gets to flush and close on its own before
+/// it's force-killed.
+///
+/// Generous on purpose. A clean InnoDB shutdown has to flush dirty pages,
+/// and the whole point of the profile switcher is pointing at datadirs
+/// measured in gigabytes — a timeout tuned for Rezure's own near-empty
+/// datadir would force-kill exactly the large, valuable ones.
+const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
-    // Older Windows builds of `mariadb-install-db` (unlike the Linux
-    // installer) don't support `--auth-root-authentication-method` — root
-    // is created passwordless and localhost-only by default, which is fine
-    // for a local dev database.
-    let output = Command::new(&installer)
-        .current_dir(bin_dir)
-        .arg(format!("--datadir={}", data_dir.display()))
-        .output()
-        .map_err(|e| AppError::ProcessBootstrapFailed {
-            name: "MariaDB".to_string(),
-            reason: e.to_string(),
-        })?;
-
-    if !output.status.success() {
-        return Err(AppError::ProcessBootstrapFailed {
-            name: "MariaDB".to_string(),
-            reason: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        });
+/// Asks a running server to shut down cleanly.
+///
+/// `mysqladmin shutdown` is the supported way in: it connects and issues a
+/// real shutdown, so InnoDB flushes and closes its tablespaces instead of
+/// being cut off mid-write. `mysqladmin.exe` is spelled the same on both
+/// engines — MariaDB ships it as an alias beside `mariadb-admin.exe`.
+///
+/// Returns whether the *request* was accepted; the caller still waits for
+/// the process to actually go.
+fn request_graceful_shutdown(server_exe: &Path, port: u16) -> bool {
+    let Some(bin_dir) = server_exe.parent() else {
+        return false;
+    };
+    let admin = bin_dir.join(db_engine::ADMIN_EXE);
+    if !admin.is_file() {
+        return false;
     }
 
-    Ok(())
+    Command::new(&admin)
+        .args([
+            "--protocol=TCP",
+            "-h",
+            database::HOST,
+            "-P",
+            &port.to_string(),
+            "-u",
+            database::USER,
+            "shutdown",
+        ])
+        .hidden()
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+/// How long a database gets to finish starting before Rezure calls it a
+/// failure. Recovering a large InnoDB datadir is the slow case.
+const READY_TIMEOUT: Duration = Duration::from_secs(45);
+
+/// Waits until the server is actually accepting connections, or has died
+/// trying.
+///
+/// A successful `spawn()` only means the process was created. `mysqld` does
+/// the work that can fail — opening the datadir, loading privilege tables —
+/// *after* that, and exits if any of it goes wrong. Reporting "running" on
+/// spawn alone is how a fatal startup error reaches the user as unexplained
+/// log lines instead of a failed action, which is exactly what happened
+/// when a datadir turned out not to be openable.
+///
+/// Returns the process's own last words when it didn't come up, so the
+/// caller can say *why* rather than just that it didn't.
+fn wait_until_accepting(child: &mut Child, port: u16) -> Result<(), String> {
+    let deadline = Instant::now() + READY_TIMEOUT;
+
+    while Instant::now() < deadline {
+        // A dead process will never start listening — check it first so a
+        // fast failure is reported immediately rather than after the full
+        // timeout.
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                return Err(format!("the server exited during startup ({status})"));
+            }
+            Err(err) => return Err(format!("could not check on the server: {err}")),
+            Ok(None) => {}
+        }
+
+        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+
+    Err(format!(
+        "the server did not accept connections within {}s",
+        READY_TIMEOUT.as_secs()
+    ))
+}
+
+/// Polls until `child` exits or `timeout` elapses.
+fn wait_for_exit(child: &mut Child, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        match child.try_wait() {
+            Ok(Some(_)) => return true,
+            Ok(None) => std::thread::sleep(Duration::from_millis(100)),
+            Err(_) => return false,
+        }
+    }
+    false
 }
 
 impl Service for ProcessService {
@@ -403,7 +578,7 @@ impl Service for ProcessService {
 
         ServiceInfo {
             id: self.id.to_string(),
-            name: self.name.to_string(),
+            name: self.display_name(),
             category: self.category.to_string(),
             status: if pid.is_some() {
                 ServiceStatus::Running
@@ -411,7 +586,7 @@ impl Service for ProcessService {
                 ServiceStatus::Stopped
             },
             version,
-            port: self.port,
+            port: self.current_port(),
             cpu_percent,
             cpu_history: self.cpu_history.lock().unwrap().clone(),
         }
@@ -429,7 +604,7 @@ impl Service for ProcessService {
         }
 
         self.reap_orphan()?;
-        ensure_port_available(self.bind_addr(), self.port, self.name)?;
+        ensure_port_available(self.bind_addr(), self.current_port(), self.name)?;
 
         let mut cmd = self.command()?;
         let mut child = cmd.spawn().map_err(|e| AppError::ProcessSpawnFailed {
@@ -442,14 +617,81 @@ impl Service for ProcessService {
         }
 
         self.spawn_log_readers(&mut child);
+
+        // Only the database is waited on. nginx and `php-cgi` either bind or
+        // die immediately, while a database does its riskiest work — opening
+        // somebody's datadir — after the process already exists, so "spawned"
+        // and "working" are genuinely different answers for it alone.
+        if matches!(self.launch, Launch::Database) {
+            if let Err(reason) = wait_until_accepting(&mut child, self.current_port()) {
+                // It never came up, so nothing should be tracking it as
+                // running — and a half-started server must not be left
+                // holding the datadir.
+                kill_process_tree(child.id());
+                let _ = child.wait();
+                if let Ok(path) = pid_file_path(self.id) {
+                    let _ = fs::remove_file(&path);
+                }
+                return Err(AppError::ProcessSpawnFailed {
+                    name: self.display_name(),
+                    reason,
+                });
+            }
+        }
+
         *self.child.lock().unwrap() = Some(child);
         Ok(self.info())
     }
 
+    /// Stops the service, giving a database the chance to close cleanly
+    /// first.
+    ///
+    /// nginx and `php-cgi` hold no state worth flushing, so they go straight
+    /// to `kill_process_tree`. A database does not: force-killing `mysqld`
+    /// leaves the datadir needing crash recovery on next start, and against
+    /// an adopted multi-gigabyte datadir that is somebody's real data. So it
+    /// is asked to shut down, given [`GRACEFUL_SHUTDOWN_TIMEOUT`] to do it,
+    /// and only force-killed if it doesn't — a hung server still has to be
+    /// stoppable.
     fn stop(&self) -> Result<ServiceInfo, AppError> {
+        self.shut_down(true)
+    }
+
+    /// Skips the shutdown request entirely and kills the process tree.
+    ///
+    /// Deliberately available even though [`Service::stop`] already falls
+    /// back to killing: that fallback only happens *after* the full
+    /// shutdown timeout, and a user watching a hung server doesn't want to
+    /// wait it out. For a database this means the datadir is left needing
+    /// crash recovery, which is why the UI asks before doing it.
+    fn force_stop(&self) -> Result<ServiceInfo, AppError> {
+        self.shut_down(false)
+    }
+}
+
+impl ProcessService {
+    /// The one stop path. `graceful` decides whether the process is asked to
+    /// close itself first or simply killed.
+    fn shut_down(&self, graceful: bool) -> Result<ServiceInfo, AppError> {
         let mut child_guard = self.child.lock().unwrap();
         if let Some(mut child) = child_guard.take() {
-            kill_process_tree(child.id());
+            let stopped_cleanly = graceful
+                && matches!(self.launch, Launch::Database)
+                && self
+                    .resolved_exe()
+                    .is_ok_and(|exe| request_graceful_shutdown(&exe, self.current_port()))
+                && wait_for_exit(&mut child, GRACEFUL_SHUTDOWN_TIMEOUT);
+
+            if !stopped_cleanly {
+                if graceful && matches!(self.launch, Launch::Database) {
+                    log::warn!(
+                        "{} did not shut down cleanly in {}s — force-killing it",
+                        self.id,
+                        GRACEFUL_SHUTDOWN_TIMEOUT.as_secs()
+                    );
+                }
+                kill_process_tree(child.id());
+            }
             let _ = child.wait();
         }
         drop(child_guard);
@@ -511,12 +753,13 @@ impl ProcessService {
 /// leaving it running and still holding the port. `taskkill /T` walks and
 /// kills the whole tree; falling back to a plain kill covers the rare case
 /// where `taskkill.exe` isn't reachable.
-fn kill_process_tree(pid: u32) {
+pub(super) fn kill_process_tree(pid: u32) {
     let tree_killed = Command::new("taskkill")
         .args(["/T", "/F", "/PID", &pid.to_string()])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
+        .hidden()
         .status()
         .map(|status| status.success())
         .unwrap_or(false);
@@ -528,6 +771,7 @@ fn kill_process_tree(pid: u32) {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
+            .hidden()
             .status();
     }
 }
@@ -537,21 +781,63 @@ fn kill_process_tree(pid: u32) {
 /// ids drift apart, which `tests::every_service_matches_the_manifest`
 /// catches at build time.
 pub fn real_services(app: AppHandle) -> ServiceManager {
+    let log_app = app.clone();
     let sink: LogSink = Arc::new(move |service_id, stream, line| {
         let payload = ServiceLogLine {
             service_id: service_id.to_string(),
             stream,
             line: line.to_string(),
         };
-        if let Err(err) = app.emit(LOG_EVENT, payload) {
+        if let Err(err) = log_app.emit(LOG_EVENT, payload) {
             log::warn!("failed to emit service log line: {err}");
         }
     });
 
+    let crash_sink: CrashSink = Arc::new(move |service_id| {
+        // Looked up lazily (rather than at construction) since
+        // `SettingsState` isn't managed yet at the point `real_services` is
+        // called from `lib.rs`'s `setup()` — by the time a crash can
+        // actually happen the app is fully up.
+        let Some(settings) = app.try_state::<crate::config::settings::SettingsState>() else {
+            return;
+        };
+        if !settings.0.lock().unwrap().notify_on_crash {
+            return;
+        }
+        let name = match service_id {
+            "nginx" => "Nginx",
+            "php" => "PHP",
+            "mariadb" => "Database",
+            other => other,
+        };
+        use tauri_plugin_notification::NotificationExt;
+        if let Err(err) = app
+            .notification()
+            .builder()
+            .title("Rezure")
+            .body(format!("{name} stopped unexpectedly"))
+            .show()
+        {
+            log::warn!("failed to show crash notification for {service_id}: {err}");
+        }
+    });
+
     let services: Vec<ServiceHandle> = vec![
-        Arc::new(ProcessService::nginx(sink.clone()).expect("nginx must be in binaries::MANIFEST")),
-        Arc::new(ProcessService::php(sink.clone()).expect("php must be in binaries::MANIFEST")),
-        Arc::new(ProcessService::mariadb(sink).expect("mariadb must be in binaries::MANIFEST")),
+        Arc::new(
+            ProcessService::nginx(sink.clone())
+                .expect("nginx must be in binaries::MANIFEST")
+                .with_crash_sink(crash_sink.clone()),
+        ),
+        Arc::new(
+            ProcessService::php(sink.clone())
+                .expect("php must be in binaries::MANIFEST")
+                .with_crash_sink(crash_sink.clone()),
+        ),
+        Arc::new(
+            ProcessService::mariadb(sink)
+                .expect("mariadb must be in binaries::MANIFEST")
+                .with_crash_sink(crash_sink),
+        ),
     ];
     ServiceManager::new(services)
 }
@@ -585,13 +871,49 @@ mod tests {
         assert_eq!(info.status, ServiceStatus::Stopped);
     }
 
+    /// Force stop has to be safe to call when there's nothing running — the
+    /// menu offering it can race with the process exiting on its own.
+    #[test]
+    fn force_stopping_a_service_that_never_started_is_a_harmless_no_op() {
+        for service in [
+            ProcessService::mariadb(no_op_sink()).unwrap(),
+            ProcessService::nginx(no_op_sink()).unwrap(),
+        ] {
+            let info = service.force_stop().unwrap();
+            assert_eq!(info.status, ServiceStatus::Stopped);
+        }
+    }
+
+    /// Force stop must not consult the graceful path at all. Proven
+    /// indirectly but meaningfully: it returns promptly even for the
+    /// database, whose `stop` would otherwise be willing to wait
+    /// [`GRACEFUL_SHUTDOWN_TIMEOUT`] before giving up.
+    #[test]
+    fn force_stop_never_waits_on_a_shutdown_timeout() {
+        let service = ProcessService::mariadb(no_op_sink()).unwrap();
+        let started = Instant::now();
+        service.force_stop().unwrap();
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "force stop should be immediate, took {:?}",
+            started.elapsed()
+        );
+    }
+
     #[test]
     fn a_port_already_bound_is_reported_before_spawning() {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let port = listener.local_addr().unwrap().port();
 
         let err = ensure_port_available("127.0.0.1", port, "Test").unwrap_err();
-        assert!(matches!(err, AppError::PortInUse { port: p, .. } if p == port));
+        // Either variant is correct: `PortInUseBy` when the holder could be
+        // identified (the useful case, and what this test process itself
+        // produces), `PortInUse` when it couldn't.
+        assert!(
+            matches!(err, AppError::PortInUse { port: p, .. } if p == port)
+                || matches!(err, AppError::PortInUseBy { port: p, .. } if p == port),
+            "got: {err}"
+        );
 
         drop(listener);
         ensure_port_available("127.0.0.1", port, "Test")

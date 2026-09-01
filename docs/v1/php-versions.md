@@ -11,8 +11,8 @@ complete uninstall.
 
 | Root | What's in it | Marked as |
 |---|---|---|
-| `%LOCALAPPDATA%\Rezure\bin\php\<version>\` | Versions Rezure downloaded and checksum-verified | managed |
-| `%USERPROFILE%\rezure\bin\php\<anything>\` | Versions you dropped in yourself | added by hand |
+| `C:\rezure\bin\php\<version>\` | Versions Rezure downloaded and checksum-verified | managed |
+| `C:\rezure\custom\php\<anything>\` | Versions you dropped in yourself | added by hand |
 
 Both roots are scanned on every listing (`binaries::discover`), so a folder appearing in
 either **is** an installed version. The drop-in root sits next to `~\rezure\www` and
@@ -62,12 +62,12 @@ only whatever 8.3.x is current. For an older patch release, use option 2.
 
 Downloaded a build yourself? Two ways to register it:
 
-**Unpack it into the drop-in folder.** Open `%USERPROFILE%\rezure\bin\php\` (the Switch page
+**Unpack it into the drop-in folder.** Open `C:\rezure\custom\php\` (the Switch page
 links to it) and extract the zip there. Any folder holding a `php.exe` counts — the folder
 name doesn't matter:
 
 ```
-%USERPROFILE%\rezure\bin\php\
+C:\rezure\custom\php\
 ├── php-8.4.25-nts-Win32-vs17-x64\php.exe   ← reads as 8.4.25
 └── 8.0.30\php.exe                          ← reads as 8.0.30
 ```
@@ -140,7 +140,7 @@ change, and two tools doing it end up fighting over who wrote last.
 Instead Rezure adds **one stable entry, once**:
 
 ```
-%LOCALAPPDATA%\Rezure\current\php   →  junction  →  <active version's folder>
+C:\rezure\current\php   →  junction  →  <active version's folder>
 ```
 
 Switching re-points the junction. PATH is never touched again. And because the PATH string

@@ -5,6 +5,15 @@
 //! distribution on first use, checksum-verified, and cached under the user's
 //! local app data directory. Every entry in [`MANIFEST`] is a real, currently
 //! published Windows portable/zip release.
+//!
+//! **Exception:** Nginx and the default PHP version (8.3.33) can additionally
+//! arrive pre-staged inside the installer, so a fresh install serves PHP
+//! immediately with no first-run download. `scripts/stage-bundled-binaries.ps1`
+//! fetches those two into a gitignored `src-tauri/bundled-bin/` before a
+//! release build — never committed, same as everything else here — and
+//! `tauri.conf.json`'s `bundle.resources` embeds that folder in the `.msi`/
+//! `.exe`. [`seed_bundled`] is what copies it into the real install root on
+//! first launch. MariaDB and every other PHP version stay purely on-demand.
 
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
@@ -12,9 +21,10 @@ use std::path::{Path, PathBuf};
 use futures_util::StreamExt;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::utils::error::AppError;
+use crate::utils::paths;
 
 /// A downloadable portable binary package.
 #[derive(Debug, Clone, Copy)]
@@ -105,28 +115,22 @@ pub fn family_packages(family: &str) -> Vec<&'static BinaryPackage> {
     MANIFEST.iter().filter(|pkg| pkg.family == family).collect()
 }
 
-/// `%LOCALAPPDATA%\Rezure\bin` — where Rezure's own downloads land,
-/// created lazily on first install.
+/// `C:\rezure\bin` — where Rezure's own downloads land, created lazily on
+/// first install.
 pub fn install_root() -> Result<PathBuf, AppError> {
-    let base = dirs::data_local_dir().ok_or_else(|| {
-        AppError::Io("could not resolve the local app data directory".to_string())
-    })?;
-    Ok(base.join("Rezure").join("bin"))
+    paths::bin()
 }
 
-/// `%USERPROFILE%\rezure\bin` — the drop-in folder, for runtimes the user
-/// downloaded themselves.
+/// `C:\rezure\custom` — the drop-in folder, for runtimes the user downloaded
+/// themselves.
 ///
-/// Deliberately next to `~\rezure\www` and `~\rezure\dumps` rather than
-/// buried in `AppData`: this one is meant to be opened in Explorer and
-/// dropped into, the way Laragon's `bin\` is. The filesystem is the whole
-/// registry — there is no list of custom paths to persist and keep in
-/// sync, so a folder appearing here *is* an installed version, and
-/// deleting it uninstalls one.
+/// Sits beside `www` and `dumps` in the one visible Rezure folder rather than
+/// buried in `AppData`: this one is meant to be opened in Explorer and dropped
+/// into, the way Laragon's `bin\` is. The filesystem is the whole registry —
+/// there is no list of custom paths to persist and keep in sync, so a folder
+/// appearing here *is* an installed version, and deleting it uninstalls one.
 pub fn user_bin_root() -> Result<PathBuf, AppError> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| AppError::Io("could not resolve the home directory".to_string()))?;
-    Ok(home.join("rezure").join("bin"))
+    paths::custom_bin()
 }
 
 /// One runtime version found on disk, from either root.
@@ -147,7 +151,7 @@ pub struct InstalledRuntime {
 /// Official archives unpack to folders like `php-8.4.25-nts-Win32-vs17-x64`,
 /// and Rezure's own installs to a bare `8.4.25`; both should read as
 /// "8.4.25" in the Switch dropdown.
-fn version_from_folder_name(name: &str) -> Option<String> {
+pub fn version_from_folder_name(name: &str) -> Option<String> {
     let chars: Vec<char> = name.chars().collect();
     let mut start = 0;
 
@@ -178,16 +182,27 @@ fn version_from_folder_name(name: &str) -> Option<String> {
     None
 }
 
-/// One level down, for archives that unpack into their own top-level folder.
-fn nested_candidates(dir: &Path, exe_name: &str) -> Vec<PathBuf> {
-    std::fs::read_dir(dir)
-        .map(|entries| {
-            entries
-                .filter_map(Result::ok)
-                .map(|entry| entry.path().join(exe_name))
-                .collect()
-        })
-        .unwrap_or_default()
+/// Every place an archive might have left the executable, in the order
+/// they're tried.
+///
+/// Four layouts, because the runtimes Rezure supports genuinely differ:
+/// PHP's zip puts `php.exe` at the top (`<dir>/php.exe`), and a
+/// hand-extracted one nests it in the archive's own folder
+/// (`<dir>/php-8.4.25-.../php.exe`). Database servers add a `bin`:
+/// MariaDB's zip lands `mysqld.exe` at
+/// `<dir>/mariadb-11.2.2-winx64/bin/mysqld.exe` — two levels down, which
+/// is why looking only one deep found no installed server at all.
+fn exe_candidates(dir: &Path, exe_name: &str) -> Vec<PathBuf> {
+    let mut candidates = vec![dir.join(exe_name), dir.join("bin").join(exe_name)];
+
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.filter_map(Result::ok) {
+            let nested = entry.path();
+            candidates.push(nested.join(exe_name));
+            candidates.push(nested.join("bin").join(exe_name));
+        }
+    }
+    candidates
 }
 
 /// Numeric-segment comparison, so `8.10.0` sorts above `8.9.0` the way a
@@ -235,20 +250,21 @@ pub fn discover(family: &str, exe_name: &str) -> Vec<InstalledRuntime> {
                 continue;
             };
 
-            // The archive may unpack either flat (`<dir>/php.exe`) or nested
-            // inside one top-level folder (`<dir>/php-8.4.25-.../php.exe`) —
-            // a hand-extracted zip very often looks like the latter.
-            let exe = std::iter::once(dir.join(exe_name))
-                .chain(nested_candidates(&dir, exe_name))
+            let exe = exe_candidates(&dir, exe_name)
+                .into_iter()
                 .find(|candidate| candidate.is_file());
             let Some(exe) = exe else { continue };
 
+            // Walks back up from the executable when the folder it was found
+            // under carries no version — for a `bin/` layout the useful name
+            // is the grandparent (`mariadb-11.2.2-winx64`), not `bin`.
             let version = version_from_folder_name(folder_name)
                 .or_else(|| {
-                    exe.parent()
-                        .and_then(|parent| parent.file_name())
-                        .and_then(|name| name.to_str())
-                        .and_then(version_from_folder_name)
+                    exe.ancestors()
+                        .skip(1)
+                        .take(3)
+                        .filter_map(|dir| dir.file_name().and_then(|n| n.to_str()))
+                        .find_map(version_from_folder_name)
                 })
                 .unwrap_or_else(|| folder_name.to_string());
 
@@ -280,6 +296,71 @@ pub fn exe_path(pkg: &BinaryPackage) -> Result<PathBuf, AppError> {
 
 pub fn is_installed(pkg: &BinaryPackage) -> bool {
     exe_path(pkg).map(|path| path.is_file()).unwrap_or(false)
+}
+
+/// Copies whatever `scripts/stage-bundled-binaries.ps1` staged into the
+/// installer (see this module's doc comment) into the real `install_root()`,
+/// for Nginx and the default PHP version only — a no-op the moment either is
+/// already installed, so this never overwrites a real download or a version
+/// the user switched away from.
+///
+/// A no-op on a dev run too, or any install that predates this feature:
+/// `resource_dir()` either fails to resolve or simply has no `bundled-bin`
+/// folder under it, and both cases are treated the same as "nothing to seed"
+/// rather than an error — this must never block startup.
+pub fn seed_bundled(app: &AppHandle) {
+    let Ok(resource_dir) = app.path().resource_dir() else {
+        return;
+    };
+    let bundled_bin = resource_dir.join("bundled-bin");
+    if !bundled_bin.is_dir() {
+        return;
+    }
+
+    for pkg in MANIFEST
+        .iter()
+        .filter(|pkg| pkg.family == "nginx" || pkg.id == "php-8.3.33")
+    {
+        if is_installed(pkg) {
+            continue;
+        }
+        let src = bundled_bin.join(pkg.family).join(pkg.version);
+        if !src.is_dir() {
+            continue;
+        }
+        let Ok(dest) = package_dir(pkg) else { continue };
+        if let Err(err) = copy_dir_recursive(&src, &dest) {
+            log::warn!("failed to seed bundled {}: {err}", pkg.id);
+        }
+    }
+}
+
+/// Recursively copies `src` into `dest`, creating `dest` and any nested
+/// directories as needed. `std::fs` has no built-in equivalent of `cp -r`.
+fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<(), AppError> {
+    std::fs::create_dir_all(dest)
+        .map_err(|e| AppError::Io(format!("could not create {}: {e}", dest.display())))?;
+
+    for entry in std::fs::read_dir(src)
+        .map_err(|e| AppError::Io(format!("could not read {}: {e}", src.display())))?
+    {
+        let entry = entry.map_err(|e| AppError::Io(e.to_string()))?;
+        let src_path = entry.path();
+        let dest_path = dest.join(entry.file_name());
+
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dest_path)?;
+        } else {
+            std::fs::copy(&src_path, &dest_path).map_err(|e| {
+                AppError::Io(format!(
+                    "could not copy {} to {}: {e}",
+                    src_path.display(),
+                    dest_path.display()
+                ))
+            })?;
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -525,6 +606,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn copy_dir_recursive_reproduces_nested_files_and_folders() {
+        let src = std::env::temp_dir().join(format!("rezure-test-copy-src-{}", std::process::id()));
+        let dest =
+            std::env::temp_dir().join(format!("rezure-test-copy-dest-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&dest);
+
+        std::fs::create_dir_all(src.join("bin")).unwrap();
+        std::fs::write(src.join("top.txt"), b"top").unwrap();
+        std::fs::write(src.join("bin").join("nested.exe"), b"nested").unwrap();
+
+        copy_dir_recursive(&src, &dest).unwrap();
+
+        assert_eq!(std::fs::read(dest.join("top.txt")).unwrap(), b"top");
+        assert_eq!(
+            std::fs::read(dest.join("bin").join("nested.exe")).unwrap(),
+            b"nested"
+        );
+
+        std::fs::remove_dir_all(&src).unwrap();
+        std::fs::remove_dir_all(&dest).unwrap();
+    }
+
+    #[test]
     fn version_is_read_out_of_an_official_archive_folder_name() {
         // The shape a hand-extracted php.net zip actually leaves behind.
         assert_eq!(
@@ -617,6 +722,56 @@ mod tests {
 
         assert!(nested.is_some(), "a nested extraction must still be found");
         assert!(exe.unwrap().starts_with(&inner));
+    }
+
+    /// The layout MariaDB's (and MySQL's) zip actually produces:
+    /// `<version>/<archive-folder>/bin/mysqld.exe` — two levels down plus a
+    /// `bin`. Looking only one level deep found no installed database
+    /// server at all, which is the regression this guards.
+    #[test]
+    fn discover_finds_a_server_nested_under_a_bin_folder() {
+        let root = match user_bin_root() {
+            Ok(root) => root.join("mariadb"),
+            Err(_) => return,
+        };
+        let bin = root.join("9.9.7").join("mariadb-9.9.7-winx64").join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("mysqld.exe"), b"not a real binary").unwrap();
+
+        let found = discover("mariadb", "mysqld.exe");
+        let nested = found.iter().find(|runtime| runtime.version == "9.9.7");
+        let exe = nested.map(|runtime| runtime.exe.clone());
+
+        let _ = std::fs::remove_dir_all(root.join("9.9.7"));
+
+        assert!(
+            nested.is_some(),
+            "a server under <version>/<archive>/bin must be discovered"
+        );
+        assert!(exe.unwrap().ends_with("mysqld.exe"));
+    }
+
+    /// A `bin` folder contributes no version of its own — the number has to
+    /// come from a real folder name further up.
+    #[test]
+    fn a_bin_folder_never_becomes_the_version() {
+        let root = match user_bin_root() {
+            Ok(root) => root.join("mariadb"),
+            Err(_) => return,
+        };
+        let bin = root.join("mariadb-9.9.6-winx64").join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("mysqld.exe"), b"not a real binary").unwrap();
+
+        let found = discover("mariadb", "mysqld.exe");
+        let version = found
+            .iter()
+            .find(|runtime| runtime.exe.starts_with(&bin))
+            .map(|runtime| runtime.version.clone());
+
+        let _ = std::fs::remove_dir_all(root.join("mariadb-9.9.6-winx64"));
+
+        assert_eq!(version.as_deref(), Some("9.9.6"));
     }
 
     #[test]

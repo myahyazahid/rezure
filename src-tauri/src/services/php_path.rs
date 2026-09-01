@@ -37,15 +37,14 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use super::php;
+use super::php_ini;
 use crate::utils::error::AppError;
+use crate::utils::paths;
 use crate::utils::powershell::{quote_ps, run};
 
 /// `%LOCALAPPDATA%\Rezure\current` — holds the switchable junctions.
 fn current_root() -> Result<PathBuf, AppError> {
-    let base = dirs::data_local_dir().ok_or_else(|| {
-        AppError::Io("could not resolve the local app data directory".to_string())
-    })?;
-    Ok(base.join("Rezure").join("current"))
+    paths::current()
 }
 
 /// The single directory that goes on PATH.
@@ -137,6 +136,83 @@ fn without_entry(raw: &str, link: &str) -> String {
         .join(";")
 }
 
+/// Link directories Rezure used before the single-folder layout.
+///
+/// Only ever *removed* from PATH, never added — this exists so a PATH left
+/// pointing at the old location can be repaired.
+fn legacy_link_dirs() -> Vec<String> {
+    dirs::data_local_dir()
+        .map(|base| {
+            vec![base
+                .join("Rezure")
+                .join("current")
+                .join("php")
+                .display()
+                .to_string()]
+        })
+        .unwrap_or_default()
+}
+
+/// Replaces a stale pre-move PATH entry with the current one, in place.
+///
+/// Without this, a migrated install is left in a state nothing else can see
+/// or repair: PATH still names `%LOCALAPPDATA%\Rezure\current\php`, which no
+/// longer exists, while [`status`] reports `on_path: false` because it looks
+/// for the *new* directory. So `php` is broken in every terminal, the UI shows
+/// the feature as switched off, and enabling it would append a second entry
+/// while leaving the dead one in front of it.
+///
+/// The swap is positional — the old entry's slot is reused rather than being
+/// dropped and re-appended — because the entry only wins over a Laragon or
+/// XAMPP `php` by coming before it.
+///
+/// Returns `true` if PATH was rewritten.
+pub fn repair_legacy_entry() -> Result<bool, AppError> {
+    let link = link_dir()?.display().to_string();
+    let legacy = legacy_link_dirs();
+    let raw = read_user_path()?;
+
+    let mut found = false;
+    let repaired = raw
+        .split(';')
+        .map(|segment| {
+            if legacy.iter().any(|old| same_dir(segment, old)) {
+                found = true;
+                link.as_str()
+            } else {
+                segment
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(";");
+
+    if !found {
+        return Ok(false);
+    }
+
+    // A PATH that already carries the new entry as well would end up with it
+    // twice. Drop the duplicate that isn't in the reclaimed slot.
+    let deduped = {
+        let mut seen = false;
+        repaired
+            .split(';')
+            .filter(|segment| {
+                if same_dir(segment, &link) {
+                    let first = !seen;
+                    seen = true;
+                    return first;
+                }
+                true
+            })
+            .collect::<Vec<_>>()
+            .join(";")
+    };
+
+    write_user_path(&deduped)?;
+    log::info!("repaired a pre-move PHP entry in PATH: it now points at {link}");
+    Ok(true)
+}
+
 /// Where the junction points right now, or `None` if it isn't there.
 fn junction_target(link: &Path) -> Option<String> {
     if !link.exists() {
@@ -202,6 +278,17 @@ pub fn sync() -> Result<(), AppError> {
         .ok_or_else(|| AppError::Io("the active PHP has no parent directory".to_string()))?
         .to_path_buf();
 
+    // Behind the junction, PATH resolves `php` to this folder directly —
+    // Rezure's `-c` ini never enters the picture — and PHP reads only the
+    // ini sitting next to `php.exe`. Versions installed before Rezure
+    // wrote one still have none, so this heals them on the switch that
+    // first exposes them, ahead of the up-to-date check below.
+    match php_ini::ensure_cli_php_ini(&target) {
+        Ok(Some(path)) => log::info!("wrote {}", path.display()),
+        Ok(None) => {}
+        Err(err) => log::warn!("could not write php.ini in {}: {err}", target.display()),
+    }
+
     if junction_target(&link)
         .is_some_and(|current| same_dir(&current, &target.display().to_string()))
     {
@@ -264,6 +351,58 @@ pub fn disable() -> Result<PhpPathStatus, AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The positional swap `repair_legacy_entry` performs, on a plain string
+    /// so it can be checked without touching the real registry.
+    fn swap(raw: &str, legacy: &[String], link: &str) -> (String, bool) {
+        let mut found = false;
+        let repaired = raw
+            .split(';')
+            .map(|segment| {
+                if legacy.iter().any(|old| same_dir(segment, old)) {
+                    found = true;
+                    link
+                } else {
+                    segment
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(";");
+        (repaired, found)
+    }
+
+    #[test]
+    fn a_stale_entry_is_replaced_where_it_stood() {
+        // Position is the whole point: the entry only beats Laragon's `php`
+        // by sitting in front of it, so a repair that appended instead of
+        // swapping would silently hand `php` back to Laragon.
+        let legacy = vec![r"C:\Users\x\AppData\Local\Rezure\current\php".to_string()];
+        let (out, found) = swap(
+            r"C:\Users\x\AppData\Local\Rezure\current\php;C:\laragon\bin\php;C:\Windows",
+            &legacy,
+            r"C:\rezure\current\php",
+        );
+        assert!(found);
+        assert_eq!(out, r"C:\rezure\current\php;C:\laragon\bin\php;C:\Windows");
+    }
+
+    #[test]
+    fn a_path_without_a_stale_entry_is_left_alone() {
+        let legacy = vec![r"C:\Users\x\AppData\Local\Rezure\current\php".to_string()];
+        let original = r"C:\laragon\bin\php;C:\Windows;";
+        let (out, found) = swap(original, &legacy, r"C:\rezure\current\php");
+        assert!(!found, "nothing to repair");
+        assert_eq!(out, original, "every other byte must survive untouched");
+    }
+
+    #[test]
+    fn a_trailing_separator_survives_the_swap() {
+        // `without_entry` documents why this matters: PATH belongs to the
+        // user, so a repair must not quietly reformat it.
+        let legacy = vec![r"C:\old\php".to_string()];
+        let (out, _) = swap(r"C:\old\php;C:\Windows;", &legacy, r"C:\rezure\current\php");
+        assert!(out.ends_with(';'));
+    }
 
     #[test]
     fn entries_ignores_empty_and_padded_segments() {

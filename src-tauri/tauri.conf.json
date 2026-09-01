@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "rezureapp",
   "version": "1.0.0",
-  "identifier": "com.rezure.app",
+  "identifier": "com.redscale.rezure",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
@@ -36,6 +36,10 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": {
+      "bundled-bin/nginx": "bundled-bin/nginx",
+      "bundled-bin/php": "bundled-bin/php"
+    },
     "android": {
       "debugApplicationIdSuffix": ".debug"
     }

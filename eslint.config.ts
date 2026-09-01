@@ -15,7 +15,10 @@ export default defineConfigWithVueTs(
     files: ['**/*.{vue,ts,mts,tsx}'],
   },
 
-  globalIgnores(['**/dist/**', '**/dist-ssr/**', '**/coverage/**']),
+  // `src-tauri/target` is Cargo's build directory. It holds generated JS that
+  // tauri-codegen embeds as raw bytes, which ESLint can't parse — without this
+  // `npm run lint` fails on artifacts nobody wrote or ships.
+  globalIgnores(['**/dist/**', '**/dist-ssr/**', '**/coverage/**', 'src-tauri/target/**']),
 
   ...pluginVue.configs['flat/essential'],
   vueTsConfigs.recommended,

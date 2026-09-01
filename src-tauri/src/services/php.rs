@@ -16,9 +16,11 @@
 //! never passed a checksum, and the UI says so.
 //!
 //! The active version is process-wide in-memory state (a `OnceLock<Mutex<_>>`
-//! rather than a manager threaded through every call). Phase 4's settings
-//! persistence hasn't landed, so a restart falls back to the newest
-//! installed version.
+//! rather than a manager threaded through every call). `commands::php::set_active_php_version`
+//! mirrors a switch into `config::settings::Settings::active_php_version`,
+//! and `lib.rs`'s setup restores it on the next launch — if that version is
+//! no longer installed, [`active_from`]'s self-healing fallback picks the
+//! newest one instead.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -29,6 +31,8 @@ use tauri::AppHandle;
 
 use super::binaries::{self, ArchiveInstall, InstalledRuntime};
 use super::php_catalog;
+use super::php_ini;
+use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
 
 const FAMILY: &str = "php";
@@ -145,6 +149,7 @@ pub async fn install(app: &AppHandle, version: &str) -> Result<Vec<PhpVersionSta
     let dest_dir = binaries::install_root()?
         .join(FAMILY)
         .join(&release.version);
+    let php_dir = dest_dir.clone();
 
     binaries::install_archive(
         app,
@@ -159,16 +164,17 @@ pub async fn install(app: &AppHandle, version: &str) -> Result<Vec<PhpVersionSta
     )
     .await?;
 
+    write_cli_php_ini(&php_dir);
     Ok(list())
 }
 
 /// Registers a PHP build the user downloaded themselves by copying it into
 /// the drop-in folder.
 ///
-/// A copy, not a reference: with no settings persistence yet, a list of
-/// external paths would have nowhere to live across restarts, and the
-/// scan-the-folder model stays true — a version *is* a folder under one of
-/// the two roots. Copying also leaves the user's original download alone.
+/// A copy, not a reference: the scan-the-folder model stays true — a
+/// version *is* a folder under one of the two roots, with no separate list
+/// of external paths to keep in sync. Copying also leaves the user's
+/// original download alone.
 pub async fn add_from_folder(source: PathBuf) -> Result<Vec<PhpVersionStatus>, AppError> {
     tokio::task::spawn_blocking(move || add_from_folder_blocking(&source))
         .await
@@ -201,7 +207,25 @@ fn add_from_folder_blocking(source: &Path) -> Result<(), AppError> {
         let _ = std::fs::remove_dir_all(&dest);
         return Err(err);
     }
+
+    write_cli_php_ini(&dest);
     Ok(())
+}
+
+/// Gives a freshly installed version the `php.ini` the official zip leaves
+/// out, so `php` from a terminal has its extensions from the first run —
+/// without it, PHP loads none at all and Laravel reports "could not find
+/// driver" the moment a project talks to MySQL.
+///
+/// Best-effort: an install that produced a working `php.exe` is a
+/// successful install, and [`super::php_path::sync`] writes the ini again
+/// on the next switch if this didn't take.
+fn write_cli_php_ini(php_dir: &Path) {
+    match php_ini::ensure_cli_php_ini(php_dir) {
+        Ok(Some(path)) => log::info!("wrote {}", path.display()),
+        Ok(None) => {}
+        Err(err) => log::warn!("could not write php.ini in {}: {err}", php_dir.display()),
+    }
 }
 
 fn locate_php_root(source: &Path) -> Option<PathBuf> {
@@ -221,6 +245,7 @@ fn locate_php_root(source: &Path) -> Option<PathBuf> {
 fn read_php_version(exe: &Path) -> Result<String, AppError> {
     let output = Command::new(exe)
         .args(["-r", "echo PHP_VERSION;"])
+        .hidden()
         .output()
         .map_err(|e| AppError::Io(format!("could not run {}: {e}", exe.display())))?;
 

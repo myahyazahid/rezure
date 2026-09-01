@@ -1,30 +1,53 @@
-//! Reads and manages the schemas inside Rezure's own MariaDB.
+//! Reads and manages the schemas inside whichever database profile is
+//! currently active — see `services::db_profiles`.
 //!
-//! There's no MySQL driver crate in the dependency tree on purpose: the
-//! MariaDB zip Rezure already downloads ships its own client binaries
-//! (`mariadb.exe`, `mariadb-dump.exe`) next to the server, so this module
-//! drives those instead of adding a second, redundant way to speak the
-//! protocol. `--batch` makes the client emit tab-separated rows with no
-//! box drawing, which is what every read here parses.
+//! There's no MySQL driver crate in the dependency tree on purpose: every
+//! server build Rezure runs ships its own client binaries (`mysql.exe`,
+//! `mysqldump.exe`) next to it, so this module drives those instead of
+//! adding a second, redundant way to speak the protocol. `--batch` makes
+//! the client emit tab-separated rows with no box drawing, which is what
+//! every read here parses.
 //!
-//! Rezure's MariaDB is bootstrapped by `mariadb-install-db` and never
-//! given a root password — it binds to 127.0.0.1 only, and asking a
-//! developer to invent a password for a throwaway local server just moves
-//! the secret into a config file. [`server_info`] states that plainly
-//! rather than hiding it.
+//! Both the port and the client binaries are resolved from the active
+//! profile rather than fixed, so after a switch this module queries the
+//! server that's actually running, using that build's own client.
+//!
+//! Rezure's own datadir is bootstrapped without a root password — it binds
+//! to 127.0.0.1 only, and asking a developer to invent a password for a
+//! throwaway local server just moves the secret into a config file.
+//! [`server_info`] states that plainly rather than hiding it. An adopted
+//! profile keeps whatever credentials its owner set; where those aren't
+//! passwordless, its own client will say so.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::Serialize;
 
-use super::binaries;
+use super::db_engine;
+use super::db_profiles;
 use super::projects::scan_projects;
+use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
+use crate::utils::paths;
 
 pub const HOST: &str = "127.0.0.1";
-pub const PORT: u16 = 3306;
 pub const USER: &str = "root";
+/// Used only when no profile is resolvable — the real port comes from
+/// whichever profile is active.
+pub const DEFAULT_PORT: u16 = 3306;
+
+/// The port the currently active profile's server listens on.
+///
+/// A function rather than a constant because the profile switcher lets each
+/// profile carry its own port: reading a fixed 3306 here would point every
+/// query on the Databases page at whatever happened to own that port,
+/// which after a switch may not be Rezure's server at all.
+pub fn port() -> u16 {
+    db_profiles::active()
+        .map(|profile| profile.port)
+        .unwrap_or(DEFAULT_PORT)
+}
 
 /// Schemas MariaDB itself owns — never listed, never droppable.
 const SYSTEM_SCHEMAS: [&str; 4] = ["mysql", "information_schema", "performance_schema", "sys"];
@@ -60,10 +83,10 @@ pub struct ServerInfo {
 pub fn server_info() -> ServerInfo {
     ServerInfo {
         host: HOST.to_string(),
-        port: PORT,
+        port: port(),
         user: USER.to_string(),
         has_password: false,
-        dsn: format!("mysql://{USER}@{HOST}:{PORT}"),
+        dsn: format!("mysql://{USER}@{HOST}:{}", port()),
     }
 }
 
@@ -91,27 +114,37 @@ fn validate_identifier(name: &str, kind: &str) -> Result<(), AppError> {
     }
 }
 
+/// The `bin` folder of the build actually serving right now.
+///
+/// Resolved through the active profile rather than the pinned MariaDB
+/// manifest entry, so that after a switch to a MySQL profile the client
+/// binaries used to query it come from that same MySQL build — mixing a
+/// MariaDB client with a MySQL server is a source of confusing protocol
+/// and authentication errors.
 fn bin_dir() -> Result<PathBuf, AppError> {
-    let exe = binaries::exe_path(binaries::find("mariadb")?)?;
+    let profile = db_profiles::active()
+        .ok_or_else(|| AppError::BinaryNotInstalled("Database".to_string()))?;
+    let exe = db_profiles::resolve_server_exe(&profile)?;
     exe.parent()
         .map(Path::to_path_buf)
-        .ok_or_else(|| AppError::Io("mariadbd.exe has no parent directory".to_string()))
+        .ok_or_else(|| AppError::Io("the database server has no parent directory".to_string()))
 }
 
-/// One of the client binaries that ships alongside the server.
+/// One of the client binaries that ships alongside the server. The names
+/// are engine-neutral — see `services::db_engine`.
 fn client(name: &str) -> Result<PathBuf, AppError> {
     let exe = bin_dir()?.join(name);
     if exe.is_file() {
         Ok(exe)
     } else {
-        Err(AppError::BinaryNotInstalled(format!("MariaDB's {name}")))
+        Err(AppError::BinaryNotInstalled(format!("the server's {name}")))
     }
 }
 
 /// The interactive console client, for handing a developer a shell that's
 /// already connected — see `db_clients::open_console`.
 pub fn console_client() -> Result<PathBuf, AppError> {
-    client("mariadb.exe")
+    client(db_engine::CLIENT_EXE)
 }
 
 fn base_args() -> Vec<String> {
@@ -119,7 +152,7 @@ fn base_args() -> Vec<String> {
         "-h".to_string(),
         HOST.to_string(),
         "-P".to_string(),
-        PORT.to_string(),
+        port().to_string(),
         "-u".to_string(),
         USER.to_string(),
     ]
@@ -147,9 +180,10 @@ fn client_error(stderr: &[u8], fallback: &str) -> AppError {
 /// `--skip-column-names` drops the header, so a caller's row indexes line
 /// up with its `SELECT` list and nothing has to be skipped.
 fn query(sql: &str) -> Result<Vec<Vec<String>>, AppError> {
-    let output = Command::new(client("mariadb.exe")?)
+    let output = Command::new(client(db_engine::CLIENT_EXE)?)
         .args(base_args())
         .args(["--batch", "--skip-column-names", "-e", sql])
+        .hidden()
         .output()
         .map_err(|e| AppError::DatabaseQueryFailed(e.to_string()))?;
 
@@ -260,9 +294,7 @@ pub fn drop_database(name: &str) -> Result<(), AppError> {
 /// predictable path is easier to reach from a terminal afterwards than a
 /// location the user has to remember choosing.
 pub fn dumps_dir() -> Result<PathBuf, AppError> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| AppError::Io("could not resolve the home directory".to_string()))?;
-    Ok(home.join("rezure").join("dumps"))
+    paths::dumps()
 }
 
 /// Dumps `name` to a timestamped `.sql` file and returns its path.
@@ -278,10 +310,11 @@ pub fn export_database(name: &str) -> Result<PathBuf, AppError> {
     // the file rather than passing a path the client would have to quote.
     let file = std::fs::File::create(&dest)
         .map_err(|e| AppError::Io(format!("could not create {}: {e}", dest.display())))?;
-    let output = Command::new(client("mariadb-dump.exe")?)
+    let output = Command::new(client(db_engine::DUMP_EXE)?)
         .args(base_args())
         .args(["--databases", name])
         .stdout(file)
+        .hidden()
         .output()
         .map_err(|e| AppError::DatabaseQueryFailed(e.to_string()))?;
 
@@ -306,10 +339,11 @@ pub fn import_sql(name: &str, file: &Path) -> Result<(), AppError> {
 
     let input = std::fs::File::open(file)
         .map_err(|e| AppError::Io(format!("could not read {}: {e}", file.display())))?;
-    let output = Command::new(client("mariadb.exe")?)
+    let output = Command::new(client(db_engine::CLIENT_EXE)?)
         .args(base_args())
         .arg(name)
         .stdin(input)
+        .hidden()
         .output()
         .map_err(|e| AppError::DatabaseQueryFailed(e.to_string()))?;
 

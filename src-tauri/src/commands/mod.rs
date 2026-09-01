@@ -3,6 +3,8 @@
 
 pub mod binaries;
 pub mod database;
+pub mod db_profiles;
 pub mod php;
 pub mod projects;
 pub mod services;
+pub mod settings;

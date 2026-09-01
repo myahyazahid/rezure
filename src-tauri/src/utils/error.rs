@@ -81,6 +81,60 @@ pub enum AppError {
 
     #[error("no such SQL client: {0}")]
     UnknownDbClient(String),
+
+    #[error("settings error: {0}")]
+    Settings(String),
+
+    #[error("database error: {0}")]
+    Database(String),
+
+    #[error("database profile not found: {0}")]
+    ProfileNotFound(String),
+
+    #[error("that profile can't be removed — {0}")]
+    ProfileUndeletable(String),
+
+    #[error("{path} is already registered as the \"{name}\" profile")]
+    DatadirAlreadyRegistered { path: String, name: String },
+
+    #[error(
+        "{path} doesn't look like a {engine} data directory — pick the folder that holds ibdata1"
+    )]
+    NotADatadir { path: String, engine: String },
+
+    #[error(
+        "no {engine} {version} binary is installed — add one before switching to this profile"
+    )]
+    EngineBinaryMissing { engine: String, version: String },
+
+    #[error(
+        "this datadir was written by {found}, but the profile says {expected} — opening it with the wrong engine can corrupt it"
+    )]
+    EngineMismatch { found: String, expected: String },
+
+    #[error(
+        "{name}'s database server looks like it's still running against this data directory — stop it there first"
+    )]
+    DatadirInUse { name: String },
+
+    #[error("switched back to \"{restored}\" — {reason}")]
+    SwitchRolledBack { restored: String, reason: String },
+
+    #[error("{reason}")]
+    PortHolderProtected { port: u16, reason: String },
+
+    #[error("{path} can't be added as a project — {reason}")]
+    UnusableProjectPath { path: String, reason: String },
+
+    #[error("{path} is already a project here (\"{name}\")")]
+    ProjectAlreadyLinked { path: String, name: String },
+
+    #[error("can't start {name} — {holder}")]
+    PortInUseBy {
+        port: u16,
+        name: String,
+        holder: String,
+    },
 }
 
 /// Serialized as its `Display` message (the `#[error("...")]` text) rather

@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import type { ServiceInfo } from '@/types/service'
+import type { PortHolder, ServiceInfo } from '@/types/service'
 
 export const useServicesStore = defineStore('services', () => {
   const services = ref<ServiceInfo[]>([])
@@ -10,8 +10,15 @@ export const useServicesStore = defineStore('services', () => {
 
   const runningCount = computed(() => services.value.filter((s) => s.status === 'running').length)
 
+  /** True while any service is mid start/stop/restart. Drives the busy
+   *  overlay: a bulk action leaves the window looking frozen otherwise,
+   *  because spawning nginx, php-cgi and mysqld takes real seconds. */
+  const busy = computed(() => pendingIds.value.size > 0)
+
   async function fetchAll() {
-    loading.value = true
+    // Spinner only on a first load — a refetch leaves the current rows up so
+    // the dashboard doesn't blank out on the way back to it.
+    loading.value = services.value.length === 0
     try {
       services.value = await invoke<ServiceInfo[]>('list_services')
     } finally {
@@ -38,6 +45,25 @@ export const useServicesStore = defineStore('services', () => {
     return withPending(id, () => invoke<ServiceInfo>('stop_service', { id }))
   }
 
+  /** Kills the process without waiting for a clean shutdown. The caller is
+   *  expected to have confirmed with the user first — for a database this
+   *  leaves the data directory needing crash recovery. */
+  function forceStop(id: string) {
+    return withPending(id, () => invoke<ServiceInfo>('force_stop_service', { id }))
+  }
+
+  /** Who is holding a port, so a "port in use" failure can name the culprit
+   *  instead of leaving the user to hunt for it. Null when it's free. */
+  function portHolder(port: number) {
+    return invoke<PortHolder | null>('port_holder', { port })
+  }
+
+  /** Kills whatever holds `port`. Returns whoever still holds it after —
+   *  normally null. Starting the service stays a separate step. */
+  function freePort(port: number) {
+    return invoke<PortHolder | null>('free_port', { port })
+  }
+
   function restart(id: string) {
     return withPending(id, () => invoke<ServiceInfo>('restart_service', { id }))
   }
@@ -58,9 +84,13 @@ export const useServicesStore = defineStore('services', () => {
     services,
     loading,
     runningCount,
+    busy,
     fetchAll,
     start,
     stop,
+    forceStop,
+    portHolder,
+    freePort,
     restart,
     startAll,
     stopAll,

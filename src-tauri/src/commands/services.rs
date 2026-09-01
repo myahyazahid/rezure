@@ -1,5 +1,6 @@
 use tauri::State;
 
+use crate::services::ports::{self, PortHolder};
 use crate::services::{ServiceInfo, ServiceManager};
 use crate::utils::error::AppError;
 
@@ -38,6 +39,57 @@ pub async fn stop_service(
             name: id,
             reason: format!("background task panicked: {e}"),
         })?
+}
+
+/// Kills the service outright, skipping the clean shutdown `stop_service`
+/// attempts.
+///
+/// Exists because that shutdown has a timeout, and a server that has hung
+/// makes the user wait it out with no way to intervene. The frontend
+/// confirms first for anything with state to lose — see `ServiceRow.vue`.
+#[tauri::command]
+pub async fn force_stop_service(
+    id: String,
+    manager: State<'_, ServiceManager>,
+) -> Result<ServiceInfo, AppError> {
+    let service = manager.find(&id)?;
+    tokio::task::spawn_blocking(move || service.force_stop())
+        .await
+        .map_err(|e| AppError::ProcessSpawnFailed {
+            name: id,
+            reason: format!("background task panicked: {e}"),
+        })?
+}
+
+/// Who is holding the port a service wants, so a "port in use" failure can
+/// name the culprit instead of leaving the user to find it with `netstat`.
+///
+/// Returns `None` when the port is free — worth checking, since the holder
+/// may well have exited between the failed start and the user reading it.
+#[tauri::command]
+pub async fn port_holder(port: u16) -> Option<PortHolder> {
+    tokio::task::spawn_blocking(move || ports::holder(port))
+        .await
+        .unwrap_or(None)
+}
+
+/// Kills whatever is holding `port`, then reports what (if anything) still
+/// is.
+///
+/// This is the "it says the port is taken, take it back" action. It refuses
+/// protected system processes — port 80 belonging to `System` means IIS or
+/// the Windows HTTP service, which has to be stopped as a service, not
+/// killed. Starting the service afterwards stays a separate, explicit step:
+/// freeing a port and claiming it are different decisions, and bundling
+/// them would hide a failure of one behind the other.
+#[tauri::command]
+pub async fn free_port(port: u16) -> Result<Option<PortHolder>, AppError> {
+    tokio::task::spawn_blocking(move || {
+        ports::reclaim(port)?;
+        Ok(ports::holder(port))
+    })
+    .await
+    .map_err(|e| AppError::Io(format!("background task panicked: {e}")))?
 }
 
 #[tauri::command]

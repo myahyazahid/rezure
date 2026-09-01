@@ -17,7 +17,9 @@ use serde::Serialize;
 
 use super::php_ini;
 use super::projects::www_root;
+use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
+use crate::utils::paths;
 
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -210,14 +212,7 @@ fn common_top_level_dir(
 }
 
 fn composer_phar_path() -> Result<PathBuf, AppError> {
-    let base = dirs::data_local_dir().ok_or_else(|| {
-        AppError::Io("could not resolve the local app data directory".to_string())
-    })?;
-    Ok(base
-        .join("Rezure")
-        .join("bin")
-        .join("composer")
-        .join("composer.phar"))
+    Ok(paths::bin()?.join("composer").join("composer.phar"))
 }
 
 /// Whether `composer.phar` has been downloaded — there's no fixed version
@@ -277,6 +272,7 @@ async fn scaffold_laravel(target: &Path) -> Result<(), AppError> {
             .arg("--prefer-dist")
             .arg("--no-interaction")
             .stdin(Stdio::null())
+            .hidden()
             .output()
             .map_err(|e| AppError::ScaffoldFailed(format!("could not run composer: {e}")))?;
 
