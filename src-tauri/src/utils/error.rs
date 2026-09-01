@@ -135,6 +135,15 @@ pub enum AppError {
         name: String,
         holder: String,
     },
+
+    #[error("{path} can't be attached — {reason}")]
+    AttachmentRejected { path: String, reason: String },
+
+    #[error("couldn't send the ticket: {0}")]
+    TicketSubmitFailed(String),
+
+    #[error("couldn't load your ticket history: {0}")]
+    TicketHistoryFailed(String),
 }
 
 /// Serialized as its `Display` message (the `#[error("...")]` text) rather

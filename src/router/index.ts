@@ -6,10 +6,12 @@ import DatabasesView from '../views/DatabasesView.vue'
 import SwitchView from '../views/SwitchView.vue'
 import LogsView from '../views/LogsView.vue'
 import SettingsView from '../views/SettingsView.vue'
+import SupportView from '../views/SupportView.vue'
+import ChangelogView from '../views/ChangelogView.vue'
 
 // Imported eagerly rather than as `() => import(...)`. Code-splitting pays off
 // when chunks travel over a network and most users never open most routes —
-// neither is true here: six screens, all bundled into the installer, all on
+// neither is true here: eight screens, all bundled into the installer, all on
 // local disk. Lazy loading only bought a blank frame on each route's first
 // visit, so the whole app is loaded up front and every menu switch is instant.
 const router = createRouter({
@@ -44,6 +46,16 @@ const router = createRouter({
       path: '/settings',
       name: 'settings',
       component: SettingsView,
+    },
+    {
+      path: '/support',
+      name: 'support',
+      component: SupportView,
+    },
+    {
+      path: '/changelog',
+      name: 'changelog',
+      component: ChangelogView,
     },
   ],
 })

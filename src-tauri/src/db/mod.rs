@@ -7,6 +7,7 @@
 //! hand-edit of an existing one, per `CLAUDE.md`.
 
 pub mod projects;
+pub mod telemetry;
 
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
@@ -20,8 +21,9 @@ use crate::utils::paths;
 fn migrations() -> &'static Migrations<'static> {
     static MIGRATIONS: OnceLock<Migrations> = OnceLock::new();
     MIGRATIONS.get_or_init(|| {
-        Migrations::new(vec![M::up(
-            "CREATE TABLE projects (
+        Migrations::new(vec![
+            M::up(
+                "CREATE TABLE projects (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 path TEXT NOT NULL,
@@ -31,7 +33,17 @@ fn migrations() -> &'static Migrations<'static> {
                 last_opened_at INTEGER,
                 open_count INTEGER NOT NULL DEFAULT 0
             )",
-        )])
+            ),
+            M::up(
+                "CREATE TABLE pending_events (
+                id TEXT PRIMARY KEY,
+                payload TEXT NOT NULL,
+                type TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                sent_at INTEGER
+            )",
+            ),
+        ])
     })
 }
 
