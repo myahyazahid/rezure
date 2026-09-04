@@ -10,8 +10,10 @@ use tauri::State;
 
 use crate::config::settings::{self, SettingsState};
 use crate::services::binaries;
+use crate::services::doctor::{self, ProjectDiagnosis};
 use crate::services::php::{self, PhpVersionStatus};
 use crate::services::php_catalog::{self, PhpRelease};
+use crate::services::php_ini;
 use crate::services::php_path::{self, PhpPathStatus};
 use crate::services::{ServiceManager, ServiceStatus};
 use crate::utils::error::AppError;
@@ -153,6 +155,40 @@ pub fn open_php_drop_in_dir() -> Result<(), AppError> {
     tauri_plugin_opener::open_path(dir.display().to_string(), None::<&str>).map_err(|e| {
         AppError::OpenFailed {
             target: "the PHP folder".to_string(),
+            reason: e.to_string(),
+        }
+    })
+}
+
+/// Reads a project's `ext-*` requirements back against the active PHP.
+///
+/// Lives with the PHP commands rather than the project ones because that is
+/// what it answers a question about: the project side is just the
+/// `composer.json` it reads. Spawns `php -m`, so it goes through
+/// `spawn_blocking` like every other command here that shells out.
+#[tauri::command]
+pub async fn diagnose_project(id: String) -> Result<ProjectDiagnosis, AppError> {
+    tokio::task::spawn_blocking(move || doctor::diagnose_project(&id))
+        .await
+        .map_err(joined)?
+}
+
+/// The folder a user's own PHP settings go in, shown on the Switch page.
+///
+/// Read without creating anything: this is a label on a page that loads on
+/// its own, and the folder is created by the first PHP process anyway.
+#[tauri::command]
+pub fn php_config_dir() -> Result<String, AppError> {
+    Ok(php_ini::conf_d()?.display().to_string())
+}
+
+/// Creates the settings folder if needed and opens it in Explorer.
+#[tauri::command]
+pub fn open_php_config_dir() -> Result<(), AppError> {
+    let dir = php_ini::ensure_conf_d()?;
+    tauri_plugin_opener::open_path(dir.display().to_string(), None::<&str>).map_err(|e| {
+        AppError::OpenFailed {
+            target: "the PHP settings folder".to_string(),
             reason: e.to_string(),
         }
     })

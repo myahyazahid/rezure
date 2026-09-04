@@ -26,6 +26,9 @@ export const usePhpStore = defineStore('php', () => {
   const dropInDir = ref('')
   const adding = ref(false)
 
+  /** Where a user's own php.ini fragments go. A label until they open it. */
+  const configDir = ref('')
+
   /** The optional system-wide PATH link. Null until first read. */
   const pathStatus = ref<PhpPathStatus | null>(null)
   const pathBusy = ref(false)
@@ -191,6 +194,24 @@ export const usePhpStore = defineStore('php', () => {
     }
   }
 
+  async function fetchConfigDir() {
+    try {
+      configDir.value = await invoke<string>('php_config_dir')
+    } catch {
+      // Only used as a label — a missing path isn't worth an error banner.
+      configDir.value = ''
+    }
+  }
+
+  async function openConfigDir() {
+    error.value = null
+    try {
+      await invoke('open_php_config_dir')
+    } catch (e) {
+      error.value = errorMessage(e)
+    }
+  }
+
   async function openDropInDir() {
     error.value = null
     try {
@@ -214,12 +235,14 @@ export const usePhpStore = defineStore('php', () => {
     catalogError,
     dropInDir,
     adding,
+    configDir,
     notice,
     switching,
     pathStatus,
     pathBusy,
     fetchAll,
     fetchDropInDir,
+    fetchConfigDir,
     fetchPathStatus,
     setPathLink,
     fetchCatalog,
@@ -228,6 +251,7 @@ export const usePhpStore = defineStore('php', () => {
     addFromFolder,
     remove,
     openDropInDir,
+    openConfigDir,
     progressFor,
   }
 })

@@ -18,6 +18,13 @@
 //!   ([`super::php_path`]) puts the raw install folder on PATH, so without
 //!   this the CLI runs with no ini at all — `pdo_mysql` missing, which
 //!   surfaces as Laravel's "could not find driver".
+//!
+//! Neither of those is a place a *user* can configure PHP, which is what
+//! [`conf_d`] is for. The generated copy is rewritten on every start, and
+//! the install-folder copy isn't read by the web SAPI at all (that one is
+//! started with `-c` naming the generated ini), so before this folder
+//! existed there was no edit a user could make that both survived a start
+//! and reached a web request. `PHP_INI_SCAN_DIR` gives them one.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -32,6 +39,14 @@ const EXTENSIONS: &[&str] = &[
     "curl",
     "fileinfo",
     "gd",
+    // Every modern Laravel stack that touches formatting or localisation
+    // wants this — Filament hard-requires `ext-intl`, and a project that
+    // needs it and doesn't have it fails as a blank 500 with the reason
+    // buried in `laravel.log`, which is the worst shape a missing default
+    // can take. The official Windows zip already carries both the DLL and
+    // the ICU libraries it links against, so enabling it costs nothing that
+    // isn't already on disk.
+    "intl",
     "mbstring",
     "mysqli",
     "openssl",
@@ -42,6 +57,34 @@ const EXTENSIONS: &[&str] = &[
     "sqlite3",
     "zip",
 ];
+
+/// The CA bundle's name inside [`paths::etc`].
+const CA_BUNDLE_FILE: &str = "cacert.pem";
+
+/// The environment variable PHP reads to find *extra* ini files, on top of
+/// whichever one it was told to load.
+///
+/// Every PHP process Rezure spawns is given this, and [`super::php_path`]
+/// sets it machine-wide when the PATH switch is on, so the user's own
+/// terminal reads the same folder.
+pub const SCAN_DIR_ENV: &str = "PHP_INI_SCAN_DIR";
+
+/// Dropped into [`conf_d`] the first time it's created. Not an `.ini`, so
+/// PHP never tries to parse it.
+const CONF_D_README: &str = "This folder is yours. Rezure never writes into it.
+
+Any .ini file here is loaded after Rezure's generated php.ini and overrides
+it, for both the web server and the `php` you run in a terminal. Files are
+read in alphabetical order, so a `90-` prefix wins over a `10-` one.
+
+Example - save this as 90-local.ini:
+
+    memory_limit = 1G
+    extension=intl
+
+Rezure's own php.ini is regenerated on every start; edits made there are
+lost. This is the file to edit instead.
+";
 
 /// PHP on Windows treats `\` in ini values inconsistently depending on
 /// what follows it, so every generated path uses forward slashes, which
@@ -65,6 +108,56 @@ fn ensure_tmp_dir() -> Result<PathBuf, AppError> {
     fs::create_dir_all(&tmp)
         .map_err(|e| AppError::Io(format!("could not create {}: {e}", tmp.display())))?;
     Ok(tmp)
+}
+
+/// The CA bundle both TLS stacks get pointed at, when one is installed.
+///
+/// It lives in `etc/` rather than beside a PHP build because it is not a
+/// property of any one version: a bundle installed once has to keep working
+/// across a version switch, and both copies of the ini name the same file.
+fn ca_bundle() -> Option<PathBuf> {
+    let path = paths::etc().ok()?.join(CA_BUNDLE_FILE);
+    path.is_file().then_some(path)
+}
+
+/// The one folder a user's own PHP settings live in.
+///
+/// Deliberately outside the version folders. `bin/php/<version>/php.ini` is
+/// per-version, so a setting written there is gone after the next switch,
+/// and it is not read by the FastCGI service at all — that one is started
+/// with `-c` naming the generated ini, which makes the install-folder copy
+/// invisible to every web request. One folder shared by every version also
+/// means `php -m` in a terminal and a web request can't disagree about
+/// which settings are in force.
+///
+/// What sharing it costs: a fragment enabling an extension some older
+/// version doesn't ship makes *that* version warn on startup. That is the
+/// user's own file, in a folder they opened to write it — visible in a way
+/// a silently-discarded setting never was.
+pub fn conf_d() -> Result<PathBuf, AppError> {
+    Ok(paths::etc()?.join("php").join("conf.d"))
+}
+
+/// [`conf_d`], created if it isn't there yet, with the note explaining what
+/// it's for.
+///
+/// PHP is handed this path whether or not anything is in it: an empty scan
+/// directory costs nothing, and creating it up front is what makes the
+/// folder discoverable — a user who is told to "put your settings in
+/// etc/php/conf.d" should find it already waiting, not have to guess that
+/// creating it is allowed.
+pub fn ensure_conf_d() -> Result<PathBuf, AppError> {
+    let dir = conf_d()?;
+    fs::create_dir_all(&dir)
+        .map_err(|e| AppError::Io(format!("could not create {}: {e}", dir.display())))?;
+
+    // Best-effort: the folder is what PHP needs, the note is a courtesy.
+    let readme = dir.join("README.txt");
+    if !readme.exists() {
+        let _ = fs::write(&readme, CONF_D_README);
+    }
+
+    Ok(dir)
 }
 
 /// `<php dir>/ext`, the folder the extension DLLs actually live in.
@@ -104,8 +197,20 @@ fn enabled_extensions(extension_dir: &Path) -> Vec<String> {
 /// the *working directory* of whatever invoked it, so `php artisan` run
 /// from a project folder would look for the DLLs under that project, find
 /// none, and load no extensions at all.
-fn render(extension_dir: &Path, tmp: &Path) -> String {
-    let mut ini = format!("extension_dir = \"{}\"\n", ini_value(extension_dir));
+fn render(extension_dir: &Path, tmp: &Path, ca_bundle: Option<&Path>, conf_d: &Path) -> String {
+    // Not decoration: this file is regenerated under the user's feet, so the
+    // one thing it owes whoever opens it is where their own settings go.
+    let mut ini = format!(
+        "; Generated by Rezure - rewritten every time PHP starts, so edits here are lost.\n\
+         ; Put your own settings in:\n\
+         ;   {conf_d}\n\
+         ; Any .ini file there is loaded after this one and overrides it.\n\n",
+        conf_d = ini_value(conf_d)
+    );
+    ini.push_str(&format!(
+        "extension_dir = \"{}\"\n",
+        ini_value(extension_dir)
+    ));
     for extension in enabled_extensions(extension_dir) {
         ini.push_str(&format!("extension={extension}\n"));
     }
@@ -127,6 +232,22 @@ fn render(extension_dir: &Path, tmp: &Path) -> String {
     // PHP emits a warning on every date call while this is unset. Laravel
     // overrides it per-app, so UTC is only ever the floor.
     ini.push_str("date.timezone = UTC\n");
+    // The Windows PHP zip ships no CA store, and neither directive has a
+    // usable built-in default there, so out of the box libcurl and OpenSSL
+    // cannot verify any certificate at all: every outbound HTTPS call dies
+    // with "cURL error 60: unable to get local issuer certificate". That is
+    // not a niche path, it is Composer, Laravel's Http client and every API
+    // a project talks to. Both stacks are named because they are separate:
+    // curl.cainfo covers ext/curl, openssl.cafile covers the stream
+    // wrappers, so file_get_contents("https://...") verifies too.
+    //
+    // Written only when the bundle is really on disk: a cainfo naming a
+    // file that is not there is a failure of its own, and a worse one to
+    // read than the default.
+    if let Some(bundle) = ca_bundle {
+        ini.push_str(&format!("curl.cainfo = \"{}\"\n", ini_value(bundle)));
+        ini.push_str(&format!("openssl.cafile = \"{}\"\n", ini_value(bundle)));
+    }
     ini
 }
 
@@ -148,8 +269,16 @@ pub fn ensure_php_ini(php_exe: &Path) -> Result<PathBuf, AppError> {
         .ok_or_else(|| AppError::Io("php.exe has no parent directory".to_string()))?;
 
     let ini_path = dir.join("php.ini");
-    fs::write(&ini_path, render(&extension_dir(php_dir), &tmp))
-        .map_err(|e| AppError::Io(format!("could not write {}: {e}", ini_path.display())))?;
+    fs::write(
+        &ini_path,
+        render(
+            &extension_dir(php_dir),
+            &tmp,
+            ca_bundle().as_deref(),
+            &ensure_conf_d()?,
+        ),
+    )
+    .map_err(|e| AppError::Io(format!("could not write {}: {e}", ini_path.display())))?;
 
     Ok(ini_path)
 }
@@ -178,8 +307,16 @@ pub fn ensure_cli_php_ini(php_dir: &Path) -> Result<Option<PathBuf>, AppError> {
     }
 
     let tmp = ensure_tmp_dir()?;
-    fs::write(&ini_path, render(&extension_dir(php_dir), &tmp))
-        .map_err(|e| AppError::Io(format!("could not write {}: {e}", ini_path.display())))?;
+    fs::write(
+        &ini_path,
+        render(
+            &extension_dir(php_dir),
+            &tmp,
+            ca_bundle().as_deref(),
+            &ensure_conf_d()?,
+        ),
+    )
+    .map_err(|e| AppError::Io(format!("could not write {}: {e}", ini_path.display())))?;
 
     Ok(Some(ini_path))
 }
@@ -435,12 +572,68 @@ mod tests {
         let _ = fs::remove_dir_all(&php_dir);
     }
 
+    /// Filament and half of Laravel's formatting helpers need `intl`, and
+    /// the ICU libraries it links against ship in the same zip as the DLL.
+    /// A version that predates it still gets a clean ini, because the list
+    /// is filtered against what's really in `ext/`.
+    #[test]
+    fn intl_is_on_by_default_but_only_where_the_build_ships_it() {
+        assert!(EXTENSIONS.contains(&"intl"), "intl must be a default");
+
+        let php_dir =
+            std::env::temp_dir().join(format!("rezure-test-ini-intl-{}", std::process::id()));
+        let ext = php_dir.join("ext");
+        let _ = fs::remove_dir_all(&php_dir);
+        fs::create_dir_all(&ext).unwrap();
+        fs::write(ext.join("php_intl.dll"), "").unwrap();
+
+        assert!(enabled_extensions(&ext).contains(&"intl".to_string()));
+        // The same list against a build without it must not name it.
+        fs::remove_file(ext.join("php_intl.dll")).unwrap();
+        assert!(!enabled_extensions(&ext).contains(&"intl".to_string()));
+
+        let _ = fs::remove_dir_all(&php_dir);
+    }
+
     /// A version still being unpacked has no `ext/` to inspect, and an ini
     /// listing nothing would be worse than one listing too much.
     #[test]
     fn a_missing_ext_folder_falls_back_to_the_full_list() {
         let nowhere = std::env::temp_dir().join("rezure-test-ini-no-ext-folder");
         assert_eq!(enabled_extensions(&nowhere).len(), EXTENSIONS.len());
+    }
+
+    /// Without these, every HTTPS call out of PHP fails with cURL error 60,
+    /// because the Windows build carries no CA store of its own.
+    #[test]
+    fn render_points_both_tls_stacks_at_the_ca_bundle() {
+        let dir = std::env::temp_dir().join("rezure-test-ini-ca");
+        let bundle = dir.join(CA_BUNDLE_FILE);
+
+        let content = render(&dir.join("ext"), &dir, Some(&bundle), &dir.join("conf.d"));
+
+        let expected = ini_value(&bundle);
+        assert!(
+            content.contains(&format!("curl.cainfo = \"{expected}\"")),
+            "missing curl.cainfo, got: {content}"
+        );
+        assert!(
+            content.contains(&format!("openssl.cafile = \"{expected}\"")),
+            "missing openssl.cafile, got: {content}"
+        );
+        assert!(!content.contains('\\'), "paths must use forward slashes");
+    }
+
+    /// Naming a bundle that is not on disk is an error of its own, so the
+    /// pair is left out entirely rather than written blind.
+    #[test]
+    fn render_omits_the_ca_directives_when_no_bundle_is_installed() {
+        let dir = std::env::temp_dir().join("rezure-test-ini-no-ca");
+
+        let content = render(&dir.join("ext"), &dir, None, &dir.join("conf.d"));
+
+        assert!(!content.contains("curl.cainfo"));
+        assert!(!content.contains("openssl.cafile"));
     }
 
     /// A user's own edits live in this file, so a switch or a re-install
@@ -462,5 +655,76 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(&php_dir);
+    }
+
+    /// The generated file is disposable, so it has to name the folder that
+    /// isn't — otherwise a user editing it has no way to know their change
+    /// will be gone by the next start.
+    #[test]
+    fn the_generated_ini_points_at_the_folder_the_user_owns() {
+        let dir = std::env::temp_dir().join("rezure-test-ini-confd-header");
+        let conf_d = dir.join("conf.d");
+
+        let content = render(&dir.join("ext"), &dir, None, &conf_d);
+
+        let first = content.lines().next().unwrap_or_default();
+        assert!(
+            first.starts_with(';'),
+            "the header must be a comment: {first}"
+        );
+        assert!(
+            content.contains(&ini_value(&conf_d)),
+            "the header must name the conf.d folder, got: {content}"
+        );
+        // A comment must not read as a setting — `extension_dir` is parsed
+        // back out of this file by `repair_extension_dir`.
+        assert_eq!(
+            declared_extension_dir(&content),
+            Some(ini_value(&dir.join("ext")).as_str()),
+            "the header must not shadow the real extension_dir"
+        );
+    }
+
+    /// PHP is handed this path on every spawn, so it has to exist before the
+    /// first one — and the note is what makes the empty folder explain
+    /// itself to whoever opens it.
+    #[test]
+    fn ensure_conf_d_creates_the_folder_and_explains_it() {
+        let dir = ensure_conf_d().unwrap();
+
+        assert!(dir.is_dir(), "{} must exist", dir.display());
+        assert!(dir.ends_with("conf.d"));
+        let readme = dir.join("README.txt");
+        assert!(readme.is_file(), "the note must be there");
+        // Not an .ini, or PHP would try to parse it as settings.
+        assert!(fs::read_to_string(&readme)
+            .unwrap()
+            .contains("90-local.ini"));
+
+        // Idempotent, since every spawn calls it.
+        assert_eq!(ensure_conf_d().unwrap(), dir);
+    }
+
+    /// A user's own fragment must never be overwritten by a start, which is
+    /// the whole failure this folder exists to end.
+    #[test]
+    fn regenerating_the_ini_leaves_a_users_fragment_alone() {
+        let conf_d = ensure_conf_d().unwrap();
+        let fragment = conf_d.join("99-rezure-test.ini");
+        fs::write(&fragment, "memory_limit = 1G\n").unwrap();
+
+        let fake_php_exe = std::env::temp_dir()
+            .join(format!("rezure-test-confd-keep-{}", std::process::id()))
+            .join("php.exe");
+        let ini_path = ensure_php_ini(&fake_php_exe).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(&fragment).unwrap(),
+            "memory_limit = 1G\n",
+            "a start must not touch the user's own settings"
+        );
+
+        let _ = fs::remove_file(&fragment);
+        let _ = fs::remove_file(&ini_path);
     }
 }

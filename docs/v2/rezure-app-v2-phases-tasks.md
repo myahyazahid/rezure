@@ -4,12 +4,15 @@ Breakdown fase dan task untuk menambahkan kemampuan pengiriman telemetry di sisi
 
 ---
 
-## Fase 2.1 — Support / Ticket Menu
+## Fase 2.1 — Feedback / Bug Report Menu
 
 **Tujuan:** User bisa mengirim feedback atau laporan error dengan jelas, termasuk lampiran file, langsung dari dalam app.
 
+> Catatan: menu ini di-rename dari "Support" menjadi **"Feedback"** agar tidak bertabrakan dengan menu **"Support Developer"** (donasi) yang direncanakan di v3.
+
 ### Tasks
-- [ ] Tambahkan menu "Support" / "Feedback" di sidebar
+
+- [ ] Tambahkan menu "Feedback" di sidebar
 - [ ] Buat form pengiriman ticket: judul, deskripsi, kategori (Bug Report / Feature Request / General Feedback)
 - [ ] Implementasi upload lampiran file (screenshot, log file) — validasi tipe & ukuran file di sisi client sebelum kirim
 - [ ] Auto-attach info sistem opsional (versi Rezure, versi OS) supaya laporan bug lebih informatif tanpa user perlu ketik manual
@@ -26,6 +29,7 @@ Breakdown fase dan task untuk menambahkan kemampuan pengiriman telemetry di sisi
 **Tujuan:** Rezure bisa mengidentifikasi dirinya sendiri secara unik dan siap mencatat data (belum terhubung ke server).
 
 ### Tasks
+
 - [ ] Implementasi generate `device_id` (UUID v4) saat pertama kali app dibuka
 - [ ] Simpan `device_id` di local config (persist, tidak berubah selama app tidak di-reset/uninstall)
 - [ ] Buat tabel lokal SQLite `pending_events` (kolom: `id`, `payload`, `type` [event/heartbeat], `created_at`, `sent_at`)
@@ -40,6 +44,7 @@ Breakdown fase dan task untuk menambahkan kemampuan pengiriman telemetry di sisi
 **Tujuan:** Data dari antrian lokal terkirim ke API Laravel dengan aman, tanpa mengganggu UX.
 
 ### Tasks
+
 - [ ] Implementasi heartbeat berkala (interval 5-10 menit) selama app aktif
 - [ ] Implementasi pengiriman batch: ambil beberapa event dari `pending_events`, kirim sebagai satu request
 - [ ] Jalankan pengiriman di background task (`tokio::spawn`), non-blocking terhadap UI
@@ -55,6 +60,7 @@ Breakdown fase dan task untuk menambahkan kemampuan pengiriman telemetry di sisi
 **Tujuan:** Mulai mencatat event nyata dari fitur yang paling penting, bukan semua fitur sekaligus.
 
 ### Tasks
+
 - [ ] Instrumentasi event `app_opened`
 - [ ] Instrumentasi event `service_started` (metadata: nama service, versi)
 - [ ] Instrumentasi event `service_stopped`
@@ -68,6 +74,7 @@ Breakdown fase dan task untuk menambahkan kemampuan pengiriman telemetry di sisi
 **Tujuan:** Pastikan fitur telemetry tidak mengganggu pengalaman inti Rezure.
 
 ### Tasks
+
 - [ ] Review: pastikan tidak ada data selain yang direncanakan yang ikut tercatat/terkirim
 - [ ] Pastikan opt-out benar-benar menghentikan seluruh pencatatan, bukan hanya pengiriman
 - [ ] Pastikan kegagalan pengiriman (API down, tidak ada internet) tidak memunculkan error yang mengganggu user
@@ -80,6 +87,7 @@ Breakdown fase dan task untuk menambahkan kemampuan pengiriman telemetry di sisi
 **Tujuan:** User bisa lihat riwayat rilis Rezure langsung dari dalam app.
 
 ### Tasks
+
 - [ ] Tambahkan menu "Changelog" di sidebar
 - [ ] Buat UI list changelog: versi, tanggal, ringkasan perubahan (dikelompokkan per versi)
 - [ ] Implementasi fetch data dari endpoint `GET /api/v1/changelog` (`rezure-dashboard`)

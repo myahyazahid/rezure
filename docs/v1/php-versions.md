@@ -125,10 +125,54 @@ By default the active version reaches two places:
 
 ---
 
+## Configuring PHP
+
+Rezure generates its own `php.ini` and **rewrites it every time PHP starts**, so nothing you
+type into it survives. Your settings go in a folder Rezure never writes to:
+
+```
+C:\rezure\etc\php\conf.d\
+```
+
+Any `.ini` file there is loaded *after* the generated one and overrides it — for your `.test`
+sites, for Composer, and for `php` in your own terminal. Files are read in alphabetical order,
+so a `90-` prefix wins over a `10-` one.
+
+```ini
+; C:\rezure\etc\php\conf.d\90-local.ini
+memory_limit = 1G
+extension=intl
+```
+
+Restart the PHP service (Dashboard → PHP) for a change to reach running sites. `php --ini` in a
+terminal lists every fragment that was actually parsed — the fastest way to check a file is
+being read at all.
+
+| File | Who owns it | Survives a start? | Survives a version switch? |
+|---|---|---|---|
+| `data\php\php.ini` | Rezure — regenerated | no | no |
+| `bin\php\<version>\php.ini` | Rezure writes it once, then leaves it | yes | no — it's per-version |
+| `etc\php\conf.d\*.ini` | **you** | yes | yes |
+
+The middle one is also **not read by your `.test` sites at all**: the web server is started with
+`-c` naming the generated ini, which makes the copy in the version folder a CLI-only file. That
+is why `conf.d` is the only place worth editing.
+
+One shared folder for every version is deliberate — it keeps `php -m` in a terminal and a web
+request from disagreeing. The trade-off: enabling an extension an older build doesn't ship makes
+*that* version print a startup warning. Split those into a fragment you rename when you switch,
+or keep them out of the shared list.
+
+---
+
 ## Making it system-wide (optional)
 
 **Switch → "Use Rezure's PHP everywhere"** puts the active version on your user PATH, so `php`
 resolves to it in every terminal.
+
+It also sets `PHP_INI_SCAN_DIR` to `C:\rezure\etc\php\conf.d`, so that `php` reads the same
+settings your sites do. An existing value is kept and Rezure's folder appended after it; turning
+the feature off removes only Rezure's entry, and leaves the `conf.d` folder — your files — alone.
 
 ### How it works, and why not the obvious way
 

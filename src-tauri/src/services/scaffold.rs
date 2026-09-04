@@ -258,11 +258,16 @@ async fn scaffold_laravel(target: &Path) -> Result<(), AppError> {
         return Err(AppError::BinaryNotInstalled("PHP".to_string()));
     }
     let ini_path = php_ini::ensure_php_ini(&php_exe)?;
+    // Composer runs under the same settings a web request will, so a user
+    // who enabled an extension in conf.d gets it here too — otherwise
+    // `create-project` could pass a platform check the served app then fails.
+    let conf_d = php_ini::ensure_conf_d()?;
     let composer_phar = ensure_composer().await?;
 
     let target = target.to_path_buf();
     tokio::task::spawn_blocking(move || {
         let output = Command::new(&php_exe)
+            .env(php_ini::SCAN_DIR_ENV, &conf_d)
             .arg("-c")
             .arg(&ini_path)
             .arg(&composer_phar)

@@ -9,6 +9,7 @@ import RuntimeSwitchRow, {
 } from '@/components/services/RuntimeSwitchRow.vue'
 import InstallPhpVersionModal from '@/components/services/InstallPhpVersionModal.vue'
 import PhpPathLinkCard from '@/components/services/PhpPathLinkCard.vue'
+import PhpConfigCard from '@/components/services/PhpConfigCard.vue'
 import BusyOverlay from '@/components/common/BusyOverlay.vue'
 
 const phpStore = usePhpStore()
@@ -33,6 +34,7 @@ async function switchPhp(id: string) {
 onActivated(() => {
   composerStore.fetchStatus()
   phpStore.fetchDropInDir()
+  phpStore.fetchConfigDir()
   phpStore.fetchPathStatus()
 })
 
@@ -146,6 +148,10 @@ const composerVersions = computed<RuntimeVersionEntry[]>(() => [
 
     <div class="mt-3">
       <PhpPathLinkCard />
+    </div>
+
+    <div class="mt-3">
+      <PhpConfigCard />
     </div>
 
     <div class="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-neutral-400">

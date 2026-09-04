@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { LinkPreview, ProjectInfo, ProjectTemplate } from '@/types/project'
+import type { ProjectDiagnosis } from '@/types/php'
 
 function errorMessage(e: unknown): string {
   if (typeof e === 'string') return e
@@ -14,6 +15,12 @@ export const useProjectsStore = defineStore('projects', () => {
   const syncingHosts = ref(false)
   const hostsError = ref<string | null>(null)
   const openError = ref<string | null>(null)
+
+  /** The project whose requirements check is open, or null. One at a time:
+   *  the result is about a single project and shown in a modal. */
+  const doctorFor = ref<string | null>(null)
+  const diagnosis = ref<ProjectDiagnosis | null>(null)
+  const doctorError = ref<string | null>(null)
 
   const templates = ref<ProjectTemplate[]>([])
   const wwwRoot = ref('')
@@ -74,6 +81,30 @@ export const useProjectsStore = defineStore('projects', () => {
   const openSite = (id: string) => launch('open_project_site', id)
   const openFolder = (id: string) => launch('open_project_folder', id)
   const openTerminal = (id: string) => launch('open_project_terminal', id)
+
+  /**
+   * Reads a project's `ext-*` requirements back against the active PHP.
+   *
+   * Never runs on its own: it spawns `php -m`, so doing it for every card on
+   * every visit to this page would mean a process per project. It answers a
+   * question the user has just asked, which is also when the answer matters.
+   */
+  async function runDoctor(id: string) {
+    doctorFor.value = id
+    diagnosis.value = null
+    doctorError.value = null
+    try {
+      diagnosis.value = await invoke<ProjectDiagnosis>('diagnose_project', { id })
+    } catch (e) {
+      doctorError.value = errorMessage(e)
+    }
+  }
+
+  function closeDoctor() {
+    doctorFor.value = null
+    diagnosis.value = null
+    doctorError.value = null
+  }
 
   async function fetchTemplateInfo() {
     const [fetchedTemplates, fetchedWwwRoot] = await Promise.all([
@@ -149,6 +180,11 @@ export const useProjectsStore = defineStore('projects', () => {
     openError,
     allHostsReady,
     unresolvedProjects,
+    doctorFor,
+    diagnosis,
+    doctorError,
+    runDoctor,
+    closeDoctor,
     templates,
     wwwRoot,
     creating,

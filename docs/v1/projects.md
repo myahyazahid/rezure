@@ -83,6 +83,30 @@ Scanned projects have no Remove button — move the folder out of `www` instead.
 
 ---
 
+## Checking a project's requirements
+
+The stethoscope button on a project runs one check: every `ext-*` in that project's
+`composer.json`, compared against what the active PHP actually loads.
+
+It exists because that gap fails silently. Composer refuses to install without an extension,
+but a project installed elsewhere — cloned from a repo, copied from another machine — gets no
+such warning, and a Laravel app missing `ext-intl` answers a browser with a blank 500 while the
+real reason sits in `storage/logs/laravel.log`.
+
+The answer is about the PHP that serves the site: the active version, running with the same
+generated ini and the same settings folder the web server uses. Requirements that only
+`require-dev` asks for are listed but not counted as missing — a served site doesn't break
+without them.
+
+Nothing runs on its own. The check spawns `php -m`, so it happens when you ask for it, not once
+per project every time the page opens.
+
+Missing something? The fix is a line in your settings folder — see
+[Configuring PHP](php-versions.md#configuring-php). An extension whose DLL isn't in the build at
+all has to be installed first; Rezure doesn't ship PECL extensions such as `redis` yet.
+
+---
+
 ## How it works under the hood
 
 ### Identity

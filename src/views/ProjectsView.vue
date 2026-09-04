@@ -6,6 +6,7 @@ import BasePill from '@/components/common/BasePill.vue'
 import ProjectActionButtons from '@/components/projects/ProjectActionButtons.vue'
 import NewProjectModal from '@/components/projects/NewProjectModal.vue'
 import LinkProjectModal from '@/components/projects/LinkProjectModal.vue'
+import ProjectDoctorModal from '@/components/projects/ProjectDoctorModal.vue'
 import BusyOverlay from '@/components/common/BusyOverlay.vue'
 
 const store = useProjectsStore()
@@ -184,6 +185,10 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
 
     <NewProjectModal v-if="showNewProjectModal" @close="showNewProjectModal = false" />
     <LinkProjectModal v-if="showLinkProjectModal" @close="showLinkProjectModal = false" />
+
+    <!-- Rendered once, outside both the card grid and the list: the result
+         is about one project at a time, and the store already says which. -->
+    <ProjectDoctorModal />
 
     <BusyOverlay :show="busy !== null" :label="busy?.label ?? ''" :detail="busy?.detail ?? ''" />
 
