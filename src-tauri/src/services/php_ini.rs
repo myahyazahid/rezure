@@ -54,6 +54,11 @@ const EXTENSIONS: &[&str] = &[
     // Laravel 11's default `.env` uses SQLite (a local file, no server
     // needed) until a project's config points it at MariaDB instead.
     "pdo_sqlite",
+    // Not in the official zip — `services::php_ext` installs it on request.
+    // Listed here so that the moment its DLL lands in a version's `ext/`, the
+    // generated ini turns it on by itself; versions without it are unaffected,
+    // since every name here is filtered against what's really on disk.
+    "redis",
     "sqlite3",
     "zip",
 ];
@@ -191,6 +196,47 @@ fn enabled_extensions(extension_dir: &Path) -> Vec<String> {
         .collect()
 }
 
+/// Extension names the user's own `conf.d` fragments already enable.
+///
+/// Found the hard way: someone who enabled `intl` in `conf.d` before Rezure
+/// made it a default ends up with it enabled twice, and PHP answers every
+/// single start with `Module "intl" is already loaded`. On the CLI that is
+/// noise; under FastCGI it is bytes emitted ahead of the response, the same
+/// class of failure `output_buffering` is set for.
+///
+/// Both spellings PHP accepts are recognised, since a fragment copied out of
+/// an old php.ini says `extension=php_intl.dll` where a modern one says
+/// `extension=intl`.
+fn user_enabled_extensions(conf_d: &Path) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(conf_d) else {
+        return Vec::new();
+    };
+
+    entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "ini"))
+        .filter_map(|path| fs::read_to_string(path).ok())
+        .flat_map(|content| {
+            content
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.starts_with(';'))
+                .filter_map(|line| line.strip_prefix("extension"))
+                .filter_map(|rest| rest.trim_start().strip_prefix('='))
+                .map(|value| {
+                    value
+                        .trim()
+                        .trim_matches('"')
+                        .trim_start_matches("php_")
+                        .trim_end_matches(".dll")
+                        .to_lowercase()
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
 /// The directives themselves, shared by both copies.
 ///
 /// `extension_dir` is always absolute: PHP resolves a relative one against
@@ -211,7 +257,14 @@ fn render(extension_dir: &Path, tmp: &Path, ca_bundle: Option<&Path>, conf_d: &P
         "extension_dir = \"{}\"\n",
         ini_value(extension_dir)
     ));
+    // Anything the user already turned on in `conf.d` is left to their file:
+    // enabling it here too would only earn an "already loaded" warning on
+    // every start.
+    let user_enabled = user_enabled_extensions(conf_d);
     for extension in enabled_extensions(extension_dir) {
+        if user_enabled.contains(&extension.to_lowercase()) {
+            continue;
+        }
         ini.push_str(&format!("extension={extension}\n"));
     }
     ini.push_str("memory_limit = 256M\n");
@@ -321,6 +374,44 @@ pub fn ensure_cli_php_ini(php_dir: &Path) -> Result<Option<PathBuf>, AppError> {
     Ok(Some(ini_path))
 }
 
+/// Adds `extension=<name>` to an install's own `php.ini` when it isn't already
+/// there, and reports whether it had to.
+///
+/// Additive only, and deliberately so. The generated ini needs nothing like
+/// this — it is rewritten from the real contents of `ext/` on every start
+/// — but the copy inside the version folder is written once and then left to
+/// the user forever ([`ensure_cli_php_ini`]). Without this, installing an
+/// extension would work for served sites and appear to have done nothing at
+/// all in a terminal.
+///
+/// A commented-out line does not count as enabled: `;extension=redis` is what
+/// a file looks like after someone turned it off on purpose, and the answer to
+/// that is to add the real line, not to edit theirs.
+pub fn ensure_extension_enabled(php_dir: &Path, name: &str) -> Result<bool, AppError> {
+    let ini_path = php_dir.join("php.ini");
+    let Ok(existing) = fs::read_to_string(&ini_path) else {
+        // No ini yet: the next `ensure_cli_php_ini` writes one that already
+        // lists every extension present in `ext/`, including this one.
+        return Ok(false);
+    };
+
+    let wanted = format!("extension={name}");
+    let already = existing
+        .lines()
+        .map(str::trim)
+        .any(|line| !line.starts_with(';') && line.replace(' ', "") == wanted);
+    if already {
+        return Ok(false);
+    }
+
+    let separator = if existing.ends_with('\n') { "" } else { "\n" };
+    fs::write(&ini_path, format!("{existing}{separator}{wanted}\n"))
+        .map_err(|e| AppError::Io(format!("could not write {}: {e}", ini_path.display())))?;
+
+    log::info!("enabled {name} in {}", ini_path.display());
+    Ok(true)
+}
+
 /// Reads the directory an existing ini's `extension_dir` names, if it has one.
 fn declared_extension_dir(ini: &str) -> Option<&str> {
     ini.lines()
@@ -397,6 +488,17 @@ pub fn repair_extension_dir(php_dir: &Path) -> Result<bool, AppError> {
 mod tests {
     use super::*;
 
+    /// `ensure_php_ini` writes one fixed path by design, so every test that
+    /// calls it has to take a turn: run in parallel, one test reads the file
+    /// while another is still writing it and sees a truncated ini. The failure
+    /// looks like a missing extension, which is a lie about the code.
+    fn ini_guard() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        LOCK.get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     /// A PHP folder with an `ext/` directory and the ini content given.
     fn fake_php_dir(label: &str, ini: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -472,6 +574,7 @@ mod tests {
 
     #[test]
     fn ensure_php_ini_enables_every_required_extension() {
+        let _guard = ini_guard();
         let fake_php_exe = std::env::temp_dir()
             .join(format!("rezure-test-phpini-{}", std::process::id()))
             .join("php.exe");
@@ -479,9 +582,14 @@ mod tests {
         let ini_path = ensure_php_ini(&fake_php_exe).unwrap();
         let content = fs::read_to_string(&ini_path).unwrap();
 
+        // A default the user's own conf.d already enables is deliberately left
+        // out of this file - see `user_enabled_extensions`. The rule is
+        // "enabled somewhere", not "enabled here".
+        let user_enabled = user_enabled_extensions(&conf_d().unwrap());
         for extension in EXTENSIONS {
             assert!(
-                content.contains(&format!("extension={extension}")),
+                content.contains(&format!("extension={extension}"))
+                    || user_enabled.contains(&extension.to_lowercase()),
                 "missing extension={extension}"
             );
         }
@@ -496,6 +604,7 @@ mod tests {
     /// never stick.
     #[test]
     fn ensure_php_ini_buffers_output_and_points_php_at_a_real_temp_dir() {
+        let _guard = ini_guard();
         let fake_php_exe = std::env::temp_dir()
             .join(format!("rezure-test-phpini-buf-{}", std::process::id()))
             .join("php.exe");
@@ -657,6 +766,123 @@ mod tests {
         let _ = fs::remove_dir_all(&php_dir);
     }
 
+    /// Installing an extension has to reach the terminal `php` too, and that
+    /// one reads an ini Rezure wrote once and never rewrites.
+    #[test]
+    fn an_installed_extension_is_appended_to_an_existing_cli_ini() {
+        let dir = fake_php_dir(
+            "addext",
+            "extension_dir = \"C:/php/ext\"
+extension=curl
+",
+        );
+
+        assert!(ensure_extension_enabled(&dir, "redis").unwrap(), "must add");
+        let content = fs::read_to_string(dir.join("php.ini")).unwrap();
+        assert!(content.contains("extension=redis"));
+        // The user's file is added to, never rewritten.
+        assert!(content.contains("extension=curl"));
+
+        // Idempotent: a second install attempt must not add a second line.
+        assert!(!ensure_extension_enabled(&dir, "redis").unwrap());
+        assert_eq!(content.matches("extension=redis").count(), 1);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// `;extension=redis` is what a file looks like after someone turned it
+    /// off deliberately. Uncommenting their line would be editing their
+    /// decision; adding the real line is not.
+    #[test]
+    fn a_commented_out_extension_does_not_count_as_enabled() {
+        let dir = fake_php_dir(
+            "addext-commented",
+            ";extension=redis
+",
+        );
+
+        assert!(ensure_extension_enabled(&dir, "redis").unwrap());
+        let content = fs::read_to_string(dir.join("php.ini")).unwrap();
+        assert!(content.contains(";extension=redis"), "their line survives");
+        assert!(content.lines().any(|line| line == "extension=redis"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The duplicate this prevents is not hypothetical: anyone who followed
+    /// the advice to enable an extension in `conf.d` before Rezure made it a
+    /// default gets `Module "intl" is already loaded` on every start.
+    #[test]
+    fn an_extension_the_user_already_enabled_is_not_enabled_twice() {
+        let dir =
+            std::env::temp_dir().join(format!("rezure-test-ini-dup-{}-confd", std::process::id()));
+        let ext = dir.join("ext");
+        let conf_d = dir.join("conf.d");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&ext).unwrap();
+        fs::create_dir_all(&conf_d).unwrap();
+        for dll in ["php_intl.dll", "php_curl.dll"] {
+            fs::write(ext.join(dll), "").unwrap();
+        }
+        // Their file, in both spellings PHP accepts.
+        fs::write(conf_d.join("10-intl.ini"), "extension=intl\n").unwrap();
+        fs::write(conf_d.join("20-curl.ini"), ";extension=zip\n").unwrap();
+
+        let content = render(&ext, &dir, None, &conf_d);
+
+        assert!(
+            !content.contains("extension=intl"),
+            "conf.d already enables intl, got: {content}"
+        );
+        // A commented-out fragment line is not an enable, so curl still has to
+        // come from here.
+        assert!(content.contains("extension=curl"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The old spelling has to be recognised too, or the duplicate comes back
+    /// for anyone whose fragment was copied out of a full php.ini.
+    #[test]
+    fn the_php_dll_spelling_counts_as_enabled_too() {
+        let dir =
+            std::env::temp_dir().join(format!("rezure-test-ini-dup2-{}-confd", std::process::id()));
+        let ext = dir.join("ext");
+        let conf_d = dir.join("conf.d");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&ext).unwrap();
+        fs::create_dir_all(&conf_d).unwrap();
+        fs::write(ext.join("php_intl.dll"), "").unwrap();
+        fs::write(conf_d.join("intl.ini"), "extension = \"php_intl.dll\"").unwrap();
+
+        assert!(!render(&ext, &dir, None, &conf_d).contains("extension=intl"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Prints the ini Rezure would really hand PHP right now, for the version
+    /// that is actually active, against the real `conf.d`. Run with:
+    /// `cargo test --lib services::php_ini::tests::print_generated_ini -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn print_generated_ini() {
+        let Ok(php_exe) = crate::services::php::active_exe() else {
+            println!("no PHP installed - nothing to generate");
+            return;
+        };
+        let path = ensure_php_ini(&php_exe).unwrap();
+        println!(
+            "{}
+---",
+            path.display()
+        );
+        println!("{}", fs::read_to_string(&path).unwrap());
+        println!(
+            "--- conf.d already enables: {:?}",
+            user_enabled_extensions(&conf_d().unwrap())
+        );
+    }
+
     /// The generated file is disposable, so it has to name the folder that
     /// isn't — otherwise a user editing it has no way to know their change
     /// will be gone by the next start.
@@ -709,6 +935,7 @@ mod tests {
     /// the whole failure this folder exists to end.
     #[test]
     fn regenerating_the_ini_leaves_a_users_fragment_alone() {
+        let _guard = ini_guard();
         let conf_d = ensure_conf_d().unwrap();
         let fragment = conf_d.join("99-rezure-test.ini");
         fs::write(&fragment, "memory_limit = 1G\n").unwrap();

@@ -20,6 +20,30 @@ pub struct ChangelogEntry {
     pub released_at: String,
 }
 
+/// Mirrors the wire shape of `GET /api/v1/changelog` — `rezure-dashboard` is
+/// a Laravel app and returns snake_case keys, unlike `ChangelogEntry`'s
+/// camelCase (used for the cache file and the Tauri IPC boundary to the
+/// Vue frontend). Deserializing straight into `ChangelogEntry` silently
+/// failed here (missing `releasedAt`), which fell back to an empty cache.
+#[derive(Debug, Deserialize)]
+struct ApiChangelogEntry {
+    version: String,
+    title: String,
+    body: String,
+    released_at: String,
+}
+
+impl From<ApiChangelogEntry> for ChangelogEntry {
+    fn from(entry: ApiChangelogEntry) -> Self {
+        Self {
+            version: entry.version,
+            title: entry.title,
+            body: entry.body,
+            released_at: entry.released_at,
+        }
+    }
+}
+
 fn cache_path() -> Result<std::path::PathBuf, AppError> {
     Ok(paths::etc()?.join("changelog_cache.json"))
 }
@@ -64,10 +88,12 @@ async fn fetch_live() -> Result<Vec<ChangelogEntry>, AppError> {
             response.status()
         )));
     }
-    response
-        .json::<Vec<ChangelogEntry>>()
+    let entries = response
+        .json::<Vec<ApiChangelogEntry>>()
         .await
-        .map_err(|e| AppError::Io(format!("unexpected response: {e}")))
+        .map_err(|e| AppError::Io(format!("unexpected response: {e}")))?;
+
+    Ok(entries.into_iter().map(ChangelogEntry::from).collect())
 }
 
 /// Fetches the changelog, refreshing the local cache on success and falling

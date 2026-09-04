@@ -17,6 +17,28 @@ Roadmap fitur lanjutan Rezure. Beberapa fitur yang sebelumnya direncanakan di v3
 
 ---
 
+## Fase 3.1b — PECL Extension Installer (redis)
+
+**Tujuan:** User bisa memasang ekstensi yang tidak ikut di zip resmi PHP — `redis` lebih dulu —
+langsung dari dalam app, tanpa berburu DLL.
+
+> **Catatan:** implementasinya sudah ditulis dan lolos test saat mengerjakan feedback user, lalu
+> ditunda ke v3 supaya rilis v2 tetap bersih. Lihat `services/php_ext.rs` beserta tombol Install di
+> requirements check. Yang tersisa hanyalah keputusan rilis, bukan pekerjaan implementasi.
+
+### Tasks
+
+- [x] Katalog PECL dengan SHA-256 di-pin per branch PHP (7.4—8.5), karena area PECL php.net tidak
+      menyediakan index checksum apa pun
+- [x] Unduh lewat jalur terverifikasi yang sama dengan runtime lain (`binaries::install_archive`)
+- [x] Ekstrak hanya DLL-nya ke `ext/` versi terkait; arsipnya juga berisi README/LICENSE/`.pdb`
+- [x] Aktifkan untuk web (ini generated) dan untuk terminal (baris aditif di ini versi)
+- [x] Tombol Install di requirements check project, lalu cek ulang otomatis
+- [ ] Uji klik pertama di app sungguhan (unduhan nyata lewat `AppHandle`, tidak bisa headless)
+- [ ] Putuskan cakupan katalog berikutnya (`imagick`? `xdebug`?) sebelum daftarnya jadi beban rawat
+
+---
+
 ## Fase 3.2 — Docker Toggle Mode
 
 **Tujuan:** User bisa pilih menjalankan service via native binary (default) atau via Docker container.

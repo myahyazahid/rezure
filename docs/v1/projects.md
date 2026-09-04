@@ -101,9 +101,12 @@ without them.
 Nothing runs on its own. The check spawns `php -m`, so it happens when you ask for it, not once
 per project every time the page opens.
 
-Missing something? The fix is a line in your settings folder — see
-[Configuring PHP](php-versions.md#configuring-php). An extension whose DLL isn't in the build at
-all has to be installed first; Rezure doesn't ship PECL extensions such as `redis` yet.
+Missing something? For an extension Rezure can install — `redis` today — the check offers an
+**Install** button next to it, and re-runs itself afterwards. For anything else, the fix is a line
+in your settings folder: see [Configuring PHP](php-versions.md#configuring-php).
+
+An install reaches new requests only after the PHP service restarts; the copy already serving
+requests read its configuration when it started.
 
 ---
 

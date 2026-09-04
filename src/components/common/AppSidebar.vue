@@ -75,7 +75,11 @@ const navItems = computed(() => [
   {
     to: '/support',
     icon: 'support' as const,
-    label: 'Support',
+    // Labelled "Feedback", not "Support": v3 adds a "Support Developer"
+    // (donate) menu, and two neighbouring entries reading "Support" would
+    // send bug reports to the donation page. The route, store and API path
+    // stay `support` - that is what the backend contract calls the endpoint.
+    label: 'Feedback',
     badge: '',
     variant: 'default' as const,
   },

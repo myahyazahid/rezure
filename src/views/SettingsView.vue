@@ -211,7 +211,9 @@ const DOMAIN_SUFFIXES = ['test', 'local', 'dev'] as const
         <div>
           <p class="font-semibold text-neutral-900 dark:text-neutral-100">Share usage data</p>
           <p class="mt-0.5 text-xs text-neutral-500">
-            Anonymous, opt-in — not collected yet (planned for v2's telemetry).
+            Anonymous and opt-in: a random device id, the app and OS version, and which services you
+            start or stop. Never your project names, paths, or file contents. Off means nothing is
+            recorded at all, not merely that nothing is sent.
           </p>
         </div>
         <button

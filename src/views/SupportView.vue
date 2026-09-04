@@ -62,7 +62,7 @@ function formatSize(bytes: number): string {
 
 <template>
   <section>
-    <h1 class="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Support</h1>
+    <h1 class="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Feedback</h1>
     <p class="mt-1 text-sm text-neutral-500">
       Report a bug, request a feature, or send general feedback.
     </p>

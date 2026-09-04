@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useProjectsStore } from '@/stores/projects'
 import { usePhpStore } from '@/stores/php'
 
@@ -12,6 +12,36 @@ const loading = computed(() => store.doctorFor !== null && !result.value && !sto
 
 /** The one number that decides what this modal is saying. */
 const missingCount = computed(() => result.value?.missing.length ?? 0)
+
+/** Names installed during this visit — what the "restart PHP" note is for. */
+const justInstalled = ref<string[]>([])
+
+// The catalog is per PHP branch, so it can only be asked for once the check
+// has said which PHP it was talking about.
+watch(
+  () => result.value?.phpVersion,
+  (phpVersion) => {
+    justInstalled.value = []
+    if (phpVersion) phpStore.fetchExtensions(phpVersion)
+  },
+  { immediate: true },
+)
+
+/** The catalog entry for a missing extension, when Rezure can install it. */
+function installable(name: string) {
+  return phpStore.extensions.find((e) => e.id === name && e.available && !e.installed) ?? null
+}
+
+async function install(name: string) {
+  const phpVersion = result.value?.phpVersion
+  if (!phpVersion) return
+  const ok = await phpStore.installExtension(name, phpVersion)
+  if (!ok) return
+  justInstalled.value = [...justInstalled.value, name]
+  // Re-check rather than assume: `php -m` is the only thing that actually
+  // knows whether the DLL loaded.
+  if (store.doctorFor) await store.runDoctor(store.doctorFor)
+}
 </script>
 
 <template>
@@ -91,6 +121,19 @@ const missingCount = computed(() => result.value?.missing.length ?? 0)
               </span>
               <code class="font-mono text-neutral-800 dark:text-neutral-200">{{ check.name }}</code>
               <span v-if="check.devOnly" class="text-xs text-neutral-400">dev only</span>
+
+              <!-- Only for the ones Rezure has a checksum-verified build of;
+                   everything else stays a diagnosis, not a dead button. -->
+              <button
+                v-if="!check.loaded && installable(check.name)"
+                type="button"
+                class="ml-auto shrink-0 rounded-full border border-neutral-200 px-3 py-1 text-xs font-semibold text-neutral-700 transition hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                :disabled="phpStore.installingExtension !== null"
+                @click="install(check.name)"
+              >
+                <template v-if="phpStore.installingExtension === check.name">Installing…</template>
+                <template v-else>Install {{ installable(check.name)?.version }}</template>
+              </button>
             </li>
           </ul>
 
@@ -104,6 +147,22 @@ const missingCount = computed(() => result.value?.missing.length ?? 0)
           </p>
         </template>
       </template>
+
+      <p
+        v-if="justInstalled.length"
+        class="mt-4 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300"
+      >
+        Installed <strong>{{ justInstalled.join(', ') }}</strong
+        >. Restart the PHP service for running sites to pick it up — the copy already serving
+        requests read its configuration when it started.
+      </p>
+
+      <p
+        v-if="phpStore.error"
+        class="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+      >
+        {{ phpStore.error }}
+      </p>
 
       <div class="mt-6 flex items-center justify-end gap-2">
         <button

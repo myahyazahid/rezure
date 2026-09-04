@@ -48,6 +48,8 @@ pub fn run() {
                 commands::php::php_config_dir,
                 commands::php::open_php_config_dir,
                 commands::php::diagnose_project,
+                commands::php::php_extensions,
+                commands::php::install_php_extension,
                 commands::php::php_path_status,
                 commands::php::enable_php_path,
                 commands::php::disable_php_path,

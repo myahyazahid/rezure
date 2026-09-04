@@ -2,6 +2,11 @@
 
 Breakdown fase dan task untuk menambahkan kemampuan pengiriman telemetry di sisi **Rezure desktop app**. Proyek ini terpisah dari `rezure-dashboard`, berkomunikasi hanya lewat kontrak API (lihat `docs/telemetry-contract.md`).
 
+> **Status (audit 2026-09-05):** centang di bawah diisi dari pembacaan kode, bukan dari ingatan.
+> Task yang berupa pengujian manual sengaja dibiarkan kosong — itu harus dijalankan orang, bukan
+> disimpulkan dari source. Dua hal menyimpang dari rencana awal dan sengaja dibiarkan begitu;
+> keduanya dicatat di tempatnya.
+
 ---
 
 ## Fase 2.1 — Feedback / Bug Report Menu
@@ -12,15 +17,16 @@ Breakdown fase dan task untuk menambahkan kemampuan pengiriman telemetry di sisi
 
 ### Tasks
 
-- [ ] Tambahkan menu "Feedback" di sidebar
-- [ ] Buat form pengiriman ticket: judul, deskripsi, kategori (Bug Report / Feature Request / General Feedback)
-- [ ] Implementasi upload lampiran file (screenshot, log file) — validasi tipe & ukuran file di sisi client sebelum kirim
-- [ ] Auto-attach info sistem opsional (versi Rezure, versi OS) supaya laporan bug lebih informatif tanpa user perlu ketik manual
-- [ ] Tombol "Lampirkan log terbaru" — ambil log dari service yang error (integrasi dengan log viewer yang sudah ada di v1)
-- [ ] Kirim ticket via `POST /api/v1/support/tickets` (multipart form-data) ke `rezure-dashboard`
-- [ ] Tampilkan status pengiriman jelas (loading, sukses, gagal) — ini aksi yang di-inisiasi user secara langsung, jadi feedback harus real-time, beda dari telemetry yang silent di background
-- [ ] Tangani kegagalan kirim dengan baik (retry manual oleh user, atau simpan draft lokal supaya tidak hilang)
-- [ ] (Opsional) Halaman riwayat ticket yang pernah dikirim user beserta statusnya (Open/In Progress/Resolved), diambil dari `GET /api/v1/support/tickets?device_id=...`
+- [x] Tambahkan menu "Feedback" di sidebar  
+      Label menu dan judul halaman "Feedback"; route, store, dan endpoint tetap `support` — itu nama yang dipakai kontrak API.
+- [x] Buat form pengiriman ticket: judul, deskripsi, kategori (Bug Report / Feature Request / General Feedback)
+- [x] Implementasi upload lampiran file (screenshot, log file) — validasi tipe & ukuran file di sisi client sebelum kirim
+- [x] Auto-attach info sistem opsional (versi Rezure, versi OS) supaya laporan bug lebih informatif tanpa user perlu ketik manual
+- [x] Tombol "Lampirkan log terbaru" — ambil log dari service yang error (integrasi dengan log viewer yang sudah ada di v1)
+- [x] Kirim ticket via `POST /api/v1/support/tickets` (multipart form-data) ke `rezure-dashboard`
+- [x] Tampilkan status pengiriman jelas (loading, sukses, gagal) — ini aksi yang di-inisiasi user secara langsung, jadi feedback harus real-time, beda dari telemetry yang silent di background
+- [x] Tangani kegagalan kirim dengan baik (retry manual oleh user, atau simpan draft lokal supaya tidak hilang)
+- [x] (Opsional) Halaman riwayat ticket yang pernah dikirim user beserta statusnya (Open/In Progress/Resolved), diambil dari `GET /api/v1/support/tickets?device_id=...`
 
 ---
 
@@ -30,12 +36,12 @@ Breakdown fase dan task untuk menambahkan kemampuan pengiriman telemetry di sisi
 
 ### Tasks
 
-- [ ] Implementasi generate `device_id` (UUID v4) saat pertama kali app dibuka
-- [ ] Simpan `device_id` di local config (persist, tidak berubah selama app tidak di-reset/uninstall)
-- [ ] Buat tabel lokal SQLite `pending_events` (kolom: `id`, `payload`, `type` [event/heartbeat], `created_at`, `sent_at`)
-- [ ] Buat modul `TelemetryClient` di Rust sebagai titik masuk tunggal untuk mencatat data (`record_event()`, `record_heartbeat()`)
-- [ ] Tambahkan toggle "Share anonymous usage data" di halaman Settings
-- [ ] Pastikan saat toggle off, `TelemetryClient` tidak mencatat apapun ke antrian lokal
+- [x] Implementasi generate `device_id` (UUID v4) saat pertama kali app dibuka
+- [x] Simpan `device_id` di local config (persist, tidak berubah selama app tidak di-reset/uninstall)
+- [x] Buat tabel lokal SQLite `pending_events` (kolom: `id`, `payload`, `type` [event/heartbeat], `created_at`, `sent_at`)
+- [x] Buat modul `TelemetryClient` di Rust sebagai titik masuk tunggal untuk mencatat data (`record_event()`, `record_heartbeat()`)
+- [x] Tambahkan toggle "Share anonymous usage data" di halaman Settings
+- [x] Pastikan saat toggle off, `TelemetryClient` tidak mencatat apapun ke antrian lokal
 
 ---
 
@@ -45,13 +51,14 @@ Breakdown fase dan task untuk menambahkan kemampuan pengiriman telemetry di sisi
 
 ### Tasks
 
-- [ ] Implementasi heartbeat berkala (interval 5-10 menit) selama app aktif
-- [ ] Implementasi pengiriman batch: ambil beberapa event dari `pending_events`, kirim sebagai satu request
-- [ ] Jalankan pengiriman di background task (`tokio::spawn`), non-blocking terhadap UI
-- [ ] Set timeout pendek untuk request (misal 5 detik)
-- [ ] Tandai event sebagai `sent_at` setelah sukses terkirim; bersihkan/retensi terbatas untuk event yang sudah terkirim
-- [ ] Retry logic sederhana untuk event yang gagal terkirim (exponential backoff atau retry di siklus berikutnya)
-- [ ] Implementasi HTTP client (`reqwest`) untuk memanggil endpoint ingest sesuai kontrak API
+- [x] Implementasi heartbeat berkala (interval 5-10 menit) selama app aktif
+- [x] Implementasi pengiriman batch: ambil beberapa event dari `pending_events`, kirim sebagai satu request  
+      Menyimpang: batch dibaca sekaligus (20 baris), tapi dikirim satu request per baris — backend tidak punya endpoint bulk, `telemetry/event` dan `telemetry/heartbeat` terpisah.
+- [x] Jalankan pengiriman di background task (`tokio::spawn`), non-blocking terhadap UI
+- [x] Set timeout pendek untuk request (misal 5 detik)
+- [x] Tandai event sebagai `sent_at` setelah sukses terkirim; bersihkan/retensi terbatas untuk event yang sudah terkirim
+- [x] Retry logic sederhana untuk event yang gagal terkirim (exponential backoff atau retry di siklus berikutnya)
+- [x] Implementasi HTTP client (`reqwest`) untuk memanggil endpoint ingest sesuai kontrak API
 
 ---
 
@@ -61,10 +68,12 @@ Breakdown fase dan task untuk menambahkan kemampuan pengiriman telemetry di sisi
 
 ### Tasks
 
-- [ ] Instrumentasi event `app_opened`
-- [ ] Instrumentasi event `service_started` (metadata: nama service, versi)
-- [ ] Instrumentasi event `service_stopped`
-- [ ] Uji manual: pastikan event tercatat di `pending_events` saat aksi dilakukan
+- [x] Instrumentasi event `app_opened`
+- [x] Instrumentasi event `service_started` (metadata: nama service, versi)
+- [x] Instrumentasi event `service_stopped`
+- [x] Uji manual: pastikan event tercatat di `pending_events` saat aksi dilakukan  
+      Terverifikasi di `C:\rezure\rezure.db` (5 Sep 2026): 35 event + 9 heartbeat, semuanya ber-`sent_at`,
+      payload sesuai kontrak (`device_id`, `event_id`, `event_type`, `event_name`, `app_version`).
 - [ ] Uji skenario offline → online: pastikan event tetap terkirim setelah koneksi kembali
 
 ---
@@ -75,10 +84,10 @@ Breakdown fase dan task untuk menambahkan kemampuan pengiriman telemetry di sisi
 
 ### Tasks
 
-- [ ] Review: pastikan tidak ada data selain yang direncanakan yang ikut tercatat/terkirim
-- [ ] Pastikan opt-out benar-benar menghentikan seluruh pencatatan, bukan hanya pengiriman
-- [ ] Pastikan kegagalan pengiriman (API down, tidak ada internet) tidak memunculkan error yang mengganggu user
-- [ ] Dokumentasikan payload yang dikirim di `docs/telemetry-contract.md`
+- [x] Review: pastikan tidak ada data selain yang direncanakan yang ikut tercatat/terkirim
+- [x] Pastikan opt-out benar-benar menghentikan seluruh pencatatan, bukan hanya pengiriman
+- [x] Pastikan kegagalan pengiriman (API down, tidak ada internet) tidak memunculkan error yang mengganggu user
+- [x] Dokumentasikan payload yang dikirim di `docs/telemetry-contract.md`
 
 ---
 
@@ -88,12 +97,12 @@ Breakdown fase dan task untuk menambahkan kemampuan pengiriman telemetry di sisi
 
 ### Tasks
 
-- [ ] Tambahkan menu "Changelog" di sidebar
-- [ ] Buat UI list changelog: versi, tanggal, ringkasan perubahan (dikelompokkan per versi)
-- [ ] Implementasi fetch data dari endpoint `GET /api/v1/changelog` (`rezure-dashboard`)
-- [ ] Cache hasil fetch secara lokal (SQLite/file) supaya tetap bisa dibuka saat offline
-- [ ] Tambahkan badge notifikasi kecil di menu jika ada entry baru yang belum dibaca (bandingkan versi terakhir dibaca vs data terbaru dari API)
-- [ ] Handle graceful saat API tidak bisa diakses (tampilkan data cache terakhir, jangan error mengganggu)
+- [x] Tambahkan menu "Changelog" di sidebar
+- [x] Buat UI list changelog: versi, tanggal, ringkasan perubahan (dikelompokkan per versi)
+- [x] Implementasi fetch data dari endpoint `GET /api/v1/changelog` (`rezure-dashboard`)
+- [x] Cache hasil fetch secara lokal (SQLite/file) supaya tetap bisa dibuka saat offline
+- [x] Tambahkan badge notifikasi kecil di menu jika ada entry baru yang belum dibaca (bandingkan versi terakhir dibaca vs data terbaru dari API)
+- [x] Handle graceful saat API tidak bisa diakses (tampilkan data cache terakhir, jangan error mengganggu)
 
 ---
 

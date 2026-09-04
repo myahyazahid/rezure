@@ -66,3 +66,15 @@ export interface ProjectDiagnosis {
   /** The names that actually need acting on. */
   missing: string[]
 }
+
+/** A PECL extension Rezure can install into a PHP version. */
+export interface ExtensionStatus {
+  id: string
+  name: string
+  version: string
+  summary: string
+  /** Already in this version's ext/ folder. */
+  installed: boolean
+  /** A verified build exists for this PHP branch. */
+  available: boolean
+}

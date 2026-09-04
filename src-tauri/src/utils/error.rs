@@ -15,6 +15,9 @@ pub enum AppError {
     #[error("unknown binary package: {0}")]
     UnknownBinary(String),
 
+    #[error("{id} isn't available for PHP {php_version} yet")]
+    ExtensionUnavailable { id: String, php_version: String },
+
     #[error("download failed: {0}")]
     Download(String),
 

@@ -13,6 +13,7 @@ use crate::services::binaries;
 use crate::services::doctor::{self, ProjectDiagnosis};
 use crate::services::php::{self, PhpVersionStatus};
 use crate::services::php_catalog::{self, PhpRelease};
+use crate::services::php_ext::{self, ExtensionStatus};
 use crate::services::php_ini;
 use crate::services::php_path::{self, PhpPathStatus};
 use crate::services::{ServiceManager, ServiceStatus};
@@ -158,6 +159,30 @@ pub fn open_php_drop_in_dir() -> Result<(), AppError> {
             reason: e.to_string(),
         }
     })
+}
+
+/// Which PECL extensions Rezure can add to this PHP version, and which are
+/// already there.
+#[tauri::command]
+pub async fn php_extensions(php_version: String) -> Result<Vec<ExtensionStatus>, AppError> {
+    tokio::task::spawn_blocking(move || php_ext::status_for(&php_version))
+        .await
+        .map_err(joined)?
+}
+
+/// Downloads a PECL extension, verifies it against its pinned checksum, and
+/// installs it into that PHP version.
+///
+/// Returns the refreshed list rather than a bare `Ok`, so the UI can't end up
+/// showing a stale "not installed" next to an extension that now is.
+#[tauri::command]
+pub async fn install_php_extension(
+    app: AppHandle,
+    id: String,
+    php_version: String,
+) -> Result<Vec<ExtensionStatus>, AppError> {
+    php_ext::install(&app, &id, &php_version).await?;
+    php_ext::status_for(&php_version)
 }
 
 /// Reads a project's `ext-*` requirements back against the active PHP.

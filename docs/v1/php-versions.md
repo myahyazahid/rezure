@@ -165,6 +165,34 @@ or keep them out of the shared list.
 
 ---
 
+## Extensions that aren't in the PHP zip
+
+php.net's Windows build ships a large `ext/` folder, but **PECL extensions are not in it** —
+`redis` above all, which Laravel projects need for queues, cache and Horizon, and which
+`composer install` refuses to work without once `"ext-redis"` is in `composer.json`.
+
+Rezure installs those on request. A project's
+[requirements check](projects.md#checking-a-projects-requirements) offers an **Install** button
+next to a missing extension it has a build for; the DLL lands in that PHP version's `ext/` folder,
+and Rezure enables it for both the served site and your terminal.
+
+Two things are worth knowing about how this works:
+
+**Downloads are checksum-verified, which is why the list is short.** php.net publishes a machine-readable
+index with hashes for PHP itself, so the version list stays current on its own. The PECL area
+publishes no such index and no checksum files at all. Rather than download something unverified,
+Rezure pins a SHA-256 per extension per PHP branch. The cost is that a brand-new PHP branch shows
+the extension as unavailable until a hash is added — a wrong answer that says so, instead of a
+download nobody checked.
+
+**It's per version.** The DLL goes into one version's `ext/`, so switching to a PHP version that
+never had it installed leaves it missing there. That is deliberate: an extension built for 8.4
+cannot be loaded by 8.5. Run the check again after a switch.
+
+Currently installable: **redis 6.3.0**, for PHP 7.4 through 8.5 (NTS x64).
+
+---
+
 ## Making it system-wide (optional)
 
 **Switch → "Use Rezure's PHP everywhere"** puts the active version on your user PATH, so `php`
