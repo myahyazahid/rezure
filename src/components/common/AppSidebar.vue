@@ -66,13 +66,6 @@ const navItems = computed(() => [
     variant: 'alert' as const,
   },
   {
-    to: '/settings',
-    icon: 'settings' as const,
-    label: 'Settings',
-    badge: '',
-    variant: 'default' as const,
-  },
-  {
     to: '/support',
     icon: 'support' as const,
     // Labelled "Feedback", not "Support": v3 adds a "Support Developer"
@@ -89,6 +82,15 @@ const navItems = computed(() => [
     label: 'Changelog',
     badge: hasUnseenChangelog.value ? '•' : '',
     variant: 'alert' as const,
+  },
+  // Last on purpose: the daily work (services, projects, databases) comes
+  // first, and settings are visited rarely enough to sit out of the way.
+  {
+    to: '/settings',
+    icon: 'settings' as const,
+    label: 'Settings',
+    badge: '',
+    variant: 'default' as const,
   },
 ])
 

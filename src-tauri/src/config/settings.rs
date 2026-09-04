@@ -18,6 +18,13 @@ use crate::utils::paths;
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     pub default_port: u16,
+    /// Anonymous usage data. On by default, and no longer exposed in the UI
+    /// — the Settings toggle was deliberately removed. The field stays here,
+    /// serialized, so `settings.json` remains the way to turn it off: set
+    /// `"shareUsageData": false` and restart. `serde`'s default applies only
+    /// to a file that never mentioned it, so anyone who had already switched
+    /// it off keeps that choice.
+    #[serde(default = "default_share_usage_data")]
     pub share_usage_data: bool,
     /// Mirrors `services::php`'s in-memory active version so it survives a
     /// restart. `None` until the user has switched at least once.
@@ -57,11 +64,19 @@ fn default_domain_suffix() -> String {
     "test".to_string()
 }
 
+/// Usage data is on for a fresh install. Kept as a named function rather than
+/// a literal because `serde` needs one anyway, and because it puts the default
+/// in a single place that both `Default` and a settings file missing the key
+/// resolve through.
+fn default_share_usage_data() -> bool {
+    true
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
             default_port: 80,
-            share_usage_data: false,
+            share_usage_data: default_share_usage_data(),
             active_php_version: None,
             start_with_windows: false,
             keep_in_tray_on_close: false,
@@ -141,13 +156,38 @@ mod tests {
         ))
     }
 
+    /// Two rules, and the second is the one that is easy to get wrong: a
+    /// fresh install shares usage data, but a file that already says `false`
+    /// — written when the UI still had a toggle — keeps saying `false`. With
+    /// the toggle gone, silently flipping that back on would take away a
+    /// choice the user has no way to make again.
+    #[test]
+    fn usage_data_is_on_by_default_but_an_explicit_opt_out_survives() {
+        let path = temp_path("usage-data");
+        let _ = std::fs::remove_file(&path);
+        assert!(load_from(&path).share_usage_data, "fresh install is on");
+
+        std::fs::write(&path, r#"{"defaultPort":80,"shareUsageData":false}"#).unwrap();
+        assert!(
+            !load_from(&path).share_usage_data,
+            "an explicit opt-out must not be overwritten by the default"
+        );
+
+        // A file written before this field existed gets the default.
+        std::fs::write(&path, r#"{"defaultPort":80}"#).unwrap();
+        assert!(load_from(&path).share_usage_data);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
     #[test]
     fn missing_file_falls_back_to_defaults() {
         let path = temp_path("missing");
         let _ = std::fs::remove_file(&path);
         let settings = load_from(&path);
         assert_eq!(settings.default_port, 80);
-        assert!(!settings.share_usage_data);
+        // On unless a file says otherwise - there is no UI switch any more.
+        assert!(settings.share_usage_data);
         assert_eq!(settings.active_php_version, None);
         assert!(!settings.start_with_windows);
         assert!(!settings.keep_in_tray_on_close);

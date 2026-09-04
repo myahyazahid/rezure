@@ -225,6 +225,19 @@ pub fn sync_hosts_entries() -> Result<bool, AppError> {
         return Ok(false);
     }
 
+    // Logged before the prompt, not after: an admin prompt on every start is
+    // a question users ask, and the answer is always "these entries differ".
+    // Without this, the Logs page shows the prompt happening and nothing about
+    // why - and the usual cause is another tool (Laragon, XAMPP) rewriting the
+    // file between runs, which is only visible as a block that keeps vanishing.
+    let added: Vec<&String> = domains.iter().filter(|d| !current.contains(d)).collect();
+    let removed: Vec<&String> = current.iter().filter(|d| !domains.contains(d)).collect();
+    log::info!(
+        "hosts file needs an admin write: {} to add {added:?}, {} to remove {removed:?}",
+        added.len(),
+        removed.len()
+    );
+
     let updated = rebuild_hosts_content(&existing, &domains);
 
     let dir = staging_dir()?;
@@ -247,6 +260,40 @@ mod tests {
             std::env::temp_dir().join(format!("rezure-test-hosts-{name}-{}", std::process::id()));
         fs::write(&path, content).unwrap();
         path
+    }
+
+    /// Prints the exact comparison `sync_hosts_entries` makes on startup, so
+    /// "why does Rezure ask for admin every time?" can be answered by looking
+    /// rather than guessing: the prompt appears only when these two lists
+    /// differ. Run with:
+    /// `cargo test --lib services::hosts::tests::print_hosts_sync_plan -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn print_hosts_sync_plan() {
+        let mut wanted: Vec<String> = scan_projects()
+            .expect("projects must be scannable")
+            .into_iter()
+            .map(|p| p.domain)
+            .collect();
+        wanted.sort();
+        wanted.dedup();
+
+        let existing = fs::read_to_string(hosts_file_path()).unwrap_or_default();
+        let mut current = managed_domains(&existing);
+        current.sort();
+
+        println!("wanted  ({}): {wanted:?}", wanted.len());
+        println!("in file ({}): {current:?}", current.len());
+        println!(
+            "would prompt for admin: {}",
+            if current == wanted { "no" } else { "YES" }
+        );
+        for domain in wanted.iter().filter(|d| !current.contains(d)) {
+            println!("  missing from hosts: {domain}");
+        }
+        for domain in current.iter().filter(|d| !wanted.contains(d)) {
+            println!("  stale in hosts:     {domain}");
+        }
     }
 
     #[test]

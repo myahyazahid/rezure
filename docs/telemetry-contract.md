@@ -6,20 +6,34 @@ rate limits, idempotency — lives outside this repo at
 `api-documentation/telemetry-api.md` (shared with `laravel-api`, since both sides must
 agree on it). If the two disagree, that doc wins; update this one to match.
 
+## The setting
+
+Usage data is **on by default**, and there is no switch for it in the UI. The setting still
+exists and is still honoured — it lives in `settings.json` (`%REZURE_HOME%\etc\settings.json`,
+normally `C:\rezure\etc\settings.json`):
+
+```json
+{ "shareUsageData": false }
+```
+
+Set that and restart, and nothing is recorded or sent. A file that already says `false` keeps
+saying it: the default applies only where the key is absent, so an opt-out made while the UI
+still had a toggle is never silently reversed.
+
 ## Recording vs. sending
 
-Recording and sending are two separate steps, and each independently respects the
-"Share anonymous usage data" toggle in Settings:
+Recording and sending are two separate steps, and each independently respects
+`shareUsageData`:
 
 1. **Recording** — `services::telemetry::TelemetryClient::record_event` /
    `record_heartbeat` (`src-tauri/src/services/telemetry.rs`) serialize a payload and
    insert it into the local `pending_events` SQLite table
-   (`src-tauri/src/db/telemetry.rs`). If the toggle is off, these no-op immediately —
+   (`src-tauri/src/db/telemetry.rs`). If the setting is off, these no-op immediately —
    nothing is written, not even locally.
 2. **Sending** — `services::telemetry::send_pending` runs on a 60-second timer
-   (`src-tauri/src/lib.rs`'s `setup()`) and drains `pending_events`. If the toggle is off
+   (`src-tauri/src/lib.rs`'s `setup()`) and drains `pending_events`. If the setting is off
    *at send time* — even for rows queued earlier while it was on — it returns
-   immediately and sends nothing. Turning the toggle off always means "stop", not "finish
+   immediately and sends nothing. Turning it off always means "stop", not "finish
    what's already queued".
 
 ## What's recorded, and when

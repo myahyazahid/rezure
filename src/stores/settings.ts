@@ -11,7 +11,10 @@ function errorMessage(e: unknown): string {
 
 export const useSettingsStore = defineStore('settings', () => {
   const defaultPort = ref(80)
-  const shareUsageData = ref(false)
+  /** Mirrors the persisted setting. There is no control for it in the UI -
+   *  usage data is on unless `settings.json` says otherwise - so this is
+   *  read-only state, kept because the backend still sends it. */
+  const shareUsageData = ref(true)
   const activePhpVersion = ref<string | null>(null)
   const startWithWindows = ref(false)
   const keepInTrayOnClose = ref(false)
@@ -67,7 +70,6 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   const setDefaultPort = (port: number) => update({ defaultPort: port })
-  const setShareUsageData = (share: boolean) => update({ shareUsageData: share })
   const setStartWithWindows = (enabled: boolean) => update({ startWithWindows: enabled })
   const setKeepInTrayOnClose = (enabled: boolean) => update({ keepInTrayOnClose: enabled })
   const setNotifyOnCrash = (enabled: boolean) => update({ notifyOnCrash: enabled })
@@ -89,7 +91,6 @@ export const useSettingsStore = defineStore('settings', () => {
     fetchAll,
     fetchStoragePaths,
     setDefaultPort,
-    setShareUsageData,
     setStartWithWindows,
     setKeepInTrayOnClose,
     setNotifyOnCrash,

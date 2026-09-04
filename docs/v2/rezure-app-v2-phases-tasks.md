@@ -40,7 +40,10 @@ Breakdown fase dan task untuk menambahkan kemampuan pengiriman telemetry di sisi
 - [x] Simpan `device_id` di local config (persist, tidak berubah selama app tidak di-reset/uninstall)
 - [x] Buat tabel lokal SQLite `pending_events` (kolom: `id`, `payload`, `type` [event/heartbeat], `created_at`, `sent_at`)
 - [x] Buat modul `TelemetryClient` di Rust sebagai titik masuk tunggal untuk mencatat data (`record_event()`, `record_heartbeat()`)
-- [x] Tambahkan toggle "Share anonymous usage data" di halaman Settings
+- [x] Tambahkan toggle "Share anonymous usage data" di halaman Settings  
+      Toggle-nya dibuat, lalu **sengaja dihapus dari UI** atas permintaan: usage data kini on
+      secara default. Settingnya tetap ada dan tetap dihormati lewat `settings.json`
+      (`"shareUsageData": false`), dan opt-out yang sudah tercatat tidak pernah ditimpa balik.
 - [x] Pastikan saat toggle off, `TelemetryClient` tidak mencatat apapun ke antrian lokal
 
 ---

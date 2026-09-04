@@ -206,32 +206,6 @@ const DOMAIN_SUFFIXES = ['test', 'local', 'dev'] as const
           @change="onPortChange"
         />
       </div>
-
-      <div class="flex items-center justify-between gap-4 p-4">
-        <div>
-          <p class="font-semibold text-neutral-900 dark:text-neutral-100">Share usage data</p>
-          <p class="mt-0.5 text-xs text-neutral-500">
-            Anonymous and opt-in: a random device id, the app and OS version, and which services you
-            start or stop. Never your project names, paths, or file contents. Off means nothing is
-            recorded at all, not merely that nothing is sent.
-          </p>
-        </div>
-        <button
-          type="button"
-          role="switch"
-          :aria-checked="settingsStore.shareUsageData"
-          class="relative h-6 w-11 shrink-0 rounded-full transition"
-          :class="
-            settingsStore.shareUsageData ? 'bg-red-600' : 'bg-neutral-200 dark:bg-neutral-700'
-          "
-          @click="settingsStore.setShareUsageData(!settingsStore.shareUsageData)"
-        >
-          <span
-            class="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition"
-            :class="settingsStore.shareUsageData ? 'left-5' : 'left-0.5'"
-          />
-        </button>
-      </div>
     </div>
 
     <div class="mt-6">
