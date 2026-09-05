@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import BasePill from '@/components/common/BasePill.vue'
 
 export interface RuntimeVersionEntry {
   id: string
@@ -41,35 +42,48 @@ function pick(entry: RuntimeVersionEntry) {
 
 <template>
   <div
-    class="flex items-center gap-3 rounded-2xl border p-3.5 transition"
-    :class="
-      disabled
-        ? 'border-neutral-200/60 bg-neutral-100/30 opacity-60 dark:border-neutral-800/60 dark:bg-neutral-900/30'
-        : 'border-neutral-200/80 bg-neutral-100/60 dark:border-neutral-800 dark:bg-neutral-900/60'
-    "
+    class="flex items-center gap-3 px-4 py-3.5 transition"
+    :class="disabled ? 'opacity-50' : 'hover:bg-neutral-100/70 dark:hover:bg-neutral-800/40'"
   >
     <span
-      class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-red-50 text-sm font-bold text-red-600 dark:bg-red-500/10 dark:text-red-400"
+      class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold"
+      :class="
+        !disabled && installedCount > 0
+          ? 'bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400'
+          : 'bg-neutral-200/70 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400'
+      "
     >
       {{ icon }}
     </span>
 
     <div class="min-w-0 flex-1">
       <p class="font-semibold text-neutral-900 dark:text-neutral-100">{{ name }}</p>
-      <p class="mt-0.5 font-mono text-xs text-neutral-500">
-        {{
-          disabled
-            ? 'not available yet'
-            : activeVersion
-              ? `active ${activeVersion}`
-              : 'not installed'
-        }}
-      </p>
+      <div class="mt-0.5 flex items-center gap-1.5 text-xs">
+        <span
+          v-if="!disabled"
+          class="h-1.5 w-1.5 shrink-0 rounded-full"
+          :class="activeVersion ? 'bg-emerald-500' : 'bg-neutral-400 dark:bg-neutral-600'"
+        ></span>
+        <span
+          class="font-mono"
+          :class="
+            !disabled && activeVersion
+              ? 'text-emerald-600 dark:text-emerald-400'
+              : 'text-neutral-500'
+          "
+        >
+          {{
+            disabled
+              ? 'not available yet'
+              : activeVersion
+                ? `active ${activeVersion}`
+                : 'not installed'
+          }}
+        </span>
+      </div>
     </div>
 
-    <span v-if="!disabled" class="shrink-0 text-xs text-neutral-500"
-      >{{ installedCount }} installed</span
-    >
+    <BasePill v-if="!disabled" class="shrink-0">{{ installedCount }} installed</BasePill>
 
     <div v-if="!disabled" class="relative shrink-0">
       <button
@@ -141,15 +155,5 @@ function pick(entry: RuntimeVersionEntry) {
         </div>
       </template>
     </div>
-
-    <span
-      v-if="!disabled && installedCount > 0"
-      class="flex shrink-0 items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400"
-    >
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" class="h-3 w-3">
-        <path stroke-linecap="round" stroke-linejoin="round" d="m5 12 4 4L19 6" />
-      </svg>
-      In use
-    </span>
   </div>
 </template>
