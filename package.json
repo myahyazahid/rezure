@@ -1,6 +1,6 @@
 {
   "name": "rezureapp",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "description": "A modern, lightweight local development environment manager for Windows — inspired by Laragon, built with Tauri + Rust + Vue 3.",
   "type": "module",

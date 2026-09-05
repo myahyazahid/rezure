@@ -53,9 +53,24 @@ const mariadbVersions = computed<RuntimeVersionEntry[]>(() =>
     : [],
 )
 
+// Only one build is offered, so there's nothing to switch between — the row
+// is here because this is the one place that installs it.
+const nginx = computed(() => binariesStore.binaries.find((b) => b.id === 'nginx') ?? null)
+const nginxVersions = computed<RuntimeVersionEntry[]>(() =>
+  nginx.value
+    ? [{ id: 'nginx', version: nginx.value.version, installed: nginx.value.installed }]
+    : [],
+)
+
 const composerVersions = computed<RuntimeVersionEntry[]>(() => [
   { id: 'composer', version: 'latest', installed: composerStore.installed },
 ])
+
+// A PHP install can be started from the modal and keeps running after it's
+// closed, so the row reports the progress of whichever version is in flight.
+const phpProgress = computed(() =>
+  phpStore.installingId ? phpStore.progressFor(phpStore.installingId) : null,
+)
 
 // The rows below fill in as their paths arrive, so the section's frame is
 // held back until there's at least one to put in it.
@@ -117,9 +132,20 @@ const hasPhpConfig = computed(
         :installed-count="phpInstalledCount"
         :versions="phpVersions"
         :installing-id="phpStore.installingId"
+        :progress="phpProgress"
         :busy="phpStore.switching !== null"
         @select="switchPhp"
         @install="phpStore.install"
+      />
+      <RuntimeSwitchRow
+        icon="N"
+        name="Nginx"
+        :active-version="nginx?.installed ? nginx.version : null"
+        :installed-count="nginx?.installed ? 1 : 0"
+        :versions="nginxVersions"
+        :installing-id="binariesStore.isInstalling('nginx') ? 'nginx' : null"
+        :progress="binariesStore.progressFor('nginx')"
+        @install="binariesStore.install('nginx')"
       />
       <RuntimeSwitchRow
         icon="M"
@@ -128,6 +154,7 @@ const hasPhpConfig = computed(
         :installed-count="mariadb?.installed ? 1 : 0"
         :versions="mariadbVersions"
         :installing-id="binariesStore.isInstalling('mariadb') ? 'mariadb' : null"
+        :progress="binariesStore.progressFor('mariadb')"
         @install="binariesStore.install('mariadb')"
       />
       <RuntimeSwitchRow

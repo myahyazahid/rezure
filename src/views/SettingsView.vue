@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onActivated } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
+import BasePill from '@/components/common/BasePill.vue'
 
 const settingsStore = useSettingsStore()
 
@@ -25,8 +26,6 @@ const PATH_ROWS = [
   { key: 'dropInDir', label: 'PHP drop-in folder' },
   { key: 'dumpsDir', label: 'Database exports' },
 ] as const
-
-const DOMAIN_SUFFIXES = ['test', 'local', 'dev'] as const
 </script>
 
 <template>
@@ -136,27 +135,13 @@ const DOMAIN_SUFFIXES = ['test', 'local', 'dev'] as const
           <div>
             <p class="font-semibold text-neutral-900 dark:text-neutral-100">Domain suffix</p>
             <p class="mt-0.5 text-xs text-neutral-500">
-              Only applies to new or resynced projects — existing ones keep their current domain.
+              Every project is served at <code class="font-mono">name.test</code>, the suffix
+              reserved for local development. <code class="font-mono">.dev</code> is forced to HTTPS
+              by browsers and <code class="font-mono">.local</code> is claimed by mDNS, so neither
+              reaches a site served over plain HTTP.
             </p>
           </div>
-          <div
-            class="flex shrink-0 gap-1 rounded-full border border-neutral-200 p-0.5 dark:border-neutral-700"
-          >
-            <button
-              v-for="suffix in DOMAIN_SUFFIXES"
-              :key="suffix"
-              type="button"
-              class="rounded-full px-3 py-1 text-xs font-medium transition"
-              :class="
-                settingsStore.domainSuffix === suffix
-                  ? 'bg-red-600 text-white'
-                  : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100'
-              "
-              @click="settingsStore.setDomainSuffix(suffix)"
-            >
-              .{{ suffix }}
-            </button>
-          </div>
+          <BasePill variant="mono" class="shrink-0">.test</BasePill>
         </div>
 
         <div class="flex items-center justify-between gap-4 p-4">

@@ -326,6 +326,13 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
         >
           Folder not found — it may have moved, or be on a drive that isn't connected.
         </p>
+        <p
+          v-else-if="project.domainInvalid"
+          class="mt-0.5 truncate text-xs text-amber-600 dark:text-amber-400"
+          title="Rename the folder using letters, digits and hyphens only"
+        >
+          Not served — rename the folder using letters, digits and hyphens only.
+        </p>
         <p v-else-if="lastOpenedLabel(project)" class="mt-0.5 truncate text-xs text-neutral-400">
           {{ lastOpenedLabel(project) }}
         </p>
@@ -345,7 +352,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
             {{ project.domain }}
           </span>
           <ProjectActionButtons
-            v-if="!project.missing"
+            v-if="!project.missing && !project.domainInvalid"
             :project-id="project.id"
             :domain="project.domain"
             :path="project.path"
@@ -413,6 +420,13 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
             <p v-if="project.missing" class="truncate text-xs text-amber-600 dark:text-amber-400">
               Folder not found — it may have moved, or be on a drive that isn't connected.
             </p>
+            <p
+              v-else-if="project.domainInvalid"
+              class="truncate text-xs text-amber-600 dark:text-amber-400"
+              title="Rename the folder using letters, digits and hyphens only"
+            >
+              Not served — rename the folder using letters, digits and hyphens only.
+            </p>
             <p v-else class="truncate text-xs text-neutral-400">
               {{ lastOpenedLabel(project) }}
             </p>
@@ -433,7 +447,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
                down the list. -->
           <div class="flex w-56 shrink-0 items-center justify-end gap-1">
             <ProjectActionButtons
-              :class="project.missing ? 'invisible' : ''"
+              :class="project.missing || project.domainInvalid ? 'invisible' : ''"
               :project-id="project.id"
               :domain="project.domain"
               :path="project.path"

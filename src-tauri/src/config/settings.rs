@@ -44,13 +44,6 @@ pub struct Settings {
     /// crash sink).
     #[serde(default)]
     pub notify_on_crash: bool,
-    /// Suffix (no leading dot) appended to a project's folder/link name to
-    /// build its local domain — `"test"`, `"local"` or `"dev"`. Only affects
-    /// domains resolved from here on; a project already served under the
-    /// previous suffix keeps its existing hosts entry and vhost until it's
-    /// resynced.
-    #[serde(default = "default_domain_suffix")]
-    pub domain_suffix: String,
     /// When true, `lib.rs`'s startup runs one background hosts-file sync so
     /// new project domains resolve without a manual "Sync hosts" click —
     /// still at most one UAC prompt per session, never mid-workflow. See
@@ -58,10 +51,6 @@ pub struct Settings {
     /// automatic.
     #[serde(default)]
     pub auto_write_hosts: bool,
-}
-
-fn default_domain_suffix() -> String {
-    "test".to_string()
 }
 
 /// Usage data is on for a fresh install. Kept as a named function rather than
@@ -81,7 +70,6 @@ impl Default for Settings {
             start_with_windows: false,
             keep_in_tray_on_close: false,
             notify_on_crash: false,
-            domain_suffix: default_domain_suffix(),
             auto_write_hosts: false,
         }
     }
@@ -192,7 +180,6 @@ mod tests {
         assert!(!settings.start_with_windows);
         assert!(!settings.keep_in_tray_on_close);
         assert!(!settings.notify_on_crash);
-        assert_eq!(settings.domain_suffix, "test");
         assert!(!settings.auto_write_hosts);
     }
 
@@ -208,7 +195,7 @@ mod tests {
         .unwrap();
         let settings = load_from(&path);
         assert!(!settings.start_with_windows);
-        assert_eq!(settings.domain_suffix, "test");
+        assert!(!settings.auto_write_hosts);
         std::fs::remove_file(&path).unwrap();
     }
 
@@ -231,7 +218,6 @@ mod tests {
             start_with_windows: true,
             keep_in_tray_on_close: true,
             notify_on_crash: true,
-            domain_suffix: "local".to_string(),
             auto_write_hosts: true,
         };
         save_to(&path, &settings).unwrap();
@@ -242,7 +228,6 @@ mod tests {
         assert!(loaded.start_with_windows);
         assert!(loaded.keep_in_tray_on_close);
         assert!(loaded.notify_on_crash);
-        assert_eq!(loaded.domain_suffix, "local");
         assert!(loaded.auto_write_hosts);
         std::fs::remove_file(&path).unwrap();
     }

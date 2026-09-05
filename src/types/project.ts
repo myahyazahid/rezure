@@ -15,6 +15,9 @@ export interface ProjectInfo {
   /** A linked project whose folder is no longer there. Still listed — the
    *  drive may just be unplugged. */
   missing: boolean
+  /** The folder name can't be used as a domain (a space, `;`, `{`…), so it
+   *  isn't served — writing it to the nginx config would break every site. */
+  domainInvalid: boolean
 }
 
 /** What linking a folder would produce, shown before anything is saved. */

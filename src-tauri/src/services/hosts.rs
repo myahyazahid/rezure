@@ -212,7 +212,13 @@ pub fn sync_hosts_entries() -> Result<bool, AppError> {
     // Missing folders keep their hosts entry: it costs nothing, and losing
     // it every time an external drive is unplugged would mean re-running an
     // admin prompt to get it back.
-    let mut domains: Vec<String> = scan_projects()?.into_iter().map(|p| p.domain).collect();
+    // A name nginx can't be given safely has no business in the hosts file
+    // either — it isn't served, so an entry for it would resolve to nothing.
+    let mut domains: Vec<String> = scan_projects()?
+        .into_iter()
+        .filter(|p| !p.domain_invalid)
+        .map(|p| p.domain)
+        .collect();
     domains.sort();
     domains.dedup();
 

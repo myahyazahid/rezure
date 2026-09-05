@@ -19,7 +19,6 @@ export const useSettingsStore = defineStore('settings', () => {
   const startWithWindows = ref(false)
   const keepInTrayOnClose = ref(false)
   const notifyOnCrash = ref(false)
-  const domainSuffix = ref('test')
   const autoWriteHosts = ref(false)
 
   const storagePaths = ref<StoragePaths | null>(null)
@@ -33,7 +32,6 @@ export const useSettingsStore = defineStore('settings', () => {
     startWithWindows.value = settings.startWithWindows
     keepInTrayOnClose.value = settings.keepInTrayOnClose
     notifyOnCrash.value = settings.notifyOnCrash
-    domainSuffix.value = settings.domainSuffix
     autoWriteHosts.value = settings.autoWriteHosts
   }
 
@@ -73,7 +71,6 @@ export const useSettingsStore = defineStore('settings', () => {
   const setStartWithWindows = (enabled: boolean) => update({ startWithWindows: enabled })
   const setKeepInTrayOnClose = (enabled: boolean) => update({ keepInTrayOnClose: enabled })
   const setNotifyOnCrash = (enabled: boolean) => update({ notifyOnCrash: enabled })
-  const setDomainSuffix = (suffix: string) => update({ domainSuffix: suffix })
   const setAutoWriteHosts = (enabled: boolean) => update({ autoWriteHosts: enabled })
 
   return {
@@ -83,7 +80,6 @@ export const useSettingsStore = defineStore('settings', () => {
     startWithWindows,
     keepInTrayOnClose,
     notifyOnCrash,
-    domainSuffix,
     autoWriteHosts,
     storagePaths,
     error,
@@ -94,7 +90,6 @@ export const useSettingsStore = defineStore('settings', () => {
     setStartWithWindows,
     setKeepInTrayOnClose,
     setNotifyOnCrash,
-    setDomainSuffix,
     setAutoWriteHosts,
   }
 })

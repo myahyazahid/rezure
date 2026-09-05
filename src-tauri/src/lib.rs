@@ -227,7 +227,6 @@ pub fn run() {
                         log::warn!("failed to re-point the PHP PATH link on startup: {err}");
                     }
                 }
-                services::projects::set_domain_suffix(&settings.domain_suffix);
                 // Reconciles the persisted flag against the OS's actual autostart
                 // registration — the two can drift if the user removes the
                 // startup entry from Windows Settings directly. Best-effort,

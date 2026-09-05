@@ -8,6 +8,6 @@
 /// spot that needs to change.
 pub fn base_url() -> String {
     option_env!("REZURE_API_BASE_URL")
-        .unwrap_or("http://127.0.0.1:8000")
+        .unwrap_or("https://api.redscale.my.id")
         .to_string()
 }

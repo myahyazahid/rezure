@@ -23,7 +23,6 @@ pub struct SettingsPatch {
     pub start_with_windows: Option<bool>,
     pub keep_in_tray_on_close: Option<bool>,
     pub notify_on_crash: Option<bool>,
-    pub domain_suffix: Option<String>,
     pub auto_write_hosts: Option<bool>,
 }
 
@@ -58,10 +57,6 @@ pub fn update_settings(
     }
     if let Some(notify_on_crash) = patch.notify_on_crash {
         current.notify_on_crash = notify_on_crash;
-    }
-    if let Some(domain_suffix) = patch.domain_suffix {
-        projects::set_domain_suffix(&domain_suffix);
-        current.domain_suffix = domain_suffix;
     }
     if let Some(auto_write_hosts) = patch.auto_write_hosts {
         current.auto_write_hosts = auto_write_hosts;

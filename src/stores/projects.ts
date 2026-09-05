@@ -35,7 +35,11 @@ export const useProjectsStore = defineStore('projects', () => {
 
   /** Projects whose domain won't resolve in a browser yet — what the
    *  hosts-file prompt on the Projects page is offering to fix. */
-  const unresolvedProjects = computed(() => projects.value.filter((p) => !p.hasHostsEntry))
+  // A project that can't be served will never get a hosts entry either, so
+  // counting it here would leave "Sync hosts file" lit with nothing to do.
+  const unresolvedProjects = computed(() =>
+    projects.value.filter((p) => !p.hasHostsEntry && !p.domainInvalid),
+  )
 
   async function fetchAll() {
     projects.value = await invoke<ProjectInfo[]>('list_projects')
