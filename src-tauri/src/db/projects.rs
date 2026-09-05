@@ -48,6 +48,11 @@ pub struct ProjectInfo {
     /// deleted, or on a drive that isn't plugged in. Listed anyway rather
     /// than quietly dropped, since the last case fixes itself.
     pub missing: bool,
+    /// True when `domain` can't be written into the generated nginx config
+    /// safely — see `services::projects::is_safe_domain`. Listed with an
+    /// explanation rather than served, because serving it would mean
+    /// emitting a config that stops every other site too.
+    pub domain_invalid: bool,
 }
 
 fn now() -> i64 {
@@ -156,6 +161,7 @@ mod tests {
             open_count: 0,
             kind: ProjectKind::Scanned,
             missing: false,
+            domain_invalid: false,
         }
     }
 

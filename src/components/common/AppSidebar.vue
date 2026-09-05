@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { useServicesStore } from '@/stores/services'
 import { useProjectsStore } from '@/stores/projects'
 import { useDatabasesStore } from '@/stores/databases'
 import { usePhpStore } from '@/stores/php'
 import { useLogsStore } from '@/stores/logs'
+import { useChangelogStore } from '@/stores/changelog'
 import { useUptime } from '@/composables/useUptime'
 
 const route = useRoute()
@@ -14,7 +15,19 @@ const projectsStore = useProjectsStore()
 const databasesStore = useDatabasesStore()
 const phpStore = usePhpStore()
 const logsStore = useLogsStore()
+const changelogStore = useChangelogStore()
 const { label: uptimeLabel } = useUptime()
+
+// Fetched here (not just on the Changelog page itself) so the "new release"
+// badge can show without the user having visited it yet.
+onMounted(() => {
+  changelogStore.fetchAll()
+})
+
+const hasUnseenChangelog = computed(() => {
+  const newest = changelogStore.entries[0]?.version
+  return !!newest && newest !== changelogStore.lastSeenVersion
+})
 
 const navItems = computed(() => [
   {
@@ -52,6 +65,26 @@ const navItems = computed(() => [
     badge: logsStore.errorCount > 0 ? String(logsStore.errorCount) : '',
     variant: 'alert' as const,
   },
+  {
+    to: '/support',
+    icon: 'support' as const,
+    // Labelled "Feedback", not "Support": v3 adds a "Support Developer"
+    // (donate) menu, and two neighbouring entries reading "Support" would
+    // send bug reports to the donation page. The route, store and API path
+    // stay `support` - that is what the backend contract calls the endpoint.
+    label: 'Feedback',
+    badge: '',
+    variant: 'default' as const,
+  },
+  {
+    to: '/changelog',
+    icon: 'changelog' as const,
+    label: 'Changelog',
+    badge: hasUnseenChangelog.value ? '•' : '',
+    variant: 'alert' as const,
+  },
+  // Last on purpose: the daily work (services, projects, databases) comes
+  // first, and settings are visited rarely enough to sit out of the way.
   {
     to: '/settings',
     icon: 'settings' as const,
@@ -157,6 +190,34 @@ const ringOffset = computed(() => {
             class="h-4 w-4"
           >
             <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h10" />
+          </svg>
+          <svg
+            v-else-if="item.icon === 'support'"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="h-4 w-4"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 20l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z"
+            />
+          </svg>
+          <svg
+            v-else-if="item.icon === 'changelog'"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="h-4 w-4"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M12 8v4l3 3m6-3a9 9 0 1 1-9-9 9 9 0 0 1 9 9Z"
+            />
           </svg>
           <svg
             v-else

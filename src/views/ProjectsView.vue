@@ -6,6 +6,7 @@ import BasePill from '@/components/common/BasePill.vue'
 import ProjectActionButtons from '@/components/projects/ProjectActionButtons.vue'
 import NewProjectModal from '@/components/projects/NewProjectModal.vue'
 import LinkProjectModal from '@/components/projects/LinkProjectModal.vue'
+import ProjectDoctorModal from '@/components/projects/ProjectDoctorModal.vue'
 import BusyOverlay from '@/components/common/BusyOverlay.vue'
 
 const store = useProjectsStore()
@@ -185,6 +186,10 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
     <NewProjectModal v-if="showNewProjectModal" @close="showNewProjectModal = false" />
     <LinkProjectModal v-if="showLinkProjectModal" @close="showLinkProjectModal = false" />
 
+    <!-- Rendered once, outside both the card grid and the list: the result
+         is about one project at a time, and the store already says which. -->
+    <ProjectDoctorModal />
+
     <BusyOverlay :show="busy !== null" :label="busy?.label ?? ''" :detail="busy?.detail ?? ''" />
 
     <!-- Says plainly that nothing is deleted. "Remove" next to a folder path
@@ -321,6 +326,13 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
         >
           Folder not found — it may have moved, or be on a drive that isn't connected.
         </p>
+        <p
+          v-else-if="project.domainInvalid"
+          class="mt-0.5 truncate text-xs text-amber-600 dark:text-amber-400"
+          title="Rename the folder using letters, digits and hyphens only"
+        >
+          Not served — rename the folder using letters, digits and hyphens only.
+        </p>
         <p v-else-if="lastOpenedLabel(project)" class="mt-0.5 truncate text-xs text-neutral-400">
           {{ lastOpenedLabel(project) }}
         </p>
@@ -340,7 +352,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
             {{ project.domain }}
           </span>
           <ProjectActionButtons
-            v-if="!project.missing"
+            v-if="!project.missing && !project.domainInvalid"
             :project-id="project.id"
             :domain="project.domain"
             :path="project.path"
@@ -408,6 +420,13 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
             <p v-if="project.missing" class="truncate text-xs text-amber-600 dark:text-amber-400">
               Folder not found — it may have moved, or be on a drive that isn't connected.
             </p>
+            <p
+              v-else-if="project.domainInvalid"
+              class="truncate text-xs text-amber-600 dark:text-amber-400"
+              title="Rename the folder using letters, digits and hyphens only"
+            >
+              Not served — rename the folder using letters, digits and hyphens only.
+            </p>
             <p v-else class="truncate text-xs text-neutral-400">
               {{ lastOpenedLabel(project) }}
             </p>
@@ -428,7 +447,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
                down the list. -->
           <div class="flex w-56 shrink-0 items-center justify-end gap-1">
             <ProjectActionButtons
-              :class="project.missing ? 'invisible' : ''"
+              :class="project.missing || project.domainInvalid ? 'invisible' : ''"
               :project-id="project.id"
               :domain="project.domain"
               :path="project.path"

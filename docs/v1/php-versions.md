@@ -125,10 +125,82 @@ By default the active version reaches two places:
 
 ---
 
+## Configuring PHP
+
+Rezure generates its own `php.ini` and **rewrites it every time PHP starts**, so nothing you
+type into it survives. Your settings go in a folder Rezure never writes to:
+
+```
+C:\rezure\etc\php\conf.d\
+```
+
+Any `.ini` file there is loaded *after* the generated one and overrides it — for your `.test`
+sites, for Composer, and for `php` in your own terminal. Files are read in alphabetical order,
+so a `90-` prefix wins over a `10-` one.
+
+```ini
+; C:\rezure\etc\php\conf.d\90-local.ini
+memory_limit = 1G
+extension=intl
+```
+
+Restart the PHP service (Dashboard → PHP) for a change to reach running sites. `php --ini` in a
+terminal lists every fragment that was actually parsed — the fastest way to check a file is
+being read at all.
+
+| File | Who owns it | Survives a start? | Survives a version switch? |
+|---|---|---|---|
+| `data\php\php.ini` | Rezure — regenerated | no | no |
+| `bin\php\<version>\php.ini` | Rezure writes it once, then leaves it | yes | no — it's per-version |
+| `etc\php\conf.d\*.ini` | **you** | yes | yes |
+
+The middle one is also **not read by your `.test` sites at all**: the web server is started with
+`-c` naming the generated ini, which makes the copy in the version folder a CLI-only file. That
+is why `conf.d` is the only place worth editing.
+
+One shared folder for every version is deliberate — it keeps `php -m` in a terminal and a web
+request from disagreeing. The trade-off: enabling an extension an older build doesn't ship makes
+*that* version print a startup warning. Split those into a fragment you rename when you switch,
+or keep them out of the shared list.
+
+---
+
+## Extensions that aren't in the PHP zip
+
+php.net's Windows build ships a large `ext/` folder, but **PECL extensions are not in it** —
+`redis` above all, which Laravel projects need for queues, cache and Horizon, and which
+`composer install` refuses to work without once `"ext-redis"` is in `composer.json`.
+
+Rezure installs those on request. A project's
+[requirements check](projects.md#checking-a-projects-requirements) offers an **Install** button
+next to a missing extension it has a build for; the DLL lands in that PHP version's `ext/` folder,
+and Rezure enables it for both the served site and your terminal.
+
+Two things are worth knowing about how this works:
+
+**Downloads are checksum-verified, which is why the list is short.** php.net publishes a machine-readable
+index with hashes for PHP itself, so the version list stays current on its own. The PECL area
+publishes no such index and no checksum files at all. Rather than download something unverified,
+Rezure pins a SHA-256 per extension per PHP branch. The cost is that a brand-new PHP branch shows
+the extension as unavailable until a hash is added — a wrong answer that says so, instead of a
+download nobody checked.
+
+**It's per version.** The DLL goes into one version's `ext/`, so switching to a PHP version that
+never had it installed leaves it missing there. That is deliberate: an extension built for 8.4
+cannot be loaded by 8.5. Run the check again after a switch.
+
+Currently installable: **redis 6.3.0**, for PHP 7.4 through 8.5 (NTS x64).
+
+---
+
 ## Making it system-wide (optional)
 
 **Switch → "Use Rezure's PHP everywhere"** puts the active version on your user PATH, so `php`
 resolves to it in every terminal.
+
+It also sets `PHP_INI_SCAN_DIR` to `C:\rezure\etc\php\conf.d`, so that `php` reads the same
+settings your sites do. An existing value is kept and Rezure's folder appended after it; turning
+the feature off removes only Rezure's entry, and leaves the `conf.d` folder — your files — alone.
 
 ### How it works, and why not the obvious way
 

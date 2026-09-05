@@ -4,20 +4,25 @@
 //! trait so adding a new one never requires special-casing elsewhere.
 
 pub mod binaries;
+pub mod changelog;
 pub mod database;
 pub mod db_clients;
 pub mod db_engine;
 pub mod db_profiles;
+pub mod doctor;
 pub mod hosts;
 pub mod launcher;
 pub mod php;
 pub mod php_catalog;
+pub mod php_ext;
 pub mod php_ini;
 pub mod php_path;
 pub mod ports;
 pub mod process;
 pub mod projects;
 pub mod scaffold;
+pub mod support;
+pub mod telemetry;
 pub mod vhosts;
 
 use std::sync::Arc;

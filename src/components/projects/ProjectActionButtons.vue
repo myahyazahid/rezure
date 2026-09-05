@@ -42,6 +42,25 @@ const ICON_BUTTON_CLASS =
       </svg>
     </button>
 
+    <!-- Runs `php -m` on demand, never on render: one process per project
+         per page visit would be the wrong trade for a question nobody asked
+         yet. -->
+    <button
+      type="button"
+      :class="ICON_BUTTON_CLASS"
+      title="Check this project's PHP extension requirements"
+      @click="store.runDoctor(props.projectId)"
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="M6 3v6a4 4 0 0 0 8 0V3M10 17a4 4 0 0 0 8 0v-2"
+        />
+        <circle cx="18" cy="13" r="2" />
+      </svg>
+    </button>
+
     <button
       type="button"
       :class="ICON_BUTTON_CLASS"

@@ -2,7 +2,13 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import type { PhpPathStatus, PhpRelease, PhpSwitchResult, PhpVersion } from '@/types/php'
+import type {
+  ExtensionStatus,
+  PhpPathStatus,
+  PhpRelease,
+  PhpSwitchResult,
+  PhpVersion,
+} from '@/types/php'
 import type { InstallProgress } from '@/types/binary'
 
 // Keep in sync with `PROGRESS_EVENT` in src-tauri/src/services/binaries.rs
@@ -25,6 +31,14 @@ export const usePhpStore = defineStore('php', () => {
 
   const dropInDir = ref('')
   const adding = ref(false)
+
+  /** Where a user's own php.ini fragments go. A label until they open it. */
+  const configDir = ref('')
+
+  /** PECL extensions available for the PHP version last asked about. */
+  const extensions = ref<ExtensionStatus[]>([])
+  /** The extension id currently being downloaded, or null. */
+  const installingExtension = ref<string | null>(null)
 
   /** The optional system-wide PATH link. Null until first read. */
   const pathStatus = ref<PhpPathStatus | null>(null)
@@ -191,6 +205,58 @@ export const usePhpStore = defineStore('php', () => {
     }
   }
 
+  async function fetchConfigDir() {
+    try {
+      configDir.value = await invoke<string>('php_config_dir')
+    } catch {
+      // Only used as a label — a missing path isn't worth an error banner.
+      configDir.value = ''
+    }
+  }
+
+  async function openConfigDir() {
+    error.value = null
+    try {
+      await invoke('open_php_config_dir')
+    } catch (e) {
+      error.value = errorMessage(e)
+    }
+  }
+
+  async function fetchExtensions(phpVersion: string) {
+    try {
+      extensions.value = await invoke<ExtensionStatus[]>('php_extensions', { phpVersion })
+    } catch {
+      // Purely additive information — without it the UI just doesn't offer
+      // an install, which is the same as before this existed.
+      extensions.value = []
+    }
+  }
+
+  /**
+   * Downloads and installs a PECL extension into a PHP version.
+   *
+   * The served site keeps running without it until the PHP service restarts:
+   * the running `php-cgi` read its ini at start. The UI says so rather than
+   * restarting a service the user didn't ask to have restarted.
+   */
+  async function installExtension(id: string, phpVersion: string) {
+    installingExtension.value = id
+    error.value = null
+    try {
+      extensions.value = await invoke<ExtensionStatus[]>('install_php_extension', {
+        id,
+        phpVersion,
+      })
+      return true
+    } catch (e) {
+      error.value = errorMessage(e)
+      return false
+    } finally {
+      installingExtension.value = null
+    }
+  }
+
   async function openDropInDir() {
     error.value = null
     try {
@@ -214,12 +280,18 @@ export const usePhpStore = defineStore('php', () => {
     catalogError,
     dropInDir,
     adding,
+    configDir,
+    extensions,
+    installingExtension,
     notice,
     switching,
     pathStatus,
     pathBusy,
     fetchAll,
     fetchDropInDir,
+    fetchConfigDir,
+    fetchExtensions,
+    installExtension,
     fetchPathStatus,
     setPathLink,
     fetchCatalog,
@@ -228,6 +300,7 @@ export const usePhpStore = defineStore('php', () => {
     addFromFolder,
     remove,
     openDropInDir,
+    openConfigDir,
     progressFor,
   }
 })

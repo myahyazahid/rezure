@@ -30,92 +30,73 @@ onMounted(() => {
 </script>
 
 <template>
-  <div
-    v-if="status"
-    class="rounded-2xl border p-4 transition"
-    :class="
-      enabled
-        ? 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-500/25 dark:bg-emerald-500/10'
-        : 'border-neutral-200/80 bg-neutral-100/60 dark:border-neutral-800 dark:bg-neutral-900/60'
-    "
-  >
-    <div class="flex items-start gap-3">
-      <span
-        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
-        :class="
-          enabled
-            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400'
-            : 'bg-neutral-200/70 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400'
-        "
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M4 7h6l2 3h8M4 7v10h16V10" />
-        </svg>
-      </span>
-
-      <div class="min-w-0 flex-1">
+  <div v-if="status" class="p-4">
+    <div class="flex items-start justify-between gap-4">
+      <div class="min-w-0">
         <p class="font-semibold text-neutral-900 dark:text-neutral-100">
           Use Rezure's PHP everywhere
         </p>
-        <p class="mt-0.5 text-sm text-neutral-500">
+        <p class="mt-0.5 text-xs text-neutral-500">
           Puts the active version on your PATH, so <code class="font-mono">php</code> works in every
-          terminal — not only the ones Rezure opens. Once it's on, switching versions takes effect
-          even in terminals you already have open.
+          terminal — not only the ones Rezure opens.
         </p>
       </div>
 
       <button
         type="button"
-        class="shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition disabled:opacity-50"
-        :class="
-          enabled
-            ? 'border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-200'
-            : 'bg-red-600 text-white shadow-sm shadow-red-600/30 hover:bg-red-500'
-        "
+        role="switch"
+        :aria-checked="enabled"
+        :aria-label="`Use Rezure's PHP everywhere`"
+        class="relative h-6 w-11 shrink-0 rounded-full transition disabled:opacity-50"
+        :class="enabled ? 'bg-red-600' : 'bg-neutral-200 dark:bg-neutral-700'"
         :disabled="store.pathBusy"
         @click="store.setPathLink(!enabled)"
       >
-        <template v-if="store.pathBusy">Working…</template>
-        <template v-else>{{ enabled ? 'Disable' : 'Enable' }}</template>
+        <span
+          class="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition"
+          :class="enabled ? 'left-5' : 'left-0.5'"
+        />
       </button>
+    </div>
+
+    <div v-if="enabled" class="mt-3 flex flex-col gap-1.5">
+      <div
+        class="flex items-center gap-2 rounded-lg bg-neutral-100 px-2.5 py-1.5 font-mono text-xs dark:bg-neutral-800/60"
+      >
+        <span class="shrink-0 text-neutral-500">php</span>
+        <span class="shrink-0 text-neutral-400">→</span>
+        <span class="shrink-0 font-semibold text-emerald-600 dark:text-emerald-400">
+          {{ store.active?.version ?? 'the active version' }}
+        </span>
+        <span
+          v-if="status.target"
+          class="ml-auto min-w-0 truncate text-neutral-400"
+          :title="status.target"
+        >
+          {{ status.target }}
+        </span>
+      </div>
+
+      <!-- The distinction that actually trips people up: adding the entry
+           can't reach a shell that already started, but re-pointing the
+           link later can, because the entry is in its PATH by then. -->
+      <p class="text-xs text-neutral-500">
+        Open a <strong>new</strong> terminal to pick this up — ones already open keep the PATH they
+        started with. After that, switching versions reaches them too.
+      </p>
+      <p v-if="!status.inSync" class="text-xs text-amber-700 dark:text-amber-300">
+        The link is out of sync — switch a version to re-point it.
+      </p>
     </div>
 
     <!-- Stated before enabling, not discovered afterwards: this is the one
          thing in Rezure that changes something outside the app. -->
     <p
-      v-if="!enabled && conflictSummary"
-      class="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+      v-else-if="conflictSummary"
+      class="mt-3 rounded-lg bg-amber-50 px-2.5 py-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
     >
-      <strong>{{ conflictSummary }}</strong> already provides <code class="font-mono">php</code> on
-      your PATH. Enabling this puts Rezure ahead of it, so
-      <code class="font-mono">php</code> system-wide becomes Rezure's. Disabling hands it straight
-      back.
-      <span class="mt-1 block truncate font-mono text-[11px] opacity-70">
-        {{ status.conflicts.join(' · ') }}
-      </span>
+      <strong>{{ conflictSummary }}</strong> already provides <code class="font-mono">php</code>.
+      Turning this on puts Rezure ahead of it; turning it off hands it straight back.
     </p>
-
-    <div v-if="enabled" class="mt-3 flex flex-col gap-1 text-xs">
-      <p class="text-emerald-700 dark:text-emerald-400">
-        <code class="font-mono">php</code> resolves to
-        <strong>{{ store.active?.version ?? 'the active version' }}</strong>
-        <span v-if="!status.inSync" class="text-amber-700 dark:text-amber-300">
-          — the link is out of sync, switch a version to re-point it.
-        </span>
-      </p>
-      <!-- The distinction that actually trips people up: adding the entry
-           can't reach a shell that already started, but re-pointing the
-           link later can, because the entry is in its PATH by then. -->
-      <p class="text-neutral-500">
-        Open a <strong>new</strong> terminal to pick this up — ones already open kept the PATH they
-        started with. After that, switching versions reaches them too.
-      </p>
-      <p class="truncate font-mono text-neutral-400" :title="status.linkDir">
-        {{ status.linkDir }}
-      </p>
-      <p v-if="status.target" class="truncate font-mono text-neutral-400" :title="status.target">
-        → {{ status.target }}
-      </p>
-    </div>
   </div>
 </template>

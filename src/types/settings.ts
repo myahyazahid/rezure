@@ -7,7 +7,6 @@ export interface Settings {
   startWithWindows: boolean
   keepInTrayOnClose: boolean
   notifyOnCrash: boolean
-  domainSuffix: string
   autoWriteHosts: boolean
 }
 
@@ -17,7 +16,6 @@ export interface SettingsPatch {
   startWithWindows?: boolean
   keepInTrayOnClose?: boolean
   notifyOnCrash?: boolean
-  domainSuffix?: string
   autoWriteHosts?: boolean
 }
 

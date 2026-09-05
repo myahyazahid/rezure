@@ -279,6 +279,11 @@ impl ProcessService {
                     .arg(&ini_path)
                     .arg("-b")
                     .arg(format!("127.0.0.1:{}", self.port));
+                // `-c` above names a file this start just overwrote, so it is
+                // no place for a user's own settings. The scan directory is
+                // the one PHP reads *after* it and Rezure never writes into,
+                // which is what makes configuring the web PHP possible at all.
+                cmd.env(php_ini::SCAN_DIR_ENV, php_ini::ensure_conf_d()?);
                 cmd
             }
             Launch::Database => {

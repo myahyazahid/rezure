@@ -178,7 +178,7 @@ pub fn sync_vhosts() -> Result<VhostSync, AppError> {
     // since the folder may simply be on a drive that isn't plugged in.
     let current: Vec<_> = scan_projects()?
         .into_iter()
-        .filter(|project| !project.missing)
+        .filter(|project| !project.missing && !project.domain_invalid)
         .collect();
     let current_ids: std::collections::HashSet<&str> =
         current.iter().map(|p| p.id.as_str()).collect();

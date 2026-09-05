@@ -31,6 +31,11 @@
 //! `php` system-wide stops being theirs and becomes Rezure's. That's a
 //! decision to be taken deliberately, so nothing here runs unless the user
 //! turns it on, and [`disable`] puts everything back.
+//!
+//! Two things are written, not one: the PATH entry, and `PHP_INI_SCAN_DIR`
+//! pointing at [`php_ini::conf_d`] so the exposed `php` reads the same user
+//! settings the web server does. Both are undone by [`disable`], and both
+//! leave anything they didn't put there alone.
 
 use std::path::{Path, PathBuf};
 
@@ -78,14 +83,35 @@ pub struct PhpPathStatus {
 /// classic way PATH gets quietly mangled. Reading raw and writing back with
 /// the *same* value kind avoids it.
 fn read_user_path() -> Result<String, AppError> {
-    run(
-        "$k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment'); \
-         if ($null -eq $k) { '' } else { \
-         [string]$k.GetValue('Path', '', \
-         [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) }",
-        "reading your PATH",
-    )
+    read_user_env("Path", "reading your PATH")
 }
+
+/// Reads one value out of the user's `Environment` key, unexpanded.
+///
+/// Shared by PATH and `PHP_INI_SCAN_DIR` because the reason for
+/// `DoNotExpandEnvironmentNames` is the same for both: a value read expanded
+/// and written back turns a `REG_EXPAND_SZ` entry into a literal.
+fn read_user_env(name: &str, what: &str) -> Result<String, AppError> {
+    let script = format!(
+        "$k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment'); \
+         if ($null -eq $k) {{ '' }} else {{ \
+         [string]$k.GetValue({name}, '', \
+         [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) }}",
+        name = quote_ps(name)
+    );
+    run(&script, what)
+}
+
+/// Tells already-running shells and newly-launched apps that the environment
+/// changed, so neither PATH nor `PHP_INI_SCAN_DIR` needs a sign-out to take
+/// effect. Appended to every script here that writes one.
+const BROADCAST_SETTING_CHANGE: &str = "Add-Type -Namespace RezureWin32 -Name Env \
+     -MemberDefinition '[DllImport(\"user32.dll\", SetLastError=true, CharSet=CharSet.Auto)] \
+     public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, UIntPtr wParam, \
+     string lParam, uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);'; \
+     $r = [UIntPtr]::Zero; \
+     [void][RezureWin32.Env]::SendMessageTimeout([IntPtr]0xffff, 0x1A, [UIntPtr]::Zero, \
+     'Environment', 2, 5000, [ref]$r)";
 
 /// Writes the user PATH back, preserving its registry value kind, then
 /// broadcasts `WM_SETTINGCHANGE` so newly-launched apps see it without a
@@ -96,16 +122,33 @@ fn write_user_path(value: &str) -> Result<(), AppError> {
          $kind = $k.GetValueKind('Path'); \
          $k.SetValue('Path', {value}, $kind); \
          $k.Close(); \
-         Add-Type -Namespace RezureWin32 -Name Env -MemberDefinition '[DllImport(\"user32.dll\", \
-         SetLastError=true, CharSet=CharSet.Auto)] public static extern IntPtr SendMessageTimeout(\
-         IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, \
-         out UIntPtr lpdwResult);'; \
-         $r = [UIntPtr]::Zero; \
-         [void][RezureWin32.Env]::SendMessageTimeout([IntPtr]0xffff, 0x1A, [UIntPtr]::Zero, \
-         'Environment', 2, 5000, [ref]$r)",
+         {BROADCAST_SETTING_CHANGE}",
         value = quote_ps(value)
     );
     run(&script, "updating your PATH").map(|_| ())
+}
+
+/// Sets a user environment variable, or removes it when `value` is `None`.
+///
+/// Written as `REG_SZ`, unlike PATH: the value is a plain absolute path with
+/// no `%VAR%` in it, and a variable Rezure created is Rezure's to type.
+fn write_user_env(name: &str, value: Option<&str>) -> Result<(), AppError> {
+    let assignment = match value {
+        Some(value) => format!("$k.SetValue({}, {})", quote_ps(name), quote_ps(value)),
+        // Deleting a value that isn't there throws, and "already gone" is
+        // exactly the state this wants to reach.
+        None => format!(
+            "if ($null -ne $k.GetValue({name})) {{ $k.DeleteValue({name}) }}",
+            name = quote_ps(name)
+        ),
+    };
+    let script = format!(
+        "$k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true); \
+         {assignment}; \
+         $k.Close(); \
+         {BROADCAST_SETTING_CHANGE}"
+    );
+    run(&script, "updating your environment").map(|_| ())
 }
 
 /// Splits a PATH string into its non-empty entries, for *reading* it.
@@ -264,6 +307,58 @@ pub fn status() -> Result<PhpPathStatus, AppError> {
     })
 }
 
+/// Puts Rezure's `conf.d` on the machine-wide `PHP_INI_SCAN_DIR`, so the
+/// `php` this feature exposes reads the same user settings the web server
+/// does.
+///
+/// Without it, the terminal `php` loads only the ini sitting beside
+/// `php.exe` — a per-version file that a switch replaces — while every web
+/// request reads `conf.d`. The two would then disagree about which
+/// extensions and limits are in force, which is the confusing half of the
+/// problem this folder exists to fix.
+///
+/// An existing value is kept and ours appended, never replaced: the variable
+/// is machine-wide, so another tool may already be using it, and appending
+/// also puts Rezure's folder last, where it wins on any setting both name.
+fn ensure_scan_dir_env() -> Result<(), AppError> {
+    let conf_d = php_ini::ensure_conf_d()?.display().to_string();
+    let current = read_user_env(php_ini::SCAN_DIR_ENV, "reading your PHP settings folder")?;
+
+    if entries(&current)
+        .iter()
+        .any(|entry| same_dir(entry, &conf_d))
+    {
+        return Ok(());
+    }
+
+    let updated = if entries(&current).is_empty() {
+        conf_d
+    } else {
+        format!("{current};{conf_d}")
+    };
+    write_user_env(php_ini::SCAN_DIR_ENV, Some(&updated))
+}
+
+/// Takes Rezure's folder back out of `PHP_INI_SCAN_DIR`, removing the
+/// variable entirely only when nothing else was in it.
+///
+/// The same rule PATH gets: turning the feature off undoes what Rezure did
+/// and nothing else. A value some other tool set is left standing.
+fn remove_scan_dir_env() -> Result<(), AppError> {
+    let conf_d = php_ini::conf_d()?.display().to_string();
+    let current = read_user_env(php_ini::SCAN_DIR_ENV, "reading your PHP settings folder")?;
+
+    let rest = without_entry(&current, &conf_d);
+    if rest == current {
+        return Ok(());
+    }
+
+    write_user_env(
+        php_ini::SCAN_DIR_ENV,
+        (!entries(&rest).is_empty()).then_some(rest.as_str()),
+    )
+}
+
 /// Points the junction at the active version, creating it if needed.
 ///
 /// Re-pointing is delete-then-create: `New-Item -Force` refuses to replace a
@@ -287,6 +382,13 @@ pub fn sync() -> Result<(), AppError> {
         Ok(Some(path)) => log::info!("wrote {}", path.display()),
         Ok(None) => {}
         Err(err) => log::warn!("could not write php.ini in {}: {err}", target.display()),
+    }
+
+    // Best-effort, and here rather than only in `enable`, so an install that
+    // turned this feature on before Rezure had a `conf.d` gets the variable
+    // on its next switch instead of never.
+    if let Err(err) = ensure_scan_dir_env() {
+        log::warn!("could not set {}: {err}", php_ini::SCAN_DIR_ENV);
     }
 
     if junction_target(&link)
@@ -328,14 +430,21 @@ pub fn enable() -> Result<PhpPathStatus, AppError> {
     status()
 }
 
-/// Removes the entry from PATH and deletes the junction, leaving the machine
-/// as it was.
+/// Removes the entry from PATH, drops Rezure's folder from
+/// `PHP_INI_SCAN_DIR`, and deletes the junction, leaving the machine as it
+/// was.
 pub fn disable() -> Result<PhpPathStatus, AppError> {
     let link = link_dir()?;
     let link_str = link.display().to_string();
 
     let user_path = read_user_path()?;
     write_user_path(&without_entry(&user_path, &link_str))?;
+
+    // The folder itself stays — it holds the user's settings, and Rezure's
+    // own processes keep reading it. Only the machine-wide pointer goes.
+    if let Err(err) = remove_scan_dir_env() {
+        log::warn!("could not clear {}: {err}", php_ini::SCAN_DIR_ENV);
+    }
 
     if link.exists() {
         let script = format!(

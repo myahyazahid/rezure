@@ -35,7 +35,10 @@ onMounted(() => {
 
     <div class="flex min-h-0 flex-1">
       <AppSidebar />
-      <main class="min-w-0 flex-1 overflow-y-auto px-6 py-5">
+      <!-- More room at the bottom than the top: the full-height views end
+           flush with this edge, and without the gap their last row reads as
+           clipped by the window rather than scrolled. -->
+      <main class="min-w-0 flex-1 overflow-y-auto px-6 pt-5 pb-8">
         <!--
           Kept alive so switching pages is instant. Without this every route
           unmounts on the way out and remounts on the way back, which re-runs

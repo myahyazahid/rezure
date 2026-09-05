@@ -6,7 +6,6 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -17,24 +16,35 @@ use crate::db::projects::{ProjectInfo, ProjectKind};
 use crate::utils::error::AppError;
 use crate::utils::paths;
 
-fn domain_suffix_cell() -> &'static Mutex<String> {
-    static SUFFIX: OnceLock<Mutex<String>> = OnceLock::new();
-    SUFFIX.get_or_init(|| Mutex::new("test".to_string()))
-}
+/// The suffix (no leading dot) every local domain is built with.
+///
+/// Fixed rather than configurable, because the alternatives don't work on a
+/// plain HTTP vhost: `.dev` is a real gTLD on the browsers' HSTS preload
+/// list, so they force `https://` before the hosts file is ever consulted,
+/// and `.local` is reserved for mDNS, which on Windows intercepts it ahead
+/// of the hosts file. `.test` is reserved for exactly this by RFC 6761.
+pub const DOMAIN_SUFFIX: &str = "test";
 
-/// The suffix (no leading dot) new domains are built with — process-wide
-/// in-memory state, the same pattern `services::php` uses for its active
-/// version: cheap to read on every scan rather than re-reading
-/// `Settings.domain_suffix` from disk each time (see `CLAUDE.md`'s "config
-/// is a single source of truth" rule). `commands::settings::update_settings`
-/// and `lib.rs`'s startup restore are what keep this in sync with the
-/// persisted setting.
-pub fn domain_suffix() -> String {
-    domain_suffix_cell().lock().unwrap().clone()
-}
-
-pub fn set_domain_suffix(suffix: &str) {
-    *domain_suffix_cell().lock().unwrap() = suffix.to_string();
+/// Whether `domain` is safe to write into a generated nginx `server_name`
+/// and into the Windows hosts file — ASCII letters, digits and hyphens per
+/// dot-separated label.
+///
+/// This is a safety check, not a style rule. Windows allows a space, `;`,
+/// `{` and `#` in a folder name, and every one of those means something to
+/// nginx: a space makes it read the rest as a second server name, and `;`
+/// or `{` ends the directive. The generated config holds every project, so
+/// one bad name there stops nginx from loading at all and takes the other
+/// sites down with it.
+pub fn is_safe_domain(domain: &str) -> bool {
+    !domain.is_empty()
+        && domain.len() <= 253
+        && domain.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+        })
 }
 
 /// `%USERPROFILE%\rezure\www` — where Rezure looks for projects. A fresh
@@ -89,6 +99,9 @@ fn linked_projects(scanned: &[ProjectInfo]) -> Vec<ProjectInfo> {
             name: link.name,
             path: link.path,
             has_hosts_entry: hosts::has_entry(&link.domain),
+            // `link()` rejects an unsafe domain, but a `links.json` written
+            // by an older build or edited by hand hasn't been through it.
+            domain_invalid: !is_safe_domain(&link.domain),
             domain: link.domain,
             // A folder that isn't there can't be inspected; the badge would
             // otherwise read "Unknown" as though the project had no stack.
@@ -132,13 +145,17 @@ fn scan_www() -> Result<Vec<ProjectInfo>, AppError> {
             continue;
         }
 
-        let domain = format!("{folder_name}.{}", domain_suffix());
+        let domain = format!("{folder_name}.{DOMAIN_SUFFIX}");
+        // The folder name comes off the disk, so nothing has vetted it —
+        // it's whatever the user (or an unzipped archive) called it.
+        let domain_invalid = !is_safe_domain(&domain);
         projects.push(ProjectInfo {
             id: folder_name.to_string(),
             name: folder_name.to_string(),
             path: path.display().to_string(),
             has_hosts_entry: hosts::has_entry(&domain),
             domain,
+            domain_invalid,
             stack: detect_stack(&path),
             // Filled in by `commands::projects::list_projects` from SQLite —
             // a bare scan has no way to know this.
@@ -205,10 +222,10 @@ fn reject_dangerous_root(path: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Picks a free domain for `name` under the current `domain_suffix()`,
-/// appending `-2`, `-3`… only if the obvious one is taken.
+/// Picks a free domain for `name` under `DOMAIN_SUFFIX`, appending `-2`,
+/// `-3`… only if the obvious one is taken.
 fn free_domain(base_slug: &str, taken: &[String]) -> (String, bool) {
-    let suffix = domain_suffix();
+    let suffix = DOMAIN_SUFFIX;
     let is_free = |candidate: &str| !taken.iter().any(|d| d.eq_ignore_ascii_case(candidate));
 
     let first = format!("{base_slug}.{suffix}");
@@ -300,6 +317,17 @@ pub fn link(path: &str, name: Option<String>, domain: Option<String>) -> Result<
         .filter(|d| !d.is_empty())
     {
         Some(requested) => {
+            // Checked before the collision test: this one ends up verbatim
+            // in the generated nginx config, where a stray `;` or space
+            // breaks every site, not just this one.
+            if !is_safe_domain(&requested) {
+                return Err(AppError::UnusableProjectPath {
+                    path: path.to_string(),
+                    reason: format!(
+                        "{requested} isn't a usable domain — use letters, digits and hyphens only"
+                    ),
+                });
+            }
             let taken: Vec<String> = scan_projects()?.into_iter().map(|p| p.domain).collect();
             if taken.iter().any(|d| d.eq_ignore_ascii_case(&requested)) {
                 return Err(AppError::UnusableProjectPath {
@@ -387,6 +415,46 @@ fn detect_from_package_json(dir: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ordinary_folder_names_are_servable() {
+        assert!(is_safe_domain("blog.test"));
+        assert!(is_safe_domain("my-shop-2.test"));
+        // Uppercase has always worked and must keep working — nginx matches
+        // server names case-insensitively.
+        assert!(is_safe_domain("MyBlog.test"));
+        assert!(is_safe_domain("api.internal.test"));
+    }
+
+    /// Every one of these is a legal Windows folder name, and every one of
+    /// them means something to nginx.
+    #[test]
+    fn names_that_would_corrupt_the_nginx_config_are_rejected() {
+        // Read as two server names, so the site silently answers on the
+        // wrong domain rather than failing loudly.
+        assert!(!is_safe_domain("My App.test"));
+        // Ends the directive — the rest becomes a stray one and nginx
+        // refuses to load the whole config.
+        assert!(!is_safe_domain("foo;return.test"));
+        assert!(!is_safe_domain("foo{bar.test"));
+        assert!(!is_safe_domain("foo}bar.test"));
+        // Comments out the remainder of the hosts-file line.
+        assert!(!is_safe_domain("foo#bar.test"));
+        assert!(!is_safe_domain("foo'bar.test"));
+        assert!(!is_safe_domain("foo\"bar.test"));
+        assert!(!is_safe_domain("foo\nbar.test"));
+    }
+
+    #[test]
+    fn malformed_labels_are_rejected() {
+        assert!(!is_safe_domain(""));
+        assert!(!is_safe_domain(".test"));
+        assert!(!is_safe_domain("foo..test"));
+        assert!(!is_safe_domain("-foo.test"));
+        assert!(!is_safe_domain("foo-.test"));
+        // Non-ASCII resolves nowhere without punycode, so it isn't served.
+        assert!(!is_safe_domain("café.test"));
+    }
 
     fn temp_project(name: &str) -> PathBuf {
         let dir =

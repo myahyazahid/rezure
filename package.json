@@ -1,6 +1,6 @@
 {
   "name": "rezureapp",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "description": "A modern, lightweight local development environment manager for Windows — inspired by Laragon, built with Tauri + Rust + Vue 3.",
   "type": "module",
@@ -21,6 +21,8 @@
     "@tauri-apps/api": "^2.9.0",
     "@tauri-apps/plugin-dialog": "^2.7.2",
     "@tauri-apps/plugin-opener": "^2.5.1",
+    "dompurify": "^3.4.14",
+    "marked": "^18.0.11",
     "pinia": "^4.0.2",
     "vue": "^3.5.40",
     "vue-router": "^5.2.0"
@@ -29,6 +31,7 @@
     "@tailwindcss/vite": "^4.1.16",
     "@tauri-apps/cli": "^2.9.5",
     "@tsconfig/node24": "^24.0.4",
+    "@types/dompurify": "^3.0.5",
     "@types/node": "^24.13.3",
     "@vitejs/plugin-vue": "^6.0.8",
     "@vue/eslint-config-typescript": "^14.9.0",

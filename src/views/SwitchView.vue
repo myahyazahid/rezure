@@ -9,6 +9,7 @@ import RuntimeSwitchRow, {
 } from '@/components/services/RuntimeSwitchRow.vue'
 import InstallPhpVersionModal from '@/components/services/InstallPhpVersionModal.vue'
 import PhpPathLinkCard from '@/components/services/PhpPathLinkCard.vue'
+import PhpConfigCard from '@/components/services/PhpConfigCard.vue'
 import BusyOverlay from '@/components/common/BusyOverlay.vue'
 
 const phpStore = usePhpStore()
@@ -33,6 +34,7 @@ async function switchPhp(id: string) {
 onActivated(() => {
   composerStore.fetchStatus()
   phpStore.fetchDropInDir()
+  phpStore.fetchConfigDir()
   phpStore.fetchPathStatus()
 })
 
@@ -51,9 +53,30 @@ const mariadbVersions = computed<RuntimeVersionEntry[]>(() =>
     : [],
 )
 
+// Only one build is offered, so there's nothing to switch between — the row
+// is here because this is the one place that installs it.
+const nginx = computed(() => binariesStore.binaries.find((b) => b.id === 'nginx') ?? null)
+const nginxVersions = computed<RuntimeVersionEntry[]>(() =>
+  nginx.value
+    ? [{ id: 'nginx', version: nginx.value.version, installed: nginx.value.installed }]
+    : [],
+)
+
 const composerVersions = computed<RuntimeVersionEntry[]>(() => [
   { id: 'composer', version: 'latest', installed: composerStore.installed },
 ])
+
+// A PHP install can be started from the modal and keeps running after it's
+// closed, so the row reports the progress of whichever version is in flight.
+const phpProgress = computed(() =>
+  phpStore.installingId ? phpStore.progressFor(phpStore.installingId) : null,
+)
+
+// The rows below fill in as their paths arrive, so the section's frame is
+// held back until there's at least one to put in it.
+const hasPhpConfig = computed(
+  () => phpStore.pathStatus !== null || phpStore.configDir !== '' || phpStore.dropInDir !== '',
+)
 </script>
 
 <template>
@@ -96,7 +119,12 @@ const composerVersions = computed<RuntimeVersionEntry[]>(() => [
       {{ composerStore.error }}
     </p>
 
-    <div class="mt-5 flex flex-col gap-2.5">
+    <h2 class="mt-6 mb-2 text-xs font-semibold tracking-wide text-neutral-400 uppercase">
+      Runtimes
+    </h2>
+    <div
+      class="flex flex-col divide-y divide-neutral-200/80 rounded-2xl border border-neutral-200/80 bg-neutral-100/60 dark:divide-neutral-800 dark:border-neutral-800 dark:bg-neutral-900/60"
+    >
       <RuntimeSwitchRow
         icon="P"
         name="PHP"
@@ -104,9 +132,20 @@ const composerVersions = computed<RuntimeVersionEntry[]>(() => [
         :installed-count="phpInstalledCount"
         :versions="phpVersions"
         :installing-id="phpStore.installingId"
+        :progress="phpProgress"
         :busy="phpStore.switching !== null"
         @select="switchPhp"
         @install="phpStore.install"
+      />
+      <RuntimeSwitchRow
+        icon="N"
+        name="Nginx"
+        :active-version="nginx?.installed ? nginx.version : null"
+        :installed-count="nginx?.installed ? 1 : 0"
+        :versions="nginxVersions"
+        :installing-id="binariesStore.isInstalling('nginx') ? 'nginx' : null"
+        :progress="binariesStore.progressFor('nginx')"
+        @install="binariesStore.install('nginx')"
       />
       <RuntimeSwitchRow
         icon="M"
@@ -115,6 +154,7 @@ const composerVersions = computed<RuntimeVersionEntry[]>(() => [
         :installed-count="mariadb?.installed ? 1 : 0"
         :versions="mariadbVersions"
         :installing-id="binariesStore.isInstalling('mariadb') ? 'mariadb' : null"
+        :progress="binariesStore.progressFor('mariadb')"
         @install="binariesStore.install('mariadb')"
       />
       <RuntimeSwitchRow
@@ -143,33 +183,53 @@ const composerVersions = computed<RuntimeVersionEntry[]>(() => [
         disabled
       />
     </div>
-
-    <div class="mt-3">
-      <PhpPathLinkCard />
-    </div>
-
-    <div class="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-neutral-400">
-      <span v-if="customPhpCount > 0">
-        {{ customPhpCount }} PHP {{ customPhpCount === 1 ? 'version was' : 'versions were' }} added
-        by hand — Rezure didn't checksum those.
-      </span>
-      <span v-if="phpStore.dropInDir" class="flex items-center gap-1">
-        Drop-in folder:
-        <button
-          type="button"
-          class="truncate font-mono underline"
-          :title="phpStore.dropInDir"
-          @click="phpStore.openDropInDir"
-        >
-          {{ phpStore.dropInDir }}
-        </button>
-      </span>
-    </div>
-
+    <p v-if="customPhpCount > 0" class="mt-2 text-xs text-neutral-400">
+      {{ customPhpCount }} PHP {{ customPhpCount === 1 ? 'version was' : 'versions were' }} added by
+      hand — Rezure didn't checksum those.
+    </p>
     <p class="mt-2 text-xs text-neutral-400">
       Node.js and Python aren't available yet — Rezure doesn't bundle a portable runtime for either,
       so there's nothing installable to switch between.
     </p>
+
+    <h2
+      v-if="hasPhpConfig"
+      class="mt-6 mb-2 text-xs font-semibold tracking-wide text-neutral-400 uppercase"
+    >
+      PHP configuration
+    </h2>
+    <div
+      v-if="hasPhpConfig"
+      class="divide-y divide-neutral-200/80 rounded-2xl border border-neutral-200/80 bg-neutral-100/60 dark:divide-neutral-800 dark:border-neutral-800 dark:bg-neutral-900/60"
+    >
+      <PhpPathLinkCard />
+      <PhpConfigCard />
+
+      <div v-if="phpStore.dropInDir" class="p-4">
+        <div class="flex items-start justify-between gap-4">
+          <div class="min-w-0">
+            <p class="font-semibold text-neutral-900 dark:text-neutral-100">Drop-in folder</p>
+            <p class="mt-0.5 text-xs text-neutral-500">
+              A PHP build copied in here shows up in the list above, alongside the ones Rezure
+              installed.
+            </p>
+          </div>
+          <button
+            type="button"
+            class="shrink-0 rounded-full border border-neutral-200 bg-white px-4 py-1.5 text-xs font-semibold text-neutral-700 transition hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
+            @click="phpStore.openDropInDir"
+          >
+            Open folder
+          </button>
+        </div>
+        <p
+          class="mt-3 truncate rounded-lg bg-neutral-100 px-2.5 py-1.5 font-mono text-xs text-neutral-500 dark:bg-neutral-800/60"
+          :title="phpStore.dropInDir"
+        >
+          {{ phpStore.dropInDir }}
+        </p>
+      </div>
+    </div>
 
     <BusyOverlay
       :show="phpStore.switching !== null"

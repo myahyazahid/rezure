@@ -44,3 +44,37 @@ export interface PhpPathStatus {
   /** Other PHP installs already on PATH that enabling would override. */
   conflicts: string[]
 }
+
+/** One `ext-*` requirement from a project's composer.json, checked against
+ *  the active PHP. */
+export interface ExtensionCheck {
+  /** The name without the `ext-` prefix, as composer.json spells it. */
+  name: string
+  loaded: boolean
+  /** Only `require-dev` asks for it — a served site doesn't break without it. */
+  devOnly: boolean
+}
+
+/** What a requirements check found for one project. */
+export interface ProjectDiagnosis {
+  /** The PHP the answer is about — the active version. */
+  phpVersion: string
+  /** False when there's no composer.json, so nothing to check. */
+  hasComposerJson: boolean
+  /** Missing first, then dev-only, then satisfied. */
+  extensions: ExtensionCheck[]
+  /** The names that actually need acting on. */
+  missing: string[]
+}
+
+/** A PECL extension Rezure can install into a PHP version. */
+export interface ExtensionStatus {
+  id: string
+  name: string
+  version: string
+  summary: string
+  /** Already in this version's ext/ folder. */
+  installed: boolean
+  /** A verified build exists for this PHP branch. */
+  available: boolean
+}
