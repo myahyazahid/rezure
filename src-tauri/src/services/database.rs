@@ -244,6 +244,21 @@ impl Conn {
     /// else — so this is deliberately returned as one ordered block that
     /// callers append their own arguments to, never interleave with.
     fn args(&self) -> Vec<String> {
+        self.base_args(true)
+    }
+
+    /// The same block for `mysqldump`, which is the one client here that
+    /// doesn't register `--connect-timeout`: MariaDB's build rejects it
+    /// outright (`unknown variable 'connect-timeout=10'`), which failed
+    /// every export rather than only slow ones. A dump has no use for a
+    /// short connect deadline anyway — a tunnelled connection has already
+    /// been proven reachable by `tunnel::open`, and a direct one falls back
+    /// to the OS's own TCP timeout.
+    fn dump_args(&self) -> Vec<String> {
+        self.base_args(false)
+    }
+
+    fn base_args(&self, connect_timeout: bool) -> Vec<String> {
         let mut args = Vec::new();
         if let Some(defaults) = &self.defaults {
             args.push(format!("--defaults-file={}", defaults.path.display()));
@@ -259,7 +274,9 @@ impl Conn {
         args.push(self.port.to_string());
         args.push("-u".to_string());
         args.push(self.user.clone());
-        args.push(format!("--connect-timeout={CONNECT_TIMEOUT_SECS}"));
+        if connect_timeout {
+            args.push(format!("--connect-timeout={CONNECT_TIMEOUT_SECS}"));
+        }
         args.extend(self.tls_args());
         args
     }
@@ -786,7 +803,7 @@ pub fn export_database(name: &str) -> Result<PathBuf, AppError> {
     let file = std::fs::File::create(&dest)
         .map_err(|e| AppError::Io(format!("could not create {}: {e}", dest.display())))?;
     let mut command = Command::new(conn.client(db_engine::DUMP_EXE)?);
-    command.args(conn.args());
+    command.args(conn.dump_args());
     if conn.is_remote() {
         command.args(remote_dump_args(&conn));
     }
@@ -997,6 +1014,29 @@ mod tests {
         assert!(
             !args.iter().any(|arg| arg.contains("s3cret")),
             "the password must never appear in the arguments: {args:?}"
+        );
+    }
+
+    /// MariaDB's `mysqldump` rejects `--connect-timeout` with "unknown
+    /// variable", which made every export fail — including local ones, where
+    /// the option was never earning anything.
+    #[test]
+    fn the_dump_client_is_not_given_an_option_it_does_not_register() {
+        let conn = conn_for(TlsMode::Preferred, Engine::MariaDb, None);
+        assert!(
+            conn.args()
+                .iter()
+                .any(|arg| arg.contains("connect-timeout")),
+            "the console client still gets its deadline: {:?}",
+            conn.args()
+        );
+        assert!(
+            !conn
+                .dump_args()
+                .iter()
+                .any(|arg| arg.contains("connect-timeout")),
+            "mysqldump must not be handed it: {:?}",
+            conn.dump_args()
         );
     }
 
