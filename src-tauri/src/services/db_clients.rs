@@ -19,7 +19,7 @@ use std::process::Command;
 
 use serde::Serialize;
 
-use super::database::{self, HOST, USER};
+use super::database;
 use crate::utils::error::AppError;
 
 /// Opens the process in its own console window instead of inheriting
@@ -171,26 +171,33 @@ pub fn detect() -> Vec<DbClientInfo> {
 /// Every one of these is a documented command-line interface of the client
 /// itself; each argument is passed as its own argv entry, so a database
 /// name never has to be quoted or escaped into a longer string.
+///
+/// The endpoint comes from whichever target the Databases page is showing,
+/// not from localhost: handing off while looking at a remote connection has
+/// to open that server, or the menu quietly lies about what it opens. The
+/// password is deliberately never passed — these clients prompt for it and
+/// store it in their own vault, which is where it belongs.
 fn connection_args(id: &str, database: &str) -> Vec<String> {
+    let (host, port, user) = database::endpoint();
     match id {
         // TablePlus takes a connection URL directly.
-        "tableplus" => vec![format!("mysql://{USER}@{HOST}:{}/{database}", database::port())],
+        "tableplus" => vec![format!("mysql://{user}@{host}:{port}/{database}")],
         // DBeaver's `-con` takes one pipe-separated spec. `save=false`
         // keeps Rezure from littering the user's DBeaver workspace with a
         // new saved connection on every click.
         "dbeaver" => vec![
             "-con".to_string(),
             format!(
-                "driver=mariadb|host={HOST}|port={}|database={database}|user={USER}|save=false|connect=true", database::port()
+                "driver=mariadb|host={host}|port={port}|database={database}|user={user}|save=false|connect=true"
             ),
         ],
         // Workbench's `-query` opens a connection to a server, with no way
         // to preselect a schema.
-        "workbench" => vec!["-query".to_string(), format!("{USER}@{HOST}:{}", database::port())],
+        "workbench" => vec!["-query".to_string(), format!("{user}@{host}:{port}")],
         "heidisql" => vec![
-            format!("-h={HOST}"),
-            format!("-P={}", database::port()),
-            format!("-u={USER}"),
+            format!("-h={host}"),
+            format!("-P={port}"),
+            format!("-u={user}"),
         ],
         // Navicat has no documented connection flags — it just opens.
         _ => Vec::new(),
@@ -228,11 +235,18 @@ pub fn open(client_id: &str, database: &str) -> Result<(), AppError> {
 fn open_console(database: &str) -> Result<(), AppError> {
     let exe = database::console_client()?;
 
+    let (host, port, user) = database::endpoint();
     let mut cmd = Command::new(&exe);
-    cmd.args(["-h", HOST])
-        .args(["-P", &database::port().to_string()])
-        .args(["-u", USER])
+    cmd.args(["-h", &host])
+        .args(["-P", &port.to_string()])
+        .args(["-u", &user])
         .arg(database);
+
+    // `-p` with no value makes the client prompt in its own console, so the
+    // password reaches it without passing through an argument list.
+    if database::endpoint_prompts_for_password() {
+        cmd.arg("-p");
+    }
 
     #[cfg(windows)]
     {

@@ -5,6 +5,7 @@
 
 pub mod binaries;
 pub mod changelog;
+pub mod connections;
 pub mod database;
 pub mod db_clients;
 pub mod db_engine;
@@ -21,8 +22,10 @@ pub mod ports;
 pub mod process;
 pub mod projects;
 pub mod scaffold;
+pub mod secrets;
 pub mod support;
 pub mod telemetry;
+pub mod tunnel;
 pub mod vhosts;
 
 use std::sync::Arc;

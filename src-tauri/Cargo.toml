@@ -40,3 +40,4 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 rusqlite_migration = "1"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+keyring = { version = "3.6.3", features = ["windows-native"] }

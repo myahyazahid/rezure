@@ -1,7 +1,7 @@
 mod commands;
 mod config;
 mod db;
-mod services;
+pub mod services;
 mod utils;
 
 use tauri::menu::{Menu, MenuItem};
@@ -87,6 +87,13 @@ pub fn run() {
                 commands::db_profiles::add_db_profile,
                 commands::db_profiles::remove_db_profile,
                 commands::db_profiles::switch_db_profile,
+                commands::connections::list_db_connections,
+                commands::connections::test_db_connection,
+                commands::connections::add_db_connection,
+                commands::connections::remove_db_connection,
+                commands::connections::set_db_connection_password,
+                commands::connections::use_db_connection,
+                commands::connections::use_local_db_profile,
                 commands::support::inspect_attachment,
                 commands::support::submit_ticket,
                 commands::support::fetch_ticket_history,
@@ -452,6 +459,11 @@ pub fn run() {
             if let Some(manager) = app_handle.try_state::<services::ServiceManager>() {
                 manager.stop_all();
             }
+
+            // Tunnels are child processes Rezure owns but no service manages,
+            // so nothing above reaps them: without this an `ssh.exe` per
+            // connection survives the app, still holding a forwarded port.
+            services::tunnel::close_all();
         }
     });
 }

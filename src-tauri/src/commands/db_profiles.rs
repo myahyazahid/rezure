@@ -126,6 +126,11 @@ pub async fn switch_db_profile(
 
     db_profiles::check_can_switch_to(&target)?;
 
+    // Picking a datadir is the user saying they want to look at local data.
+    // Leaving a remote connection selected would list another server's
+    // schemas under a switcher that claims to be showing this profile.
+    crate::services::connections::clear_active();
+
     let previous = db_profiles::active();
     let service = manager.find(DB_SERVICE)?;
     let was_running = service.info().status == ServiceStatus::Running;

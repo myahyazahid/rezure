@@ -6,7 +6,8 @@ export interface DatabaseInfo {
    *  estimate for InnoDB, not an exact byte count. */
   sizeBytes: number
   /** Domain of the project this database appears to belong to, matched by
-   *  name on the Rust side. `null` when nothing matches. */
+   *  name on the Rust side. `null` when nothing matches, and always null for
+   *  a remote server, where local project folders say nothing about it. */
   usedBy: string | null
 }
 
@@ -15,8 +16,15 @@ export interface DatabaseServerInfo {
   port: number
   user: string
   hasPassword: boolean
-  /** Connection string ready to paste into a client. */
+  /** Connection string ready to paste into a client. Never carries the
+   *  password, even for a remote connection that has one. */
   dsn: string
+  /** True when this is a remote connection rather than the local server. */
+  remote: boolean
+  /** Name of the active connection or profile, to state beside the endpoint. */
+  label: string
+  /** True when writes — create, drop, import — are refused for this target. */
+  readOnly: boolean
 }
 
 export interface DbClientInfo {

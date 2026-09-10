@@ -1,5 +1,6 @@
-//! Reads and manages the schemas inside whichever database profile is
-//! currently active — see `services::db_profiles`.
+//! Reads and manages the schemas on whichever database Rezure is currently
+//! pointed at — the local server (see `services::db_profiles`) or a remote
+//! connection (see `services::connections`).
 //!
 //! There's no MySQL driver crate in the dependency tree on purpose: every
 //! server build Rezure runs ships its own client binaries (`mysql.exe`,
@@ -8,25 +9,34 @@
 //! the client emit tab-separated rows with no box drawing, which is what
 //! every read here parses.
 //!
-//! Both the port and the client binaries are resolved from the active
-//! profile rather than fixed, so after a switch this module queries the
-//! server that's actually running, using that build's own client.
+//! # One resolved connection, not a set of globals
+//!
+//! Everything below goes through [`Conn`], resolved once per operation by
+//! [`active_conn`]. Host, port, user, credentials, TLS and *which client
+//! binary to run* all come from there, because all six differ between a
+//! local profile and a remote server — and a function that reads only some
+//! of them from the active target is how a query ends up asking the right
+//! server with the wrong client, or the wrong server entirely.
 //!
 //! Rezure's own datadir is bootstrapped without a root password — it binds
 //! to 127.0.0.1 only, and asking a developer to invent a password for a
-//! throwaway local server just moves the secret into a config file.
-//! [`server_info`] states that plainly rather than hiding it. An adopted
-//! profile keeps whatever credentials its owner set; where those aren't
-//! passwordless, its own client will say so.
+//! throwaway local server just moves the secret into a config file. A
+//! remote connection always carries one; it is passed through a temporary
+//! `--defaults-file` and never on the command line, where every process
+//! listing on the machine could read it.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::Serialize;
 
-use super::db_engine;
+use super::connections;
+use super::db_engine::{self, Engine};
 use super::db_profiles;
 use super::projects::scan_projects;
+use super::secrets;
+use super::tunnel;
+use crate::config::connections::{Connection, SshTunnel, TlsMode};
 use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
 use crate::utils::paths;
@@ -36,6 +46,14 @@ pub const USER: &str = "root";
 /// Used only when no profile is resolvable — the real port comes from
 /// whichever profile is active.
 pub const DEFAULT_PORT: u16 = 3306;
+
+/// How long a client waits for a TCP connect before giving up.
+///
+/// The client's own default is minutes long. On localhost that never
+/// mattered, because a refused connection fails instantly; a remote host
+/// that is simply unreachable would otherwise hang the Databases page with
+/// no way to tell whether anything is happening.
+const CONNECT_TIMEOUT_SECS: u32 = 10;
 
 /// The port the currently active profile's server listens on.
 ///
@@ -47,6 +65,37 @@ pub fn port() -> u16 {
     db_profiles::active()
         .map(|profile| profile.port)
         .unwrap_or(DEFAULT_PORT)
+}
+
+/// Where a SQL client should be pointed to reach what Rezure is showing:
+/// host, port and user of the active target.
+///
+/// Used by `db_clients` for the "Open" menu, so handing off to DBeaver or
+/// TablePlus lands on the same server the page is listing rather than
+/// always on localhost.
+pub fn endpoint() -> (String, u16, String) {
+    match connections::active() {
+        // A tunnelled connection's own host and port only mean anything on
+        // the SSH server. What a client on *this* machine can dial is the
+        // forwarded local port — and only while the tunnel is up, which is
+        // why this reports the live one rather than starting anything.
+        Some(connection) => match tunnel::existing_port(&connection.id) {
+            Some(local) => (HOST.to_string(), local, connection.user),
+            None => (connection.host, connection.port, connection.user),
+        },
+        None => (HOST.to_string(), port(), USER.to_string()),
+    }
+}
+
+/// Whether a console opened on the active target has to ask for a password.
+///
+/// Rezure's own server has none, so prompting there would be a step with no
+/// answer. A remote one almost always does, and a console that connects
+/// without offering to supply it just fails with "access denied".
+pub fn endpoint_prompts_for_password() -> bool {
+    connections::active()
+        .map(|connection| secrets::resolve(&connection.id).is_some())
+        .unwrap_or(false)
 }
 
 /// Schemas MariaDB itself owns — never listed, never droppable.
@@ -63,7 +112,8 @@ pub struct DatabaseInfo {
     /// storage estimate, not a byte count.
     pub size_bytes: u64,
     /// The project domain this database appears to belong to, matched by
-    /// name — see [`used_by`].
+    /// name — see [`used_by`]. Always `None` for a remote server, where
+    /// local project folders say nothing about the schemas on it.
     pub used_by: Option<String>,
 }
 
@@ -73,26 +123,266 @@ pub struct ServerInfo {
     pub host: String,
     pub port: u16,
     pub user: String,
-    /// Always false today, but stated explicitly so the UI shows the real
-    /// state instead of hard-coding "no password" into a label.
     pub has_password: bool,
-    /// Ready to paste into a client that takes a connection string.
+    /// Ready to paste into a client that takes a connection string. Never
+    /// carries the password, even for a remote connection that has one.
     pub dsn: String,
+    /// Which target this is — a remote connection, or the local server.
+    pub remote: bool,
+    /// The name of the active connection or profile, for the UI to state
+    /// beside the endpoint. Empty when no profile has been set up yet.
+    pub label: String,
+    /// Whether writes (create, drop, import) are refused for this target.
+    pub read_only: bool,
 }
 
 pub fn server_info() -> ServerInfo {
-    ServerInfo {
-        host: HOST.to_string(),
-        port: port(),
-        user: USER.to_string(),
-        has_password: false,
-        dsn: format!("mysql://{USER}@{HOST}:{}", port()),
+    match connections::active() {
+        Some(connection) => {
+            let has_password = secrets::resolve(&connection.id).is_some();
+            ServerInfo {
+                dsn: format!(
+                    "mysql://{}@{}:{}",
+                    connection.user, connection.host, connection.port
+                ),
+                host: connection.host,
+                port: connection.port,
+                user: connection.user,
+                has_password,
+                remote: true,
+                label: connection.name,
+                read_only: connection.read_only,
+            }
+        }
+        None => ServerInfo {
+            host: HOST.to_string(),
+            port: port(),
+            user: USER.to_string(),
+            has_password: false,
+            dsn: format!("mysql://{USER}@{HOST}:{}", port()),
+            remote: false,
+            label: db_profiles::active()
+                .map(|profile| profile.name)
+                .unwrap_or_default(),
+            read_only: false,
+        },
     }
 }
 
-/// A schema or collation name that's safe to splice into SQL.
+/// A temporary option file carrying a password, deleted when dropped.
 ///
-/// Identifiers can't be bound as parameters — `CREATE DATABASE ?` isn't a
+/// The password cannot go on the command line: `-p<secret>` is visible in
+/// Task Manager, `tasklist`, and any process-listing API, to every process
+/// running as this user. An option file is what both clients document for
+/// exactly this, and Windows' per-user temp directory is already ACL'd to
+/// the user — so the file is readable by the same set of processes that
+/// could read Credential Manager anyway, and only for as long as the
+/// command runs.
+struct TempDefaults {
+    path: PathBuf,
+}
+
+impl TempDefaults {
+    fn new(password: &str) -> Result<Self, AppError> {
+        let path = std::env::temp_dir().join(format!(
+            "rezure-{}-{}.cnf",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        // `[client]` is read by `mysql` and `mysqldump` alike, so one
+        // section covers every binary this module runs.
+        let contents = format!("[client]\npassword=\"{}\"\n", escape_option_value(password));
+        std::fs::write(&path, contents).map_err(|e| {
+            AppError::Io(format!(
+                "could not write the temporary credentials file: {e}"
+            ))
+        })?;
+        Ok(Self { path })
+    }
+}
+
+impl Drop for TempDefaults {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// Escapes a value for a double-quoted option-file entry.
+///
+/// Option files process backslash escapes inside quotes, so a password
+/// containing `\` or `"` would otherwise be read as something other than
+/// what the user typed — and fail authentication with no hint as to why.
+fn escape_option_value(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Everything needed to run one client command against the active target.
+pub struct Conn {
+    host: String,
+    port: u16,
+    user: String,
+    tls: TlsMode,
+    /// The engine of the *client binary*, which is not always the engine of
+    /// the server — see `connections::client_dir`.
+    client_engine: Engine,
+    /// True when this client is MySQL 8+, whose `mysqldump` takes two
+    /// options no other build has.
+    mysql_8_client: bool,
+    bin: PathBuf,
+    /// Held for the lifetime of the connection: dropping it deletes the
+    /// file, so the password exists on disk only while a command runs.
+    defaults: Option<TempDefaults>,
+    /// The remote connection this points at, or `None` for the local
+    /// server.
+    remote: Option<Connection>,
+}
+
+impl Conn {
+    /// The leading arguments every client invocation starts with.
+    ///
+    /// `--defaults-file` must come first — both clients refuse it anywhere
+    /// else — so this is deliberately returned as one ordered block that
+    /// callers append their own arguments to, never interleave with.
+    fn args(&self) -> Vec<String> {
+        let mut args = Vec::new();
+        if let Some(defaults) = &self.defaults {
+            args.push(format!("--defaults-file={}", defaults.path.display()));
+        } else {
+            // Without this the client silently reads `my.cnf` from the
+            // machine's default locations, which for a user who also runs
+            // XAMPP or Laragon can mean connecting somewhere else entirely.
+            args.push("--no-defaults".to_string());
+        }
+        args.push("-h".to_string());
+        args.push(self.host.clone());
+        args.push("-P".to_string());
+        args.push(self.port.to_string());
+        args.push("-u".to_string());
+        args.push(self.user.clone());
+        args.push(format!("--connect-timeout={CONNECT_TIMEOUT_SECS}"));
+        args.extend(self.tls_args());
+        args
+    }
+
+    /// TLS spelled the way this client understands it. MySQL took
+    /// `--ssl-mode` in 5.7; MariaDB never adopted it and uses `--ssl` /
+    /// `--skip-ssl`. Passing the wrong one aborts with "unknown option".
+    fn tls_args(&self) -> Vec<String> {
+        match (self.tls, self.client_engine) {
+            // The client's own default already negotiates TLS when the
+            // server offers it, so there's nothing to say.
+            (TlsMode::Preferred, _) => Vec::new(),
+            (TlsMode::Required, Engine::MySql) => vec!["--ssl-mode=REQUIRED".to_string()],
+            (TlsMode::Required, Engine::MariaDb) => vec!["--ssl".to_string()],
+            (TlsMode::Disabled, Engine::MySql) => vec!["--ssl-mode=DISABLED".to_string()],
+            (TlsMode::Disabled, Engine::MariaDb) => vec!["--skip-ssl".to_string()],
+        }
+    }
+
+    /// One of the client binaries that ships alongside the server. The
+    /// names are engine-neutral — see `services::db_engine`.
+    fn client(&self, name: &str) -> Result<PathBuf, AppError> {
+        let exe = self.bin.join(name);
+        if exe.is_file() {
+            Ok(exe)
+        } else {
+            Err(AppError::BinaryNotInstalled(format!("the server's {name}")))
+        }
+    }
+
+    pub fn is_remote(&self) -> bool {
+        self.remote.is_some()
+    }
+
+    /// Refuses a write against a target marked read-only, naming it, before
+    /// anything reaches the server.
+    fn check_writable(&self) -> Result<(), AppError> {
+        match &self.remote {
+            Some(connection) if connection.read_only => Err(AppError::ConnectionReadOnly {
+                name: connection.name.clone(),
+            }),
+            _ => Ok(()),
+        }
+    }
+}
+
+/// The connection every operation below runs through.
+///
+/// A remote connection wins when one is selected; otherwise this is the
+/// local server, exactly as before remote connections existed.
+fn active_conn() -> Result<Conn, AppError> {
+    match connections::active() {
+        Some(connection) => remote_conn(connection),
+        None => local_conn(),
+    }
+}
+
+/// The local server, whose client binaries come from the build actually
+/// serving right now.
+///
+/// Resolved through the active profile rather than the pinned MariaDB
+/// manifest entry, so that after a switch to a MySQL profile the client
+/// binaries used to query it come from that same MySQL build — mixing a
+/// MariaDB client with a MySQL server is a source of confusing protocol
+/// and authentication errors.
+fn local_conn() -> Result<Conn, AppError> {
+    let profile = db_profiles::active()
+        .ok_or_else(|| AppError::BinaryNotInstalled("Database".to_string()))?;
+    let exe = db_profiles::resolve_server_exe(&profile)?;
+    let bin = exe
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| AppError::Io("the database server has no parent directory".to_string()))?;
+
+    Ok(Conn {
+        host: HOST.to_string(),
+        port: profile.port,
+        user: USER.to_string(),
+        // The local server is loopback-only and has no certificate; asking
+        // for TLS here would fail a connection that is already private.
+        tls: TlsMode::Preferred,
+        client_engine: profile.engine,
+        mysql_8_client: false,
+        bin,
+        defaults: None,
+        remote: None,
+    })
+}
+
+fn remote_conn(connection: Connection) -> Result<Conn, AppError> {
+    let build = connections::client_dir(connection.engine)?;
+
+    // With a tunnel the client talks to a local port and knows nothing
+    // about SSH; without one it dials the host directly. Everything below
+    // this point is identical either way.
+    let (host, port) = match &connection.ssh {
+        Some(_) => (HOST.to_string(), tunnel::ensure(&connection)?),
+        None => (connection.host.clone(), connection.port),
+    };
+    let defaults = match secrets::resolve(&connection.id) {
+        Some(password) => Some(TempDefaults::new(&password)?),
+        // Not an error: a server may genuinely have no password, and one
+        // that does will say so itself in a message worth showing.
+        None => None,
+    };
+
+    Ok(Conn {
+        host,
+        port,
+        user: connection.user.clone(),
+        tls: connection.tls_mode,
+        client_engine: build.engine,
+        mysql_8_client: build.is_mysql_8_or_newer(),
+        bin: build.dir,
+        defaults,
+        remote: Some(connection),
+    })
+}
+
+/// Refuses anything that isn't a plain identifier.
+///
+/// A database name can't be bound as a parameter — it has to be
+/// interpolated into the statement, which is the classic injection
 /// thing — so the only defence is to refuse anything that isn't a plain
 /// identifier in the first place. Deliberately stricter than MySQL's own
 /// rules (which allow almost anything inside backticks): nothing a local
@@ -114,81 +404,135 @@ fn validate_identifier(name: &str, kind: &str) -> Result<(), AppError> {
     }
 }
 
-/// The `bin` folder of the build actually serving right now.
-///
-/// Resolved through the active profile rather than the pinned MariaDB
-/// manifest entry, so that after a switch to a MySQL profile the client
-/// binaries used to query it come from that same MySQL build — mixing a
-/// MariaDB client with a MySQL server is a source of confusing protocol
-/// and authentication errors.
-fn bin_dir() -> Result<PathBuf, AppError> {
-    let profile = db_profiles::active()
-        .ok_or_else(|| AppError::BinaryNotInstalled("Database".to_string()))?;
-    let exe = db_profiles::resolve_server_exe(&profile)?;
-    exe.parent()
-        .map(Path::to_path_buf)
-        .ok_or_else(|| AppError::Io("the database server has no parent directory".to_string()))
-}
-
-/// One of the client binaries that ships alongside the server. The names
-/// are engine-neutral — see `services::db_engine`.
-fn client(name: &str) -> Result<PathBuf, AppError> {
-    let exe = bin_dir()?.join(name);
-    if exe.is_file() {
-        Ok(exe)
-    } else {
-        Err(AppError::BinaryNotInstalled(format!("the server's {name}")))
-    }
-}
-
-/// The interactive console client, for handing a developer a shell that's
-/// already connected — see `db_clients::open_console`.
+/// The interactive console client for the active target, for handing a
+/// developer a shell that's already connected — see
+/// `db_clients::open_console`.
 pub fn console_client() -> Result<PathBuf, AppError> {
-    client(db_engine::CLIENT_EXE)
-}
-
-fn base_args() -> Vec<String> {
-    vec![
-        "-h".to_string(),
-        HOST.to_string(),
-        "-P".to_string(),
-        port().to_string(),
-        "-u".to_string(),
-        USER.to_string(),
-    ]
+    active_conn()?.client(db_engine::CLIENT_EXE)
 }
 
 /// Turns a failed client run into an error carrying the server's own
 /// message — `ERROR 1049 (42000): Unknown database 'x'` is far more useful
 /// to show than "command failed with exit code 1".
-fn client_error(stderr: &[u8], fallback: &str) -> AppError {
+///
+/// The one case that gets rewritten rather than passed through is a failed
+/// connect: see [`connect_failure`].
+fn client_error(conn: &Conn, stderr: &[u8], fallback: &str) -> AppError {
     let message = String::from_utf8_lossy(stderr);
-    let message = message
+    let detail = message
         .lines()
-        .find(|line| line.contains("ERROR"))
-        .unwrap_or_else(|| message.trim())
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or(fallback)
         .trim();
-    AppError::DatabaseQueryFailed(if message.is_empty() {
-        fallback.to_string()
+
+    if let Some(rewritten) = connect_failure(conn, detail) {
+        return rewritten;
+    }
+    // Everything else keeps the server's own wording — it is the accurate
+    // part — with a hint appended where that wording is known to send
+    // people the wrong way.
+    match hint_for(detail) {
+        Some(hint) => AppError::DatabaseQueryFailed(format!("{detail} — {hint}")),
+        None => AppError::DatabaseQueryFailed(detail.to_string()),
+    }
+}
+
+/// Server errors whose own message is correct but hides what to actually do.
+///
+/// Both of these are dead ends people lose an evening to, and neither is
+/// guessable from the text the server sends:
+///
+/// * **1698** — the account authenticates by *operating-system user*
+///   (`auth_socket` on MySQL, `unix_socket` on MariaDB), which is the
+///   default for `root@localhost` on every Debian and Ubuntu package. It
+///   cannot be used over a password connection at all, no matter how right
+///   the password is. Reading "Access denied" sends people off to reset a
+///   password that was never going to be consulted.
+/// * **caching_sha2_password** — MySQL 8's default plugin, which a MariaDB
+///   client cannot speak. Rezure falls back to a MariaDB client when no
+///   MySQL build is installed (see `connections::client_dir`), so this is
+///   reachable with a perfectly correct username and password.
+fn hint_for(detail: &str) -> Option<&'static str> {
+    let lower = detail.to_lowercase();
+    if detail.contains("1698") {
+        return Some(
+            "that account signs in by operating-system user (auth_socket / unix_socket), not by \
+             password, so no password will ever be accepted for it. Create a database user that \
+             has its own password and connect as that one instead",
+        );
+    }
+    if lower.contains("caching_sha2_password") {
+        return Some(
+            "this account uses MySQL 8's authentication plugin, which the MariaDB client can't \
+             speak. Install a MySQL build under C:\\rezure\\custom\\mysql\\ so Rezure has a \
+             matching client, or give the account mysql_native_password on the server",
+        );
+    }
+    None
+}
+
+/// Rewrites "couldn't connect" into which host, and which of the two very
+/// different causes it was.
+///
+/// The client reports these as `ERROR 2002 (HY000): Can't connect to server
+/// on 'host' (138)`, where the number is a C `errno` — not a MySQL code and
+/// not a Winsock one, so nothing a user searches for finds it. The
+/// distinction it hides is the whole diagnosis:
+///
+/// * **timed out** — the packets went nowhere. A firewall dropping them, or
+///   a server bound to `127.0.0.1` so nothing outside the box can reach it.
+/// * **refused** — the host answered "nothing is listening here", which
+///   means the port is right but the server is down, or the port is wrong.
+///
+/// Telling someone to check their firewall when the server simply isn't
+/// running wastes an afternoon, so the two are never merged.
+fn connect_failure(conn: &Conn, detail: &str) -> Option<AppError> {
+    let lower = detail.to_lowercase();
+    if !lower.contains("can't connect") && !lower.contains("cannot connect") {
+        return None;
+    }
+
+    // 138 is MSVC's `ETIMEDOUT`; 10060 is the Winsock spelling of the same
+    // thing, which some builds report instead.
+    let timed_out =
+        detail.contains("(138)") || detail.contains("(10060)") || lower.contains("timed out");
+    // 10061 is Winsock's ECONNREFUSED, 111 the POSIX one.
+    let refused =
+        detail.contains("(10061)") || detail.contains("(111)") || lower.contains("refused");
+
+    let reason = if timed_out {
+        "the connection timed out. Nothing answered, which usually means a firewall is dropping          the port, or the server is bound to 127.0.0.1 and only accepts local connections"
+    } else if refused {
+        "the connection was refused. The host is reachable but nothing is listening on that port          — check the server is running, and that this is the right port"
     } else {
-        message.to_string()
+        "the server couldn't be reached"
+    };
+
+    Some(AppError::ServerUnreachable {
+        host: conn.host.clone(),
+        port: conn.port,
+        reason: reason.to_string(),
     })
 }
 
-/// Runs `sql` and returns its rows already split on tabs.
+/// Runs a `SELECT` and hands back its rows.
 ///
 /// `--skip-column-names` drops the header, so a caller's row indexes line
 /// up with its `SELECT` list and nothing has to be skipped.
 fn query(sql: &str) -> Result<Vec<Vec<String>>, AppError> {
-    let output = Command::new(client(db_engine::CLIENT_EXE)?)
-        .args(base_args())
+    query_on(&active_conn()?, sql)
+}
+
+fn query_on(conn: &Conn, sql: &str) -> Result<Vec<Vec<String>>, AppError> {
+    let output = Command::new(conn.client(db_engine::CLIENT_EXE)?)
+        .args(conn.args())
         .args(["--batch", "--skip-column-names", "-e", sql])
         .hidden()
         .output()
         .map_err(|e| AppError::DatabaseQueryFailed(e.to_string()))?;
 
     if !output.status.success() {
-        return Err(client_error(&output.stderr, "the query failed"));
+        return Err(client_error(conn, &output.stderr, "the query failed"));
     }
 
     Ok(String::from_utf8_lossy(&output.stdout)
@@ -198,9 +542,81 @@ fn query(sql: &str) -> Result<Vec<Vec<String>>, AppError> {
         .collect())
 }
 
-/// Runs a statement that returns no rows.
+/// Runs a statement that returns no rows, refusing it on a read-only
+/// target.
 fn execute(sql: &str) -> Result<(), AppError> {
-    query(sql).map(|_| ())
+    let conn = active_conn()?;
+    conn.check_writable()?;
+    query_on(&conn, sql).map(|_| ())
+}
+
+/// Connects to a server that isn't registered yet and reports its version.
+///
+/// The add-connection form's "Test" button: everything that can go wrong
+/// about a remote server — unreachable host, wrong port, bad credentials,
+/// a TLS requirement, a client that can't do its authentication plugin —
+/// goes wrong here, once, before the connection is saved and before any of
+/// it can be mistaken for a broken feature.
+pub struct Probe<'a> {
+    pub host: &'a str,
+    pub port: u16,
+    pub user: &'a str,
+    pub password: Option<&'a str>,
+    pub engine: Engine,
+    pub tls: TlsMode,
+    pub ssh: Option<&'a SshTunnel>,
+    /// The SSH password, when the tunnel authenticates with one. Separate
+    /// from `password` above: the box you log into and the database on it
+    /// are two different accounts.
+    pub ssh_password: Option<&'a str>,
+}
+
+pub fn probe(request: Probe<'_>) -> Result<String, AppError> {
+    let Probe {
+        host,
+        port,
+        user,
+        password,
+        engine,
+        tls,
+        ssh,
+        ssh_password,
+    } = request;
+    let build = connections::client_dir(engine)?;
+
+    // Bound, not dropped: the tunnel has to stay up for the query below,
+    // and go away as soon as this function returns — an unsaved connection
+    // has no id to file a long-lived tunnel under.
+    let tunnelled = match ssh {
+        Some(ssh) => Some(tunnel::open(ssh, ssh_password, host.trim(), port)?),
+        None => None,
+    };
+    let (host, port) = match &tunnelled {
+        Some(tunnel) => (HOST.to_string(), tunnel.local_port),
+        None => (host.trim().to_string(), port),
+    };
+
+    let conn = Conn {
+        host,
+        port,
+        user: user.trim().to_string(),
+        tls,
+        client_engine: build.engine,
+        mysql_8_client: build.is_mysql_8_or_newer(),
+        bin: build.dir,
+        defaults: match password {
+            Some(password) if !password.is_empty() => Some(TempDefaults::new(password)?),
+            _ => None,
+        },
+        remote: None,
+    };
+
+    let rows = query_on(&conn, "SELECT VERSION()")?;
+    Ok(rows
+        .into_iter()
+        .flatten()
+        .next()
+        .unwrap_or_else(|| "connected".to_string()))
 }
 
 /// Matches a schema to a project by name, so the list can show which site
@@ -221,11 +637,22 @@ fn used_by(schema: &str, projects: &[(String, String)]) -> Option<String> {
 }
 
 pub fn list_databases() -> Result<Vec<DatabaseInfo>, AppError> {
-    // Best-effort: a project-scan hiccup should cost the "used by" column,
-    // not the whole database list.
-    let projects: Vec<(String, String)> = scan_projects()
-        .map(|found| found.into_iter().map(|p| (p.id, p.domain)).collect())
-        .unwrap_or_default();
+    let conn = active_conn()?;
+
+    // Local projects say nothing about the schemas on somebody else's
+    // server: a name that happens to match is a coincidence, and claiming
+    // a staging database is "used by" a folder on this machine would be a
+    // false statement, not a helpful one.
+    //
+    // Best-effort even locally: a project-scan hiccup should cost the
+    // "used by" column, not the whole database list.
+    let projects: Vec<(String, String)> = if conn.is_remote() {
+        Vec::new()
+    } else {
+        scan_projects()
+            .map(|found| found.into_iter().map(|p| (p.id, p.domain)).collect())
+            .unwrap_or_default()
+    };
 
     let excluded = SYSTEM_SCHEMAS
         .map(|schema| format!("'{schema}'"))
@@ -233,15 +660,18 @@ pub fn list_databases() -> Result<Vec<DatabaseInfo>, AppError> {
 
     // LEFT JOIN, not an inner one: a schema with no tables yet still has to
     // appear in the list (with a count of 0) rather than vanish from it.
-    let rows = query(&format!(
-        "SELECT s.schema_name, s.default_collation_name, COUNT(t.table_name), \
-         COALESCE(SUM(t.data_length + t.index_length), 0) \
-         FROM information_schema.schemata s \
-         LEFT JOIN information_schema.tables t ON t.table_schema = s.schema_name \
-         WHERE s.schema_name NOT IN ({excluded}) \
-         GROUP BY s.schema_name, s.default_collation_name \
-         ORDER BY s.schema_name"
-    ))?;
+    let rows = query_on(
+        &conn,
+        &format!(
+            "SELECT s.schema_name, s.default_collation_name, COUNT(t.table_name), \
+             COALESCE(SUM(t.data_length + t.index_length), 0) \
+             FROM information_schema.schemata s \
+             LEFT JOIN information_schema.tables t ON t.table_schema = s.schema_name \
+             WHERE s.schema_name NOT IN ({excluded}) \
+             GROUP BY s.schema_name, s.default_collation_name \
+             ORDER BY s.schema_name"
+        ),
+    )?;
 
     Ok(rows
         .into_iter()
@@ -258,7 +688,8 @@ pub fn list_databases() -> Result<Vec<DatabaseInfo>, AppError> {
 
 /// The collations offered in the "New database" dialog, newest-friendly
 /// first. Read from the server rather than hard-coded, so switching the
-/// bundled MariaDB version can't leave a stale list behind.
+/// bundled MariaDB version — or pointing at somebody else's server — can't
+/// leave a stale list behind.
 pub fn list_collations() -> Result<Vec<String>, AppError> {
     let rows = query(
         "SELECT collation_name FROM information_schema.collations \
@@ -287,7 +718,7 @@ pub fn drop_database(name: &str) -> Result<(), AppError> {
     execute(&format!("DROP DATABASE `{name}`"))
 }
 
-/// `%USERPROFILE%\rezure\dumps` — where exports land.
+/// `C:\rezure\dumps` — where exports land.
 ///
 /// A fixed, documented folder rather than a save dialog: an export is
 /// usually one step of "dump it, then do something with the file", and a
@@ -297,21 +728,69 @@ pub fn dumps_dir() -> Result<PathBuf, AppError> {
     paths::dumps()
 }
 
+/// The dump options that only make sense against a server Rezure doesn't
+/// own.
+///
+/// None of these are needed locally, and two of them don't exist on every
+/// client, so they're added only where they earn it:
+///
+/// * `--single-transaction` — `mysqldump` otherwise takes `LOCK TABLES`
+///   across the whole schema. On a private local server that costs
+///   nothing; on a shared staging box it blocks every other developer for
+///   the length of the dump.
+/// * `--quick` — streams rows instead of buffering a whole table in
+///   memory, which is the difference between dumping a large remote table
+///   and running out of it.
+/// * `--skip-column-statistics` — MySQL 8's client queries a table MariaDB
+///   has never had, and fails the dump outright with
+///   `Unknown table 'COLUMN_STATISTICS'` when pointed at one.
+/// * `--set-gtid-purged=OFF` — managed providers (RDS, Aiven) report GTID
+///   state the client writes into the dump as `SET @@GLOBAL.gtid_purged`,
+///   which then fails to import anywhere the user doesn't have SUPER.
+fn remote_dump_args(conn: &Conn) -> Vec<String> {
+    let mut args = vec![
+        "--single-transaction".to_string(),
+        "--quick".to_string(),
+        // Large rows (a `LONGBLOB`, a serialised cache table) exceed the
+        // client's modest default and abort the dump partway.
+        "--max-allowed-packet=512M".to_string(),
+    ];
+    if conn.mysql_8_client {
+        args.push("--skip-column-statistics".to_string());
+        args.push("--set-gtid-purged=OFF".to_string());
+    }
+    args
+}
+
 /// Dumps `name` to a timestamped `.sql` file and returns its path.
+///
+/// A remote dump is prefixed with the connection's name: a `blog-*.sql`
+/// pulled from staging and one taken locally are otherwise indistinguishable
+/// in the dumps folder, and importing the wrong one is silent.
 pub fn export_database(name: &str) -> Result<PathBuf, AppError> {
     validate_identifier(name, "database")?;
+    let conn = active_conn()?;
 
     let dir = dumps_dir()?;
     std::fs::create_dir_all(&dir)
         .map_err(|e| AppError::Io(format!("could not create {}: {e}", dir.display())))?;
-    let dest = dir.join(format!("{name}-{}.sql", timestamp()));
+    let prefix = conn
+        .remote
+        .as_ref()
+        .map(|connection| format!("{}-", slugify(&connection.name)))
+        .unwrap_or_default();
+    let dest = dir.join(format!("{prefix}{name}-{}.sql", timestamp()));
 
     // `mariadb-dump` writes the dump to stdout, so this redirects it into
     // the file rather than passing a path the client would have to quote.
     let file = std::fs::File::create(&dest)
         .map_err(|e| AppError::Io(format!("could not create {}: {e}", dest.display())))?;
-    let output = Command::new(client(db_engine::DUMP_EXE)?)
-        .args(base_args())
+    let mut command = Command::new(conn.client(db_engine::DUMP_EXE)?);
+    command.args(conn.args());
+    if conn.is_remote() {
+        command.args(remote_dump_args(&conn));
+    }
+    let output = command
         .args(["--databases", name])
         .stdout(file)
         .hidden()
@@ -322,25 +801,62 @@ pub fn export_database(name: &str) -> Result<PathBuf, AppError> {
         // Don't leave a half-written or empty .sql behind looking like a
         // successful export.
         let _ = std::fs::remove_file(&dest);
-        return Err(client_error(&output.stderr, "the export failed"));
+        return Err(client_error(&conn, &output.stderr, "the export failed"));
     }
     Ok(dest)
+}
+
+/// A connection name reduced to something safe to put in a filename.
+///
+/// Connection names are free text — "Staging (EU)" is a reasonable thing to
+/// call one — and `:` or `/` in a Windows filename fails the export at the
+/// point where the dump has already been taken.
+fn slugify(name: &str) -> String {
+    let slug: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let slug = slug.trim_matches('-').replace("--", "-");
+    if slug.is_empty() {
+        "remote".to_string()
+    } else {
+        slug
+    }
 }
 
 /// Pipes a `.sql` file into `name`, creating the database if it isn't
 /// there yet — importing a dump into a database you have to remember to
 /// create first is a papercut with no upside.
+///
+/// Refused outright on a read-only connection: this is the one operation
+/// here that can destroy data on a server Rezure doesn't own, and the
+/// confirmation the UI asks for is a second gate, not this one.
 pub fn import_sql(name: &str, file: &Path) -> Result<(), AppError> {
     validate_identifier(name, "database")?;
     if !file.is_file() {
         return Err(AppError::Io(format!("no such file: {}", file.display())));
     }
-    execute(&format!("CREATE DATABASE IF NOT EXISTS `{name}`"))?;
+    let conn = active_conn()?;
+    conn.check_writable()?;
+
+    query_on(&conn, &format!("CREATE DATABASE IF NOT EXISTS `{name}`"))?;
 
     let input = std::fs::File::open(file)
         .map_err(|e| AppError::Io(format!("could not read {}: {e}", file.display())))?;
-    let output = Command::new(client(db_engine::CLIENT_EXE)?)
-        .args(base_args())
+    let mut command = Command::new(conn.client(db_engine::CLIENT_EXE)?);
+    command.args(conn.args());
+    if conn.is_remote() {
+        // The counterpart to the dump side: a statement holding one large
+        // row is rejected by the server's own limit otherwise.
+        command.arg("--max-allowed-packet=512M");
+    }
+    let output = command
         .arg(name)
         .stdin(input)
         .hidden()
@@ -348,7 +864,7 @@ pub fn import_sql(name: &str, file: &Path) -> Result<(), AppError> {
         .map_err(|e| AppError::DatabaseQueryFailed(e.to_string()))?;
 
     if !output.status.success() {
-        return Err(client_error(&output.stderr, "the import failed"));
+        return Err(client_error(&conn, &output.stderr, "the import failed"));
     }
     Ok(())
 }
@@ -385,6 +901,36 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn conn_for(tls: TlsMode, client_engine: Engine, remote: Option<Connection>) -> Conn {
+        Conn {
+            host: "db.example.com".to_string(),
+            port: 3307,
+            user: "app".to_string(),
+            tls,
+            client_engine,
+            mysql_8_client: client_engine == Engine::MySql,
+            bin: PathBuf::from(r"C:\rezure\bin\mysql\8.4.0\bin"),
+            defaults: None,
+            remote,
+        }
+    }
+
+    fn remote_connection(read_only: bool) -> Connection {
+        Connection {
+            id: "c1".to_string(),
+            name: "Staging (EU)".to_string(),
+            host: "db.example.com".to_string(),
+            port: 3307,
+            user: "app".to_string(),
+            engine: Engine::MySql,
+            tls_mode: TlsMode::Required,
+            read_only,
+            save_password: false,
+            ssh: None,
+            last_used_at: None,
+        }
+    }
 
     #[test]
     fn plain_identifiers_are_accepted() {
@@ -437,6 +983,211 @@ mod tests {
         );
         assert_eq!(used_by("blog", &projects).as_deref(), Some("blog.test"));
         assert_eq!(used_by("sandbox", &projects), None);
+    }
+
+    /// `--defaults-file` is only honoured as the first argument, and the
+    /// password is only reachable through it — so this ordering is what
+    /// keeps the secret off the command line.
+    #[test]
+    fn the_defaults_file_comes_first_when_there_is_a_password() {
+        let mut conn = conn_for(TlsMode::Preferred, Engine::MySql, None);
+        conn.defaults = Some(TempDefaults::new("s3cret").unwrap());
+        let args = conn.args();
+        assert!(args[0].starts_with("--defaults-file="), "{args:?}");
+        assert!(
+            !args.iter().any(|arg| arg.contains("s3cret")),
+            "the password must never appear in the arguments: {args:?}"
+        );
+    }
+
+    #[test]
+    fn a_target_without_a_password_still_refuses_the_machines_own_option_files() {
+        let conn = conn_for(TlsMode::Preferred, Engine::MySql, None);
+        assert_eq!(conn.args()[0], "--no-defaults");
+    }
+
+    #[test]
+    fn tls_is_spelled_the_way_each_client_understands_it() {
+        assert_eq!(
+            conn_for(TlsMode::Required, Engine::MySql, None).tls_args(),
+            vec!["--ssl-mode=REQUIRED"]
+        );
+        assert_eq!(
+            conn_for(TlsMode::Required, Engine::MariaDb, None).tls_args(),
+            vec!["--ssl"]
+        );
+        assert_eq!(
+            conn_for(TlsMode::Disabled, Engine::MariaDb, None).tls_args(),
+            vec!["--skip-ssl"]
+        );
+        // The client's own default already does this; saying it would only
+        // risk an unknown option on an older build.
+        assert!(conn_for(TlsMode::Preferred, Engine::MySql, None)
+            .tls_args()
+            .is_empty());
+    }
+
+    #[test]
+    fn a_read_only_connection_refuses_writes_before_reaching_the_server() {
+        let conn = conn_for(
+            TlsMode::Required,
+            Engine::MySql,
+            Some(remote_connection(true)),
+        );
+        let err = conn.check_writable().expect_err("a write must be refused");
+        assert!(err.to_string().contains("Staging (EU)"), "{err}");
+    }
+
+    #[test]
+    fn a_writable_connection_allows_writes() {
+        let conn = conn_for(
+            TlsMode::Required,
+            Engine::MySql,
+            Some(remote_connection(false)),
+        );
+        assert!(conn.check_writable().is_ok());
+    }
+
+    #[test]
+    fn the_local_target_is_never_read_only() {
+        assert!(conn_for(TlsMode::Preferred, Engine::MariaDb, None)
+            .check_writable()
+            .is_ok());
+    }
+
+    #[test]
+    fn remote_dumps_never_lock_the_whole_schema() {
+        let conn = conn_for(
+            TlsMode::Required,
+            Engine::MariaDb,
+            Some(remote_connection(true)),
+        );
+        let args = remote_dump_args(&conn);
+        assert!(
+            args.contains(&"--single-transaction".to_string()),
+            "{args:?}"
+        );
+        // MariaDB's client has neither option; passing them aborts the dump.
+        assert!(!args.iter().any(|a| a.contains("column-statistics")));
+        assert!(!args.iter().any(|a| a.contains("gtid-purged")));
+    }
+
+    #[test]
+    fn a_mysql_8_client_gets_the_two_options_only_it_has() {
+        let conn = conn_for(
+            TlsMode::Required,
+            Engine::MySql,
+            Some(remote_connection(true)),
+        );
+        let args = remote_dump_args(&conn);
+        assert!(args.contains(&"--skip-column-statistics".to_string()));
+        assert!(args.contains(&"--set-gtid-purged=OFF".to_string()));
+    }
+
+    /// The message the user actually hit: a VPS with 22, 80 and 443 open
+    /// and 3306 dropped by the firewall.
+    #[test]
+    fn a_timed_out_connect_names_the_host_and_the_likely_cause() {
+        let conn = conn_for(TlsMode::Preferred, Engine::MariaDb, None);
+        let err = connect_failure(
+            &conn,
+            "ERROR 2002 (HY000): Can't connect to server on '203.0.113.10' (138)",
+        )
+        .expect("a connect failure must be rewritten");
+        let message = err.to_string();
+        assert!(message.contains("db.example.com:3307"), "{message}");
+        assert!(message.contains("firewall"), "{message}");
+        assert!(
+            !message.contains("138"),
+            "the raw errno helps nobody: {message}"
+        );
+    }
+
+    #[test]
+    fn a_refused_connect_is_not_reported_as_a_firewall_problem() {
+        let conn = conn_for(TlsMode::Preferred, Engine::MariaDb, None);
+        let message = connect_failure(
+            &conn,
+            "ERROR 2002 (HY000): Can't connect to server on 'localhost' (10061)",
+        )
+        .expect("a connect failure must be rewritten")
+        .to_string();
+        assert!(message.contains("nothing is listening"), "{message}");
+        assert!(!message.contains("firewall"), "{message}");
+    }
+
+    /// Everything that isn't a connect failure has to reach the user
+    /// unchanged — the server's own wording is the useful part.
+    #[test]
+    fn an_ordinary_server_error_is_passed_through_untouched() {
+        let conn = conn_for(TlsMode::Preferred, Engine::MariaDb, None);
+        assert!(connect_failure(&conn, "ERROR 1049 (42000): Unknown database 'nope'").is_none());
+        assert!(connect_failure(&conn, "ERROR 1045 (28000): Access denied for user").is_none());
+    }
+
+    /// Reached through a working tunnel: the connection is fine, the
+    /// account simply can't be used with a password.
+    #[test]
+    fn socket_authentication_is_explained_rather_than_left_as_access_denied() {
+        let conn = conn_for(TlsMode::Preferred, Engine::MariaDb, None);
+        let message = client_error(
+            &conn,
+            b"ERROR 1698 (28000): Access denied for user 'root'@'localhost'",
+            "the query failed",
+        )
+        .to_string();
+        // The server's own words survive — they are the accurate part.
+        assert!(message.contains("ERROR 1698"), "{message}");
+        assert!(message.contains("operating-system user"), "{message}");
+    }
+
+    #[test]
+    fn a_plugin_the_client_cannot_speak_names_the_fix() {
+        let conn = conn_for(TlsMode::Preferred, Engine::MariaDb, None);
+        let message = client_error(
+            &conn,
+            b"ERROR 2059 (HY000): Authentication plugin 'caching_sha2_password' cannot be loaded",
+            "the query failed",
+        )
+        .to_string();
+        assert!(message.contains("MariaDB client can't speak"), "{message}");
+    }
+
+    #[test]
+    fn an_error_with_no_known_pitfall_is_left_exactly_as_the_server_wrote_it() {
+        let conn = conn_for(TlsMode::Preferred, Engine::MariaDb, None);
+        let raw = "ERROR 1049 (42000): Unknown database 'nope'";
+        assert_eq!(
+            client_error(&conn, raw.as_bytes(), "the query failed").to_string(),
+            raw
+        );
+    }
+
+    #[test]
+    fn option_values_escape_what_an_option_file_would_otherwise_eat() {
+        assert_eq!(escape_option_value(r#"pa\ss"word"#), r#"pa\\ss\"word"#);
+        assert_eq!(escape_option_value("plain"), "plain");
+    }
+
+    #[test]
+    fn a_connection_name_becomes_a_safe_filename_prefix() {
+        assert_eq!(slugify("Staging (EU)"), "staging-eu");
+        assert_eq!(slugify("prod/db:1"), "prod-db-1");
+        // Nothing usable left — the prefix still has to be a valid name.
+        assert_eq!(slugify("!!!"), "remote");
+    }
+
+    #[test]
+    fn the_temporary_credentials_file_is_deleted_when_it_goes_out_of_scope() {
+        let path = {
+            let defaults = TempDefaults::new("s3cret").unwrap();
+            assert!(defaults.path.is_file());
+            defaults.path.clone()
+        };
+        assert!(
+            !path.exists(),
+            "the password file must not outlive the command"
+        );
     }
 
     #[test]

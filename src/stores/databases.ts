@@ -9,10 +9,14 @@ function errorMessage(e: unknown): string {
   return 'Something went wrong.'
 }
 
-/** MariaDB's "can't reach the server" codes. Worth singling out because it
- *  isn't a failure the user did anything wrong to cause — the service is
- *  just stopped, and the page can say so instead of showing a raw error. */
-const CONNECTION_REFUSED = /\(2002\)|\(2003\)|Can't connect/i
+/** The "can't reach the server" shapes. Worth singling out because it isn't
+ *  a failure the user did anything wrong to cause — the service is just
+ *  stopped, or a remote host is unreachable, and the page can say so instead
+ *  of showing a raw error.
+ *
+ *  Both spellings are matched: the raw client codes, and the rewritten
+ *  message the Rust side produces for a failed connect. */
+const CONNECTION_REFUSED = /\(2002\)|\(2003\)|Can't connect|can't reach/i
 
 export const useDatabasesStore = defineStore('databases', () => {
   const databases = ref<DatabaseInfo[]>([])

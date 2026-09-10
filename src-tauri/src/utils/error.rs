@@ -79,8 +79,21 @@ pub enum AppError {
     )]
     InvalidDatabaseName { name: String, kind: String },
 
-    #[error("MariaDB: {0}")]
+    // No engine name in the prefix: the same path now also talks to remote
+    // MySQL servers, and labelling their errors "MariaDB" sent people
+    // looking in the wrong place.
+    #[error("{0}")]
     DatabaseQueryFailed(String),
+
+    #[error("SSH tunnel failed: {0}")]
+    TunnelFailed(String),
+
+    #[error("can't reach {host}:{port} — {reason}")]
+    ServerUnreachable {
+        host: String,
+        port: u16,
+        reason: String,
+    },
 
     #[error("no such SQL client: {0}")]
     UnknownDbClient(String),
@@ -141,6 +154,23 @@ pub enum AppError {
 
     #[error("{path} can't be attached — {reason}")]
     AttachmentRejected { path: String, reason: String },
+
+    #[error("connection not found: {0}")]
+    ConnectionNotFound(String),
+
+    #[error("{endpoint} is already saved as the \"{name}\" connection")]
+    ConnectionAlreadyExists { endpoint: String, name: String },
+
+    #[error(
+        "\"{name}\" is read-only — turn that off in the connection's settings if you really mean to write to it"
+    )]
+    ConnectionReadOnly { name: String },
+
+    #[error("{0}")]
+    InvalidConnection(String),
+
+    #[error("Windows Credential Manager refused the password: {0}")]
+    CredentialStore(String),
 
     #[error("couldn't send the ticket: {0}")]
     TicketSubmitFailed(String),

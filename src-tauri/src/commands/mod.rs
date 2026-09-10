@@ -3,6 +3,7 @@
 
 pub mod binaries;
 pub mod changelog;
+pub mod connections;
 pub mod database;
 pub mod db_profiles;
 pub mod php;

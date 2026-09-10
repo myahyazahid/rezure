@@ -36,7 +36,24 @@ const nameError = computed(() => {
   return null
 })
 
-const canImport = computed(() => name.value.trim().length > 0 && !nameError.value)
+/** True when the dump is about to be loaded into a server Rezure doesn't
+ *  run. Everything below that reads `remote` exists because of it. */
+const remote = computed(() => store.server?.remote === true)
+
+/** Typed back by the user before a remote import runs.
+ *
+ *  A local import lands in a throwaway dev database; the same click against
+ *  staging replaces tables other people are using, and it can't be undone
+ *  from here. The dialog asks for the database name rather than a plain
+ *  "are you sure" because retyping it is the step that makes the user read
+ *  which database they picked. */
+const confirmation = ref('')
+
+const confirmed = computed(() => !remote.value || confirmation.value.trim() === name.value.trim())
+
+const canImport = computed(
+  () => name.value.trim().length > 0 && !nameError.value && confirmed.value,
+)
 
 function close() {
   if (store.importing) return
@@ -98,6 +115,26 @@ watch(name, () => {
       <p v-else class="mt-2 text-xs text-neutral-500">
         <strong>{{ name.trim() || '…' }}</strong> doesn't exist yet — it will be created.
       </p>
+
+      <!-- The second gate, and the only one that names the server. The first
+           is the backend's own read-only check, which a connection marked
+           read-only fails before anything reaches it. -->
+      <div
+        v-if="remote"
+        class="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-3 dark:border-amber-500/30 dark:bg-amber-500/10"
+      >
+        <p class="text-xs text-amber-900 dark:text-amber-200">
+          This writes to <strong>{{ store.server?.label }}</strong> at
+          <span class="font-mono">{{ store.server?.host }}</span> — a server Rezure doesn't run.
+          Type <strong class="font-mono">{{ name.trim() || '…' }}</strong> to confirm.
+        </p>
+        <input
+          v-model="confirmation"
+          type="text"
+          :placeholder="name.trim()"
+          class="mt-2 w-full rounded-lg border border-amber-300 bg-white px-3 py-2 font-mono text-sm outline-none focus:border-amber-500 dark:border-amber-500/30 dark:bg-neutral-950"
+        />
+      </div>
 
       <p v-if="store.importError" class="mt-3 text-sm text-red-600 dark:text-red-400">
         {{ store.importError }}

@@ -3,16 +3,25 @@ import { computed, onActivated, ref } from 'vue'
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
 import { useDatabasesStore } from '@/stores/databases'
 import { useDbProfilesStore } from '@/stores/dbProfiles'
+import { useDbConnectionsStore } from '@/stores/dbConnections'
 import OpenInClientMenu from '@/components/databases/OpenInClientMenu.vue'
 import NewDatabaseModal from '@/components/databases/NewDatabaseModal.vue'
 import ImportSqlModal from '@/components/databases/ImportSqlModal.vue'
-import DbProfileSwitcher from '@/components/databases/DbProfileSwitcher.vue'
+import DbTargetSwitcher from '@/components/databases/DbTargetSwitcher.vue'
 import SearchInput from '@/components/common/SearchInput.vue'
 import BusyOverlay from '@/components/common/BusyOverlay.vue'
 import LeafLoader from '@/components/common/LeafLoader.vue'
 
 const store = useDatabasesStore()
 const profilesStore = useDbProfilesStore()
+const connectionsStore = useDbConnectionsStore()
+
+/** True while the page is reading a server Rezure doesn't run. Almost every
+ *  statement this view makes — "no password", which project uses a schema,
+ *  "start it from Services" — is only true of the local server. */
+const remote = computed(() => store.server?.remote === true)
+/** Writes are refused for the target: a read-only connection. */
+const readOnly = computed(() => store.server?.readOnly === true)
 
 const showNewDatabaseModal = ref(false)
 const importFile = ref<string | null>(null)
@@ -29,9 +38,13 @@ const filteredDatabases = computed(() => {
 
 const subtitle = computed(() => {
   const client = store.preferredClient
-  return client
-    ? `Create, export and hand off to ${client.name} — Rezure never asks you for credentials.`
-    : 'Create, export and hand off to your SQL client — Rezure never asks you for credentials.'
+  const handoff = client ? `hand off to ${client.name}` : 'hand off to your SQL client'
+  // The local promise ("never asks you for credentials") isn't one this page
+  // can make about somebody else's server, so it isn't made.
+  if (remote.value) {
+    return `Reading ${store.server?.label ?? 'a remote server'} — list, export and ${handoff}.`
+  }
+  return `Create, export and ${handoff} — Rezure never asks you for credentials.`
 })
 
 /** Binary units, matching what a database client would report. */
@@ -92,8 +105,12 @@ const busyLabel = computed(() => {
 
 const busyDetail = computed(() => {
   if (switchingProfile.value) return 'Pointing the server at a different data directory.'
-  if (store.importingInto) return 'Reading the dump into the server.'
-  return 'Writing a .sql dump to C:\\rezure\\dumps.'
+  if (store.importingInto) return `Reading the dump into ${store.server?.label ?? 'the server'}.`
+  // Worth saying for a remote dump: it crosses the network and can take
+  // minutes, where a local one is effectively instant.
+  return remote.value
+    ? `Pulling a .sql dump from ${store.server?.label} to C:\\rezure\\dumps.`
+    : 'Writing a .sql dump to C:\\rezure\\dumps.'
 })
 </script>
 
@@ -109,7 +126,7 @@ const busyDetail = computed(() => {
       </div>
 
       <div class="flex shrink-0 items-center gap-2">
-        <DbProfileSwitcher />
+        <DbTargetSwitcher />
 
         <!-- The list is only refetched when the page is entered, and the page
              is kept alive — so after starting MariaDB from Services there is
@@ -141,7 +158,8 @@ const busyDetail = computed(() => {
         <button
           type="button"
           class="flex shrink-0 items-center gap-2 rounded-full bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-red-500/40 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
-          :disabled="store.serverDown"
+          :disabled="store.serverDown || readOnly"
+          :title="readOnly ? `${store.server?.label} is read-only` : ''"
           @click="showNewDatabaseModal = true"
         >
           <svg
@@ -159,33 +177,59 @@ const busyDetail = computed(() => {
     </div>
 
     <p
-      v-if="profilesStore.notice"
+      v-if="profilesStore.notice || connectionsStore.notice"
       class="mt-3 shrink-0 text-sm text-neutral-600 dark:text-neutral-300"
     >
-      {{ profilesStore.notice }}
+      {{ profilesStore.notice ?? connectionsStore.notice }}
     </p>
-    <p v-if="profilesStore.error" class="mt-3 shrink-0 text-sm text-red-600 dark:text-red-400">
-      {{ profilesStore.error }}
+    <p
+      v-if="profilesStore.error || connectionsStore.error"
+      class="mt-3 shrink-0 text-sm text-red-600 dark:text-red-400"
+    >
+      {{ profilesStore.error ?? connectionsStore.error }}
     </p>
 
     <!-- The connection, stated once and copyable — so nothing else in the
-         app has to ask the user for credentials it already knows. -->
+         app has to ask the user for credentials it already knows.
+
+         A remote target is deliberately a different colour: "which server am
+         I about to drop a database on" must be answerable at a glance, not
+         by reading the hostname. -->
     <div
       v-if="store.server"
-      class="mt-4 flex shrink-0 flex-wrap items-center gap-3 rounded-2xl border border-red-200/70 bg-red-50/70 px-4 py-3 dark:border-red-500/25 dark:bg-red-500/10"
+      class="mt-4 flex shrink-0 flex-wrap items-center gap-3 rounded-2xl border px-4 py-3"
+      :class="
+        remote
+          ? 'border-amber-300/70 bg-amber-50/70 dark:border-amber-500/25 dark:bg-amber-500/10'
+          : 'border-red-200/70 bg-red-50/70 dark:border-red-500/25 dark:bg-red-500/10'
+      "
     >
-      <span class="text-[11px] font-semibold tracking-wide text-red-400 uppercase">Server</span>
-      <span class="min-w-0 flex-1 truncate font-mono text-sm text-red-700 dark:text-red-300">
+      <span
+        class="text-[11px] font-semibold tracking-wide uppercase"
+        :class="remote ? 'text-amber-500' : 'text-red-400'"
+      >
+        {{ remote ? 'Remote' : 'Server' }}
+      </span>
+      <span
+        class="min-w-0 flex-1 truncate font-mono text-sm"
+        :class="remote ? 'text-amber-800 dark:text-amber-200' : 'text-red-700 dark:text-red-300'"
+      >
         {{ store.server.host }}:{{ store.server.port }} · {{ store.server.user }} ·
         {{ store.server.hasPassword ? 'password set' : 'no password' }}
         <!-- Which data this is, stated beside the connection: "New database"
-             lands in whichever profile is active, and that has to be obvious
+             lands in whichever target is active, and that has to be obvious
              before the button is clicked, not after. -->
-        <template v-if="profilesStore.active"> · {{ profilesStore.active.name }} </template>
+        <template v-if="store.server.label"> · {{ store.server.label }} </template>
+        <template v-if="readOnly"> · read-only </template>
       </span>
       <button
         type="button"
-        class="flex shrink-0 items-center gap-2 rounded-full border border-red-200 bg-white/80 px-3.5 py-2 text-sm font-semibold text-red-700 transition hover:bg-white dark:border-red-500/30 dark:bg-neutral-900/60 dark:text-red-300"
+        class="flex shrink-0 items-center gap-2 rounded-full border bg-white/80 px-3.5 py-2 text-sm font-semibold transition hover:bg-white dark:bg-neutral-900/60"
+        :class="
+          remote
+            ? 'border-amber-300 text-amber-800 dark:border-amber-500/30 dark:text-amber-200'
+            : 'border-red-200 text-red-700 dark:border-red-500/30 dark:text-red-300'
+        "
         :title="store.server.dsn"
         @click="copyDsn"
       >
@@ -203,9 +247,19 @@ const busyDetail = computed(() => {
       v-if="store.serverDown"
       class="mt-4 shrink-0 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-200"
     >
-      MariaDB isn't running, so there's nothing to list yet. Start it from
-      <RouterLink to="/" class="font-semibold underline">Services</RouterLink>, then
-      <button type="button" class="font-semibold underline" @click="store.fetchAll">retry</button>.
+      <template v-if="remote">
+        Couldn't reach {{ store.server?.label }} at
+        <span class="font-mono">{{ store.server?.host }}:{{ store.server?.port }}</span
+        >. Check the host is up and reachable from this machine, then
+        <button type="button" class="font-semibold underline" @click="store.fetchAll">retry</button
+        >.
+      </template>
+      <template v-else>
+        MariaDB isn't running, so there's nothing to list yet. Start it from
+        <RouterLink to="/" class="font-semibold underline">Services</RouterLink>, then
+        <button type="button" class="font-semibold underline" @click="store.fetchAll">retry</button
+        >.
+      </template>
     </div>
     <p v-else-if="store.error" class="mt-4 shrink-0 text-sm text-red-600 dark:text-red-400">
       {{ store.error }}
@@ -238,7 +292,11 @@ const busyDetail = computed(() => {
     >
       <SearchInput v-model="search" placeholder="Search databases" class="w-full max-w-md" />
 
+      <!-- Not merely disabled: on a read-only connection an import is not a
+           thing the user can do here at all, and a greyed button invites a
+           hunt for the setting that would enable it. -->
       <button
+        v-if="!readOnly"
         type="button"
         class="flex shrink-0 items-center gap-2 rounded-full border border-neutral-200 bg-white/70 px-4 py-2.5 text-sm font-semibold text-neutral-700 transition hover:bg-white dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
         @click="pickSqlFile"
@@ -274,10 +332,15 @@ const busyDetail = computed(() => {
       v-else-if="store.databases.length === 0 && !store.serverDown && !store.error"
       class="mt-8 shrink-0 text-center text-sm text-neutral-500"
     >
-      No databases yet — create one, or
-      <button type="button" class="font-semibold text-red-600 underline" @click="pickSqlFile">
-        import a .sql dump</button
-      >.
+      <template v-if="readOnly">
+        No databases on {{ store.server?.label }} — or none this user can see.
+      </template>
+      <template v-else>
+        No databases yet — create one, or
+        <button type="button" class="font-semibold text-red-600 underline" @click="pickSqlFile">
+          import a .sql dump</button
+        >.
+      </template>
     </div>
 
     <div
@@ -298,7 +361,7 @@ const busyDetail = computed(() => {
         <span class="flex-1">Database</span>
         <span class="w-20 shrink-0 text-right">Tables</span>
         <span class="w-24 shrink-0 text-right">Size</span>
-        <span class="w-40 shrink-0 pl-6">Used by</span>
+        <span v-if="!remote" class="w-40 shrink-0 pl-6">Used by</span>
         <span class="w-52 shrink-0 text-right">Actions</span>
       </div>
 
@@ -325,7 +388,10 @@ const busyDetail = computed(() => {
           >
             {{ formatSize(db.sizeBytes) }}
           </span>
-          <span class="w-40 shrink-0 truncate pl-6 font-mono text-xs">
+          <!-- Hidden rather than dashed out for a remote server: a local
+               project folder says nothing about a schema on somebody else's
+               machine, so there is no answer to show. -->
+          <span v-if="!remote" class="w-40 shrink-0 truncate pl-6 font-mono text-xs">
             <span v-if="db.usedBy" class="text-neutral-600 dark:text-neutral-300">{{
               db.usedBy
             }}</span>
