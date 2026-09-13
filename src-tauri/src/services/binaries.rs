@@ -512,7 +512,12 @@ pub async fn install(app: &AppHandle, id: &str) -> Result<BinaryStatus, AppError
     Ok(status_of(pkg))
 }
 
-async fn download(app: &AppHandle, id: &str, url: &str) -> Result<Vec<u8>, AppError> {
+/// Downloads `url`, emitting [`PROGRESS_EVENT`] as bytes arrive.
+///
+/// `pub(crate)` rather than private: `services::share` reuses this directly
+/// for cloudflared's bare `.exe` release, which has no archive for
+/// [`install_archive`] to extract.
+pub(crate) async fn download(app: &AppHandle, id: &str, url: &str) -> Result<Vec<u8>, AppError> {
     let response = reqwest::get(url)
         .await
         .map_err(|e| AppError::Download(format!("{url}: {e}")))?;
@@ -545,7 +550,9 @@ async fn download(app: &AppHandle, id: &str, url: &str) -> Result<Vec<u8>, AppEr
     Ok(downloaded)
 }
 
-fn verify_checksum(id: &str, expected: &str, bytes: &[u8]) -> Result<(), AppError> {
+/// `pub(crate)` for the same reason as [`download`] — shared with
+/// `services::share`'s non-archive install path.
+pub(crate) fn verify_checksum(id: &str, expected: &str, bytes: &[u8]) -> Result<(), AppError> {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     let actual = hex::encode(hasher.finalize());

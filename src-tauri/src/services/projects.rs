@@ -68,6 +68,19 @@ pub fn scan_projects() -> Result<Vec<ProjectInfo>, AppError> {
     Ok(projects)
 }
 
+/// Re-resolves `id` against a fresh scan.
+///
+/// Every caller that only ever received a project *id* from the frontend
+/// (`services::launcher`, `services::share`) goes through this rather than
+/// trusting a domain or path passed in alongside it — the scan is the one
+/// source of truth for what a project's real domain is right now.
+pub fn find(id: &str) -> Result<ProjectInfo, AppError> {
+    scan_projects()?
+        .into_iter()
+        .find(|project| project.id == id)
+        .ok_or_else(|| AppError::ProjectNotFound(id.to_string()))
+}
+
 /// The linked folders, skipping any that duplicate a domain already taken
 /// by a scanned project.
 ///

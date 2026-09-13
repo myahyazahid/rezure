@@ -9,15 +9,12 @@
 use std::path::Path;
 use std::process::Command;
 
-use super::projects::scan_projects;
+use super::projects;
 use crate::db::projects::ProjectInfo;
 use crate::utils::error::AppError;
 
 fn resolve(id: &str) -> Result<ProjectInfo, AppError> {
-    scan_projects()?
-        .into_iter()
-        .find(|project| project.id == id)
-        .ok_or_else(|| AppError::ProjectNotFound(id.to_string()))
+    projects::find(id)
 }
 
 fn open_failed(target: &str, reason: impl std::fmt::Display) -> AppError {

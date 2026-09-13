@@ -18,7 +18,10 @@ const databasesStore = useDatabasesStore()
 onMounted(() => {
   // Sidebar badges and the dashboard read from all of these, so they are loaded up front.
   servicesStore.fetchAll()
-  projectsStore.fetchAll()
+  // Restoring share status has to wait for the project list itself — it
+  // checks each project's id against a running cloudflared tunnel, so a
+  // reload while sharing is active doesn't show it as "not shared".
+  projectsStore.fetchAll().then(() => projectsStore.restoreShareStatus())
   phpStore.fetchAll()
   binariesStore.fetchAll()
   // Best-effort: this one fails when MariaDB isn't running, which the

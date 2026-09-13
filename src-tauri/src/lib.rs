@@ -37,6 +37,9 @@ pub fn run() {
                 commands::services::port_holder,
                 commands::services::free_port,
                 commands::services::restart_service,
+                commands::share::share_project,
+                commands::share::stop_sharing,
+                commands::share::sharing_status,
                 commands::php::list_php_versions,
                 commands::php::set_active_php_version,
                 commands::php::list_php_catalog,
@@ -464,6 +467,11 @@ pub fn run() {
             // so nothing above reaps them: without this an `ssh.exe` per
             // connection survives the app, still holding a forwarded port.
             services::tunnel::close_all();
+
+            // Same reasoning as the SSH tunnels above: a shared project's
+            // `cloudflared.exe` is a child process no `Service` tracks,
+            // so it needs its own explicit teardown here too.
+            services::share::close_all();
         }
     });
 }

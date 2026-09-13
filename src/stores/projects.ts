@@ -29,6 +29,17 @@ export const useProjectsStore = defineStore('projects', () => {
   const linking = ref(false)
   const linkError = ref<string | null>(null)
 
+  /** Project id -> public `https://*.trycloudflare.com` URL, for whichever
+   *  projects currently have an active Share tunnel. */
+  const shareUrls = ref<Record<string, string>>({})
+  /** The project whose share is currently starting — the first click also
+   *  downloads cloudflared, so this can take a few seconds. */
+  const sharingFor = ref<string | null>(null)
+  const shareError = ref<string | null>(null)
+  /** The project whose Share details (URL, copy, stop) modal is open, or
+   *  null. One at a time, same shape as `doctorFor` below. */
+  const shareModalFor = ref<string | null>(null)
+
   const allHostsReady = computed(
     () => projects.value.length > 0 && projects.value.every((p) => p.hasHostsEntry),
   )
@@ -172,6 +183,64 @@ export const useProjectsStore = defineStore('projects', () => {
     }
   }
 
+  /**
+   * Starts sharing a project publicly via a Cloudflare Quick Tunnel, or
+   * reuses one already running for it. The first call for a fresh install
+   * also downloads cloudflared, so this can take a few seconds — `sharingFor`
+   * is what a card uses to show a spinner instead of looking stuck. Opens
+   * the share modal immediately, before the result is known, so the modal
+   * itself carries the loading state rather than the click just looking
+   * like nothing happened for several seconds.
+   */
+  async function shareProject(id: string) {
+    sharingFor.value = id
+    shareError.value = null
+    shareModalFor.value = id
+    try {
+      const url = await invoke<string>('share_project', { id })
+      shareUrls.value = { ...shareUrls.value, [id]: url }
+    } catch (e) {
+      shareError.value = errorMessage(e)
+    } finally {
+      sharingFor.value = null
+    }
+  }
+
+  /** Stops a project's share tunnel, if it has one. */
+  async function stopSharing(id: string) {
+    await invoke('stop_sharing', { id })
+    const remaining = { ...shareUrls.value }
+    delete remaining[id]
+    shareUrls.value = remaining
+    if (shareModalFor.value === id) shareModalFor.value = null
+  }
+
+  function openShareModal(id: string) {
+    shareError.value = null
+    shareModalFor.value = id
+  }
+
+  function closeShareModal() {
+    shareModalFor.value = null
+    shareError.value = null
+  }
+
+  /**
+   * Repopulates `shareUrls` from whatever's actually still running —
+   * without this, reloading the Projects page while a share is active would
+   * show it as "not shared" even though `cloudflared.exe` is still up.
+   */
+  async function restoreShareStatus() {
+    const entries = await Promise.all(
+      projects.value.map(async (p) => [p.id, await invoke<string | null>('sharing_status', { id: p.id })] as const),
+    )
+    const active: Record<string, string> = {}
+    for (const [id, url] of entries) {
+      if (url) active[id] = url
+    }
+    shareUrls.value = active
+  }
+
   return {
     projects,
     linking,
@@ -200,5 +269,14 @@ export const useProjectsStore = defineStore('projects', () => {
     openTerminal,
     fetchTemplateInfo,
     createProject,
+    shareUrls,
+    sharingFor,
+    shareError,
+    shareModalFor,
+    shareProject,
+    stopSharing,
+    openShareModal,
+    closeShareModal,
+    restoreShareStatus,
   }
 })

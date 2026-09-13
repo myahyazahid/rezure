@@ -5,6 +5,7 @@ import { useServicesStore } from '@/stores/services'
 import BasePill from '@/components/common/BasePill.vue'
 import ServiceSparkline from '@/components/services/ServiceSparkline.vue'
 import ServiceLogPanel from '@/components/services/ServiceLogPanel.vue'
+import TechIcon from '@/components/common/TechIcon.vue'
 
 const props = defineProps<{ service: ServiceInfo }>()
 
@@ -17,7 +18,6 @@ const confirmingForceStop = ref(false)
 
 const isRunning = computed(() => props.service.status === 'running')
 const isPending = computed(() => store.isPending(props.service.id))
-const initial = computed(() => props.service.name.charAt(0).toUpperCase())
 const error = ref<string | null>(null)
 
 function toggleExpanded() {
@@ -108,14 +108,10 @@ function requestForceStop() {
   >
     <div class="flex items-center gap-3 p-3.5">
       <div
-        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold"
-        :class="
-          isRunning
-            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400'
-            : 'bg-neutral-200/70 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400'
-        "
+        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white dark:bg-neutral-800"
+        :class="isRunning ? '' : 'opacity-50 grayscale'"
       >
-        {{ initial }}
+        <TechIcon :id="service.id" :size="20" />
       </div>
 
       <div class="min-w-0 flex-1">

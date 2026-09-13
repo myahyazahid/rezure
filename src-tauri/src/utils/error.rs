@@ -88,6 +88,9 @@ pub enum AppError {
     #[error("SSH tunnel failed: {0}")]
     TunnelFailed(String),
 
+    #[error("couldn't share this project: {0}")]
+    ShareFailed(String),
+
     #[error("can't reach {host}:{port} — {reason}")]
     ServerUnreachable {
         host: String,

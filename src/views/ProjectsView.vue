@@ -7,6 +7,7 @@ import ProjectActionButtons from '@/components/projects/ProjectActionButtons.vue
 import NewProjectModal from '@/components/projects/NewProjectModal.vue'
 import LinkProjectModal from '@/components/projects/LinkProjectModal.vue'
 import ProjectDoctorModal from '@/components/projects/ProjectDoctorModal.vue'
+import ProjectShareModal from '@/components/projects/ProjectShareModal.vue'
 import BusyOverlay from '@/components/common/BusyOverlay.vue'
 
 const store = useProjectsStore()
@@ -99,7 +100,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
        the header, search and view toggle would otherwise scroll off the top
        just when they're most needed. -->
   <section class="flex h-full flex-col">
-    <div class="flex shrink-0 items-start justify-between gap-4">
+    <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
       <div>
         <h1 class="text-[28px] leading-tight font-bold tracking-tight">Projects</h1>
         <p class="mt-1 text-sm text-neutral-500">
@@ -107,7 +108,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
         </p>
       </div>
 
-      <div class="flex shrink-0 items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
         <button
           type="button"
           class="flex items-center gap-2 rounded-full border border-neutral-200 bg-white/70 px-4 py-2.5 text-sm font-semibold text-neutral-700 transition hover:bg-white disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
@@ -189,6 +190,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
     <!-- Rendered once, outside both the card grid and the list: the result
          is about one project at a time, and the store already says which. -->
     <ProjectDoctorModal />
+    <ProjectShareModal />
 
     <BusyOverlay :show="busy !== null" :label="busy?.label ?? ''" :detail="busy?.detail ?? ''" />
 
@@ -338,7 +340,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
         </p>
 
         <div
-          class="mt-3 flex items-center justify-between gap-2 border-t border-neutral-200/80 pt-3 dark:border-neutral-800"
+          class="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-neutral-200/80 pt-3 dark:border-neutral-800"
         >
           <span
             class="min-w-0 truncate rounded-full px-3 py-1.5 font-mono text-xs"
@@ -389,7 +391,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
         <span class="flex-1">Project</span>
         <span class="w-44 shrink-0">Domain</span>
         <span class="w-28 shrink-0">Stack</span>
-        <span class="w-56 shrink-0 text-right">Actions</span>
+        <span class="w-80 shrink-0 text-right">Actions</span>
       </div>
 
       <div class="min-h-0 flex-1 overflow-y-auto">
@@ -445,7 +447,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
                to be dropped rather than hidden, so a row without an unlink
                button pushed Open to the right and the actions never lined up
                down the list. -->
-          <div class="flex w-56 shrink-0 items-center justify-end gap-1">
+          <div class="flex w-80 shrink-0 items-center justify-end gap-1">
             <ProjectActionButtons
               :class="project.missing || project.domainInvalid ? 'invisible' : ''"
               :project-id="project.id"

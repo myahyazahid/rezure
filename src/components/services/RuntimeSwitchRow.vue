@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import BasePill from '@/components/common/BasePill.vue'
+import TechIcon from '@/components/common/TechIcon.vue'
 import type { InstallProgress } from '@/types/binary'
 
 export interface RuntimeVersionEntry {
@@ -75,14 +76,10 @@ function pick(entry: RuntimeVersionEntry) {
   >
     <div class="flex items-center gap-3">
       <span
-        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold"
-        :class="
-          !disabled && installedCount > 0
-            ? 'bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400'
-            : 'bg-neutral-200/70 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400'
-        "
+        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white dark:bg-neutral-800"
+        :class="disabled || installedCount === 0 ? 'opacity-50 grayscale' : ''"
       >
-        {{ icon }}
+        <TechIcon :id="icon" :size="20" />
       </span>
 
       <div class="min-w-0 flex-1">

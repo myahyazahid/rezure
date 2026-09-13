@@ -126,7 +126,7 @@ const hasPhpConfig = computed(
       class="flex flex-col divide-y divide-neutral-200/80 rounded-2xl border border-neutral-200/80 bg-neutral-100/60 dark:divide-neutral-800 dark:border-neutral-800 dark:bg-neutral-900/60"
     >
       <RuntimeSwitchRow
-        icon="P"
+        icon="php"
         name="PHP"
         :active-version="phpStore.active?.version ?? null"
         :installed-count="phpInstalledCount"
@@ -138,7 +138,7 @@ const hasPhpConfig = computed(
         @install="phpStore.install"
       />
       <RuntimeSwitchRow
-        icon="N"
+        icon="nginx"
         name="Nginx"
         :active-version="nginx?.installed ? nginx.version : null"
         :installed-count="nginx?.installed ? 1 : 0"
@@ -148,7 +148,7 @@ const hasPhpConfig = computed(
         @install="binariesStore.install('nginx')"
       />
       <RuntimeSwitchRow
-        icon="M"
+        icon="mariadb"
         name="MariaDB"
         :active-version="mariadb?.installed ? mariadb.version : null"
         :installed-count="mariadb?.installed ? 1 : 0"
@@ -158,7 +158,7 @@ const hasPhpConfig = computed(
         @install="binariesStore.install('mariadb')"
       />
       <RuntimeSwitchRow
-        icon="C"
+        icon="composer"
         name="Composer"
         :active-version="composerStore.installed ? 'latest' : null"
         :installed-count="composerStore.installed ? 1 : 0"
@@ -167,7 +167,7 @@ const hasPhpConfig = computed(
         @install="composerStore.install"
       />
       <RuntimeSwitchRow
-        icon="N"
+        icon="node"
         name="Node.js"
         active-version=""
         :installed-count="0"
@@ -175,7 +175,7 @@ const hasPhpConfig = computed(
         disabled
       />
       <RuntimeSwitchRow
-        icon="P"
+        icon="python"
         name="Python"
         active-version=""
         :installed-count="0"

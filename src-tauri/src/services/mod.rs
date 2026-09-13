@@ -23,6 +23,8 @@ pub mod process;
 pub mod projects;
 pub mod scaffold;
 pub mod secrets;
+pub mod share;
+pub mod share_proxy;
 pub mod support;
 pub mod telemetry;
 pub mod tunnel;
