@@ -9,11 +9,11 @@ Roadmap fitur lanjutan Rezure. Beberapa fitur yang sebelumnya direncanakan di v3
 **Tujuan:** User bisa share local project ke internet sementara tanpa setup manual.
 
 ### Tasks
-- [ ] Integrasi ngrok atau cloudflared (pilih salah satu, atau keduanya sebagai opsi)
-- [ ] Deteksi apakah binary tunnel tool sudah tersedia; download portable version jika belum ada
-- [ ] Tombol "Share" di tiap project card, trigger tunnel ke port project tersebut
-- [ ] Tampilkan public URL yang di-generate langsung di UI, dengan tombol copy
-- [ ] Tombol "Stop sharing" untuk menutup tunnel
+- [x] Integrasi ngrok atau cloudflared (pilih salah satu, atau keduanya sebagai opsi) — cloudflared dipilih (`services/share.rs`), ngrok dilewati karena butuh signup/authtoken
+- [x] Deteksi apakah binary tunnel tool sudah tersedia; download portable version jika belum ada — `share::ensure_installed`, checksum-verified
+- [x] Tombol "Share" di tiap project card, trigger tunnel ke port project tersebut — `ProjectActionButtons.vue`
+- [x] Tampilkan public URL yang di-generate langsung di UI, dengan tombol copy — `ProjectShareModal.vue`
+- [x] Tombol "Stop sharing" untuk menutup tunnel — `ProjectShareModal.vue` → `stopSharing`
 
 ---
 
@@ -89,11 +89,14 @@ sudah dipakai di `PhpConfigCard.vue` dan `RuntimeSwitchRow.vue`.
 **Tujuan:** Distribusi update tidak lagi manual — user diberi tahu dan bisa update langsung dari dalam app.
 
 ### Tasks
-- [ ] Implementasi `tauri-plugin-updater`
-- [ ] Cek update via endpoint `GET /api/v1/version/latest` (endpoint yang sama dipakai website & dashboard)
-- [ ] Notifikasi in-app saat ada versi baru tersedia
-- [ ] Link notifikasi ke halaman Changelog (menu yang sudah ada dari v2) untuk detail perubahan
-- [ ] Alur update: download di background, apply saat user konfirmasi (hindari update paksa yang mengganggu kerja user)
+- [x] Implementasi `tauri-plugin-updater` — dependency + registrasi plugin (`src-tauri/src/lib.rs`), capability `updater:default`, `bundle.createUpdaterArtifacts` di `tauri.conf.json`. Tidak ada command Tauri custom — seluruh alur `check`/`downloadAndInstall` dipanggil langsung dari Pinia store (`src/stores/update.ts`) lewat `@tauri-apps/plugin-updater`, bukan diwrap ulang di Rust
+- [x] Cek update via `check()` plugin resmi, terhadap manifest bertanda tangan (ed25519) sesuai kontrak di [`docs/version-contract.md`](../version-contract.md) — **bukan** sekadar `{version, download_url}` seperti sketsa awal: checksum dari server yang sama dengan file yang didownload gak ngasih jaminan integritas apa-apa, signature yang diverifikasi pakai public key yang ketanam di app baru bener-bener independen dari server
+- [x] Notifikasi in-app saat ada versi baru tersedia — badge titik merah di item sidebar "Changelog" (`AppSidebar.vue`), sinyal terpisah dari "changelog belum dibaca" (dua hal ini independen: update bisa ada padahal entry changelog-nya udah keklik `seen`, atau sebaliknya)
+- [x] Link notifikasi ke halaman Changelog (menu yang sudah ada dari v2) untuk detail perubahan — banner "Update" muncul langsung di `ChangelogView.vue`
+- [x] Alur update: **satu tombol "Update"** di halaman Changelog memicu seluruh urutan (download dengan progress terlihat → install → di Windows app keluar sendiri setelah installer jalan) — bukan background pre-download + konfirmasi terpisah, sesuai keputusan produk final (one-click-does-it-all, konsisten sama pola tombol Share/Install PHP version yang udah ada)
+- [ ] Generate keypair `tauri signer generate` (sekali, manual) — public key masuk `tauri.conf.json` (placeholder `REPLACE_WITH_PUBKEY_FROM_TAURI_SIGNER_GENERATE` sekarang), private key + password jadi secret rilis (CI/lokal), tidak pernah masuk git
+- [ ] `laravel-api` ubah response `GET /api/v1/version/latest` dari `{version, notes, published_at}` ke manifest bertanda tangan (`pub_date` + `platforms.windows-x86_64.{signature,url}`), plus tambah kolom `signature`/`url` di tabel `releases` dan bandingkan versi terhadap client yang minta (buat balikin `204` kalau gak ada update) — endpoint-nya **sudah live**, tapi shape-nya belum sesuai; detail di `api-documentation/telemetry-api.md`
+- [ ] Uji end-to-end lawan endpoint asli begitu `laravel-api` selesai diubah — sementara ini kode sisi app sudah bisa diuji lokal lawan manifest tiruan (lihat prosedur di `docs/version-contract.md`)
 
 ---
 
@@ -102,12 +105,12 @@ sudah dipakai di `PhpConfigCard.vue` dan `RuntimeSwitchRow.vue`.
 **Tujuan:** User yang mau mendukung pengembangan Rezure bisa donasi dengan mudah, lewat berbagai platform (lokal, global, dan crypto).
 
 ### Tasks
-- [ ] Tambahkan menu "Support Developer" di sidebar (terpisah dari menu "Feedback" di Fase 2.1)
-- [ ] Section link donasi lokal: Trakteer / Saweria — tombol buka browser eksternal ke halaman donasi
-- [ ] Section link donasi global: GitHub Sponsors / Ko-fi — tombol buka browser eksternal
-- [ ] Section donasi crypto: tampilkan wallet address (misal BTC, ETH, USDT — sesuaikan yang dipakai) dengan tombol copy address dan QR code per wallet
-- [ ] Pesan singkat konteks: "Rezure gratis & open-source, dukung pengembangannya" beserta link ke halaman "About" untuk cerita project
-- [ ] Semua link/alamat dikelola dari konfigurasi statis di app (bukan dari API) — kecuali suatu saat ingin diubah dari server tanpa update app, baru pertimbangkan pindah ke remote config
+- [x] Tambahkan menu "Support Developer" di sidebar (terpisah dari menu "Feedback" di Fase 2.1) — `/donate`, ikon hati, `AppSidebar.vue`
+- [x] Section link donasi lokal: Trakteer / Saweria — tombol buka browser eksternal ke halaman donasi
+- [x] Section link donasi global: GitHub Sponsors / Ko-fi — tombol buka browser eksternal
+- [x] Section donasi crypto: tampilkan wallet address dengan tombol copy address dan QR code per wallet — QR digenerate client-side (`qrcode` package) dari address, gak pernah lewat layanan QR pihak ketiga
+- [x] Pesan singkat konteks beserta link ke halaman "About" — `AboutView.vue` baru (`/about`), isi masih placeholder generik, nunggu cerita project asli dari maintainer
+- [x] **Keputusan berubah dari sketsa awal roadmap**: link/alamat donasi **diambil dari API** (`GET /api/v1/support/donate`), bukan config statis di app — permintaan eksplisit user saat implementasi, memakai jalur pengecualian yang roadmap ini sendiri udah sediakan ("kecuali suatu saat ingin diubah dari server tanpa update app"). Pola fetch+cache+fallback sama persis kayak `services::changelog` (`services/donate.rs`). Endpoint-nya **belum ada** di `laravel-api` — spek lengkap di `api-documentation/telemetry-api.md` (`GET /support/donate`). Sampai endpoint itu jadi, halaman nampilin state "nothing configured yet" (fallback `DonateConfig::default()`)
 
 ---
 
@@ -206,7 +209,7 @@ Rekomendasi: **(b)**, karena jumlah versi nginx yang relevan untuk local dev sed
 
 ## Dependency ke Proyek Lain
 
-Fase 3.4 membutuhkan endpoint `GET /api/v1/version/latest` sudah tersedia di `rezure-dashboard`. Fase 3.1–3.3, dan 3.5–3.10 sepenuhnya independen, tidak bergantung pada backend.
+Fase 3.4 membutuhkan `GET /api/v1/version/latest` di `laravel-api` diubah dari shape lama (`{version, notes, published_at}`) ke manifest bertanda tangan sesuai [`docs/version-contract.md`](../version-contract.md) — endpoint-nya sendiri **sudah live**, ini soal ganti response shape + tambah kolom `signature`/`url` di `releases`, bukan bikin endpoint baru dari nol (lihat `api-documentation/telemetry-api.md` untuk kontraknya). Kode sisi app untuk fase ini sudah dibangun dan bisa diuji lokal lawan manifest tiruan (prosedur ada di doc kontrak itu); yang masih nunggu backend cuma verifikasi end-to-end lawan endpoint asli setelah shape-nya diubah. Fase 3.1–3.3, dan 3.5–3.10 sepenuhnya independen, tidak bergantung pada backend.
 
 **Catatan soal analytics lanjutan (v3 `rezure-dashboard`):** fitur traffic by hour, breakdown negara, cohort retention, dll di dashboard **tidak membutuhkan perubahan apapun di app ini** — semua data granular yang dibutuhkan (timestamp, OS version, metadata service) sudah terkirim sejak fondasi telemetry v2. Geolocation negara diproses di sisi server dari IP request yang masuk, bukan dikirim dari client.
 

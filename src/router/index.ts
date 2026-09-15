@@ -8,6 +8,8 @@ import LogsView from '../views/LogsView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import SupportView from '../views/SupportView.vue'
 import ChangelogView from '../views/ChangelogView.vue'
+import SupportDeveloperView from '../views/SupportDeveloperView.vue'
+import AboutView from '../views/AboutView.vue'
 
 // Imported eagerly rather than as `() => import(...)`. Code-splitting pays off
 // when chunks travel over a network and most users never open most routes —
@@ -56,6 +58,16 @@ const router = createRouter({
       path: '/changelog',
       name: 'changelog',
       component: ChangelogView,
+    },
+    {
+      path: '/donate',
+      name: 'donate',
+      component: SupportDeveloperView,
+    },
+    {
+      path: '/about',
+      name: 'about',
+      component: AboutView,
     },
   ],
 })

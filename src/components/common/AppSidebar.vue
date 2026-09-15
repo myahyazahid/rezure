@@ -7,6 +7,7 @@ import { useDatabasesStore } from '@/stores/databases'
 import { usePhpStore } from '@/stores/php'
 import { useLogsStore } from '@/stores/logs'
 import { useChangelogStore } from '@/stores/changelog'
+import { useUpdateStore } from '@/stores/update'
 import { useUptime } from '@/composables/useUptime'
 
 const route = useRoute()
@@ -16,18 +17,27 @@ const databasesStore = useDatabasesStore()
 const phpStore = usePhpStore()
 const logsStore = useLogsStore()
 const changelogStore = useChangelogStore()
+const updateStore = useUpdateStore()
 const { label: uptimeLabel } = useUptime()
 
 // Fetched here (not just on the Changelog page itself) so the "new release"
 // badge can show without the user having visited it yet.
 onMounted(() => {
   changelogStore.fetchAll()
+  updateStore.checkForUpdate()
 })
 
 const hasUnseenChangelog = computed(() => {
   const newest = changelogStore.entries[0]?.version
   return !!newest && newest !== changelogStore.lastSeenVersion
 })
+
+// A binary update and a "new" changelog entry are independent signals (one
+// can exist without the other), but the nav row only has room for one dot —
+// it lights up if either is true.
+const hasChangelogAlert = computed(
+  () => hasUnseenChangelog.value || updateStore.available !== null,
+)
 
 const navItems = computed(() => [
   {
@@ -80,8 +90,15 @@ const navItems = computed(() => [
     to: '/changelog',
     icon: 'changelog' as const,
     label: 'Changelog',
-    badge: hasUnseenChangelog.value ? '•' : '',
+    badge: hasChangelogAlert.value ? '•' : '',
     variant: 'alert' as const,
+  },
+  {
+    to: '/donate',
+    icon: 'heart' as const,
+    label: 'Support Developer',
+    badge: '',
+    variant: 'default' as const,
   },
   // Last on purpose: the daily work (services, projects, databases) comes
   // first, and settings are visited rarely enough to sit out of the way.
@@ -217,6 +234,20 @@ const ringOffset = computed(() => {
               stroke-linecap="round"
               stroke-linejoin="round"
               d="M12 8v4l3 3m6-3a9 9 0 1 1-9-9 9 9 0 0 1 9 9Z"
+            />
+          </svg>
+          <svg
+            v-else-if="item.icon === 'heart'"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="h-4 w-4"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M12 21s-6.716-4.35-9.428-8.06C1.02 10.94 1.5 7.5 4.5 5.9c2.2-1.17 4.53-.4 5.9 1.4l1.6 2.1 1.6-2.1c1.37-1.8 3.7-2.57 5.9-1.4 3 1.6 3.48 5.04 1.93 7.04C18.716 16.65 12 21 12 21Z"
             />
           </svg>
           <svg

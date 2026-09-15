@@ -24,6 +24,7 @@ pub fn run() {
         tauri::Builder::default()
             .plugin(tauri_plugin_opener::init())
             .plugin(tauri_plugin_dialog::init())
+            .plugin(tauri_plugin_updater::Builder::new().build())
             .plugin(tauri_plugin_autostart::init(
                 MacosLauncher::LaunchAgent,
                 None,
@@ -103,6 +104,8 @@ pub fn run() {
                 commands::changelog::fetch_changelog,
                 commands::changelog::last_seen_changelog_version,
                 commands::changelog::mark_changelog_seen,
+                commands::donate::fetch_donate_config,
+                commands::donate::open_external_link,
             ])
             .setup(|app| {
                 if cfg!(debug_assertions) {

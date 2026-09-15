@@ -3,8 +3,10 @@ import { computed, onActivated, ref, useTemplateRef } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { useChangelogStore } from '@/stores/changelog'
+import { useUpdateStore } from '@/stores/update'
 
 const store = useChangelogStore()
+const updateStore = useUpdateStore()
 
 const PAGE_SIZE = 10
 const page = ref(1)
@@ -16,6 +18,12 @@ onActivated(async () => {
   page.value = 1
   await store.fetchAll()
   await store.markSeen()
+  await updateStore.checkForUpdate()
+})
+
+const updateProgressPercent = computed(() => {
+  if (updateStore.totalBytes === null || updateStore.totalBytes === 0) return null
+  return Math.min(100, Math.round((updateStore.downloadedBytes / updateStore.totalBytes) * 100))
 })
 
 function renderBody(markdown: string): string {
@@ -57,6 +65,44 @@ function goToPage(next: number) {
       Changelog
     </h1>
     <p class="mt-1 text-sm text-neutral-500">What's new in Rezure, release by release.</p>
+
+    <p v-if="updateStore.checking" class="mt-3 text-xs text-neutral-400">
+      Checking for updates…
+    </p>
+
+    <div
+      v-else-if="updateStore.available"
+      class="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-500/20 dark:bg-red-500/10"
+    >
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <p class="text-sm font-semibold text-red-900 dark:text-red-200">
+          Rezure {{ updateStore.available.version }} is available
+        </p>
+        <button
+          type="button"
+          class="shrink-0 rounded-full bg-red-600 px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-red-500 disabled:opacity-60"
+          :disabled="updateStore.downloading"
+          @click="updateStore.downloadAndApply()"
+        >
+          {{ updateStore.downloading ? 'Downloading…' : 'Update' }}
+        </button>
+      </div>
+
+      <div
+        v-if="updateStore.downloading"
+        class="mt-3 h-1.5 overflow-hidden rounded-full bg-red-200/70 dark:bg-red-900/40"
+      >
+        <div
+          class="h-full rounded-full bg-red-600 transition-all"
+          :class="updateProgressPercent === null ? 'w-1/3 animate-pulse' : ''"
+          :style="updateProgressPercent !== null ? { width: `${updateProgressPercent}%` } : undefined"
+        ></div>
+      </div>
+
+      <p v-if="updateStore.downloadError" class="mt-3 text-xs text-red-700 dark:text-red-300">
+        {{ updateStore.downloadError }}
+      </p>
+    </div>
 
     <p v-if="store.loading && !hasEntries" class="mt-6 text-sm text-neutral-500">Loading…</p>
 

@@ -11,6 +11,7 @@ pub mod db_clients;
 pub mod db_engine;
 pub mod db_profiles;
 pub mod doctor;
+pub mod donate;
 pub mod hosts;
 pub mod launcher;
 pub mod php;
