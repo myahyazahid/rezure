@@ -66,9 +66,7 @@ function goToPage(next: number) {
     </h1>
     <p class="mt-1 text-sm text-neutral-500">What's new in Rezure, release by release.</p>
 
-    <p v-if="updateStore.checking" class="mt-3 text-xs text-neutral-400">
-      Checking for updates…
-    </p>
+    <p v-if="updateStore.checking" class="mt-3 text-xs text-neutral-400">Checking for updates…</p>
 
     <div
       v-else-if="updateStore.available"
@@ -95,7 +93,9 @@ function goToPage(next: number) {
         <div
           class="h-full rounded-full bg-red-600 transition-all"
           :class="updateProgressPercent === null ? 'w-1/3 animate-pulse' : ''"
-          :style="updateProgressPercent !== null ? { width: `${updateProgressPercent}%` } : undefined"
+          :style="
+            updateProgressPercent !== null ? { width: `${updateProgressPercent}%` } : undefined
+          "
         ></div>
       </div>
 

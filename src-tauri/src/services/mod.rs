@@ -19,6 +19,7 @@ pub mod php_catalog;
 pub mod php_ext;
 pub mod php_ini;
 pub mod php_path;
+pub mod php_pool;
 pub mod ports;
 pub mod process;
 pub mod projects;
@@ -31,7 +32,8 @@ pub mod telemetry;
 pub mod tunnel;
 pub mod vhosts;
 
-use std::sync::Arc;
+use std::collections::{BTreeMap, HashSet};
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 
@@ -101,22 +103,56 @@ pub trait Service: Send + Sync {
 
 pub type ServiceHandle = Arc<dyn Service>;
 
+/// Builds a pooled PHP service handle for a specific version, listening on a
+/// specific port — see [`ServiceManager::sync_php_pool`]. A closure rather
+/// than a direct dependency on `services::process::ProcessService` so this
+/// module doesn't need to know about any concrete `Service` implementation;
+/// `process::real_services` is the only place that supplies one.
+pub type PhpPoolFactory = Arc<dyn Fn(&str, u16) -> ServiceHandle + Send + Sync>;
+
 /// Tauri-managed state holding every registered service.
+///
+/// The list is no longer fixed at construction: a project pinning a PHP
+/// version distinct from the global default needs its own pooled service to
+/// appear (and disappear again once nothing pins it anymore) while the app
+/// is running — see [`sync_php_pool`](Self::sync_php_pool). Nginx, the
+/// default PHP service and the database are registered once at startup and
+/// never removed; only pooled `"php-<version>"` entries come and go.
 pub struct ServiceManager {
-    services: Vec<ServiceHandle>,
+    services: Mutex<Vec<ServiceHandle>>,
+    php_factory: Option<PhpPoolFactory>,
 }
 
 impl ServiceManager {
     pub fn new(services: Vec<ServiceHandle>) -> Self {
-        Self { services }
+        Self {
+            services: Mutex::new(services),
+            php_factory: None,
+        }
+    }
+
+    /// Attaches the factory [`sync_php_pool`](Self::sync_php_pool) uses to
+    /// build a pooled PHP service on demand. Separate from `new` so the
+    /// sixteen-odd existing test call sites that construct a `ServiceManager`
+    /// without caring about the pool don't all need updating.
+    pub fn with_php_factory(mut self, factory: PhpPoolFactory) -> Self {
+        self.php_factory = Some(factory);
+        self
     }
 
     pub fn list(&self) -> Vec<ServiceInfo> {
-        self.services.iter().map(|s| s.info()).collect()
+        self.services
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|s| s.info())
+            .collect()
     }
 
     pub fn find(&self, id: &str) -> Result<ServiceHandle, AppError> {
         self.services
+            .lock()
+            .unwrap()
             .iter()
             .find(|s| s.id() == id)
             .cloned()
@@ -129,9 +165,65 @@ impl ServiceManager {
     /// stopping one service must not skip the rest, so errors are logged
     /// rather than propagated.
     pub fn stop_all(&self) {
-        for service in &self.services {
+        for service in self.services.lock().unwrap().iter() {
             if let Err(err) = service.stop() {
                 log::warn!("failed to stop {} on exit: {err}", service.id());
+            }
+        }
+    }
+
+    /// Reconciles the pooled PHP services against `wanted` (version -> port,
+    /// from [`php_pool::wanted`](php_pool::wanted)): registers a pooled
+    /// instance for every version that doesn't have one yet, and stops and
+    /// unregisters any pooled instance no project pins anymore.
+    ///
+    /// Called after every vhost sync (see `commands::projects`), so a
+    /// project's override taking effect or being cleared shows up as a
+    /// startable/removed service card immediately — it does not start the
+    /// service itself, staying consistent with every other service here
+    /// being manually started.
+    ///
+    /// A no-op if no factory was attached (every test `ServiceManager` and,
+    /// in principle, any future headless use).
+    pub fn sync_php_pool(&self, wanted: &BTreeMap<String, u16>) {
+        let Some(factory) = &self.php_factory else {
+            return;
+        };
+
+        // Stopping a process can take a moment (see `ProcessService::stop`),
+        // so it happens with the lock released rather than held for the
+        // duration — nothing else needs to observe the half-removed state.
+        let stale: Vec<ServiceHandle> = {
+            let mut services = self.services.lock().unwrap();
+            let wanted_ids: HashSet<String> =
+                wanted.keys().map(|v| php_pool::service_id(v)).collect();
+            let mut stale = Vec::new();
+            services.retain(|service| {
+                let id = service.id();
+                if id.starts_with("php-") && !wanted_ids.contains(id) {
+                    stale.push(service.clone());
+                    false
+                } else {
+                    true
+                }
+            });
+            stale
+        };
+        for service in stale {
+            if let Err(err) = service.stop() {
+                log::warn!(
+                    "failed to stop {} while removing it from the PHP pool: {err}",
+                    service.id()
+                );
+            }
+        }
+
+        let mut services = self.services.lock().unwrap();
+        let existing: HashSet<String> = services.iter().map(|s| s.id().to_string()).collect();
+        for (version, port) in wanted {
+            let id = php_pool::service_id(version);
+            if !existing.contains(&id) {
+                services.push(factory(version, *port));
             }
         }
     }

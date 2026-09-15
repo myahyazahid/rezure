@@ -11,17 +11,23 @@
 //! `php-cgi -b 127.0.0.1:PHP_FASTCGI_PORT` (see `services::process`) — the
 //! standard substitute FastCGI responder on this platform.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use super::binaries;
+use super::php;
+use super::php_pool;
 use super::projects::{docroot, scan_projects};
 use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
 use crate::utils::paths;
 
-/// Must match the port `ProcessService::php()` binds `php-cgi` to.
+/// Must match the port the default (unpinned) PHP service binds `php-cgi`
+/// to — see `ProcessService::php_default`. A project pinning a different
+/// version than the global active one proxies to a different port instead;
+/// see `services::php_pool`.
 pub const PHP_FASTCGI_PORT: u16 = 9000;
 
 /// `%LOCALAPPDATA%\Rezure\data\nginx` — Rezure's own generated nginx
@@ -119,7 +125,13 @@ http {{
     Ok(config_path)
 }
 
-fn vhost_config(domain: &str, project_root: &Path, stack: &str, fastcgi_params: &Path) -> String {
+fn vhost_config(
+    domain: &str,
+    project_root: &Path,
+    stack: &str,
+    fastcgi_params: &Path,
+    port: u16,
+) -> String {
     format!(
         r#"server {{
     listen 80;
@@ -145,13 +157,13 @@ fn vhost_config(domain: &str, project_root: &Path, stack: &str, fastcgi_params: 
 "#,
         domain = domain,
         root = conf_path(&docroot(project_root, stack)),
-        port = PHP_FASTCGI_PORT,
+        port = port,
         fastcgi_params = conf_path(fastcgi_params),
     )
 }
 
 /// What a [`sync_vhosts`] pass did.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VhostSync {
     /// How many vhosts are active.
     pub active: usize,
@@ -162,6 +174,11 @@ pub struct VhostSync {
     /// workers each time the user opened a tab; reloading only on a real
     /// change makes the reload free when nothing moved.
     pub changed: bool,
+    /// Every PHP version this pass' projects need a pooled instance for
+    /// (version -> port), straight from [`php_pool::wanted`] — the caller
+    /// feeds this to `ServiceManager::sync_php_pool` so a pinned version
+    /// shows up as a startable service the moment its vhost does.
+    pub php_pool: BTreeMap<String, u16>,
 }
 
 /// Rewrites every project's vhost to match the current scan of
@@ -182,6 +199,11 @@ pub fn sync_vhosts() -> Result<VhostSync, AppError> {
         .collect();
     let current_ids: std::collections::HashSet<&str> =
         current.iter().map(|p| p.id.as_str()).collect();
+
+    let installed: std::collections::BTreeSet<String> =
+        php::installed().into_iter().map(|r| r.version).collect();
+    let global_active = php::active_id();
+    let pool = php_pool::wanted(&current, &installed, &global_active);
 
     let mut changed = false;
 
@@ -204,11 +226,14 @@ pub fn sync_vhosts() -> Result<VhostSync, AppError> {
     }
 
     for project in &current {
+        let port =
+            php_pool::port_for_project(project.php_version.as_deref(), &pool, PHP_FASTCGI_PORT);
         let config = vhost_config(
             &project.domain,
             Path::new(&project.path),
             &project.stack,
             &fastcgi_params,
+            port,
         );
         let path = vhosts.join(format!("{}.conf", project.id));
 
@@ -225,6 +250,7 @@ pub fn sync_vhosts() -> Result<VhostSync, AppError> {
     Ok(VhostSync {
         active: current.len(),
         changed,
+        php_pool: pool,
     })
 }
 
@@ -277,6 +303,7 @@ mod tests {
             Path::new(r"C:\Users\dev\rezure\www\blog"),
             "PHP",
             Path::new(r"C:\nginx\conf\fastcgi_params"),
+            PHP_FASTCGI_PORT,
         );
 
         assert!(config.contains("server_name blog.test;"));
@@ -291,7 +318,13 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("public")).unwrap();
 
-        let config = vhost_config("app.test", &dir, "Laravel", Path::new("fastcgi_params"));
+        let config = vhost_config(
+            "app.test",
+            &dir,
+            "Laravel",
+            Path::new("fastcgi_params"),
+            PHP_FASTCGI_PORT,
+        );
         assert!(config.contains(&conf_path(&dir.join("public"))));
 
         fs::remove_dir_all(&dir).unwrap();

@@ -127,6 +127,10 @@ fn linked_projects(scanned: &[ProjectInfo]) -> Vec<ProjectInfo> {
             open_count: 0,
             kind: ProjectKind::Linked,
             missing,
+            // Filled in by `commands::projects::list_projects` from SQLite,
+            // same as `last_opened_at`/`open_count` — a scan has no opinion
+            // on PHP version.
+            php_version: None,
         });
     }
     projects
@@ -178,6 +182,9 @@ fn scan_www() -> Result<Vec<ProjectInfo>, AppError> {
             // A scanned project is a folder that was just read, so it's
             // there by definition.
             missing: false,
+            // Filled in by `commands::projects::list_projects` from SQLite —
+            // a bare scan has no way to know this either.
+            php_version: None,
         });
     }
 

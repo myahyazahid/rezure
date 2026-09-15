@@ -60,21 +60,15 @@ sudah dipakai di `PhpConfigCard.vue` dan `RuntimeSwitchRow.vue`.
 
 ---
 
-## Fase 3.2 — Docker Toggle Mode
-
-**Tujuan:** User bisa pilih menjalankan service via native binary (default) atau via Docker container.
-
-### Tasks
-- [ ] Deteksi apakah Docker Desktop terinstall & running di sistem
-- [ ] Opsi toggle per-project atau per-service: native vs Docker
-- [ ] Generate/kelola `docker-compose.yml` sederhana untuk service yang dipilih mode Docker
-- [ ] Start/stop container mengikuti pola yang sama dengan `Service` trait yang sudah ada (agar tetap konsisten dengan arsitektur di `docs/architecture.md`)
-
----
-
 ## Fase 3.3 — Project Health Dashboard
 
 **Tujuan:** Ringkasan kondisi tiap project dalam satu pandangan.
+
+**Prasyarat sekarang sudah ada:** dulu gap terbesar fase ini adalah project belum punya konsep
+"pakai service/port yang mana" — PHP versi cuma satu secara global, semua vhost proxy ke port yang
+sama. [Fase 3.11](#fase-311--per-project-php-version-concurrent) menutup gap itu: `ProjectInfo`
+sekarang punya `php_version` sendiri per-project, dan `services::php_pool` mapping versi ke port.
+Konsolidasi status di bawah ini bisa langsung baca dari situ, bukan mulai dari nol.
 
 ### Tasks
 - [ ] Konsolidasi status semua service terkait per-project dalam satu view
@@ -94,9 +88,9 @@ sudah dipakai di `PhpConfigCard.vue` dan `RuntimeSwitchRow.vue`.
 - [x] Notifikasi in-app saat ada versi baru tersedia — badge titik merah di item sidebar "Changelog" (`AppSidebar.vue`), sinyal terpisah dari "changelog belum dibaca" (dua hal ini independen: update bisa ada padahal entry changelog-nya udah keklik `seen`, atau sebaliknya)
 - [x] Link notifikasi ke halaman Changelog (menu yang sudah ada dari v2) untuk detail perubahan — banner "Update" muncul langsung di `ChangelogView.vue`
 - [x] Alur update: **satu tombol "Update"** di halaman Changelog memicu seluruh urutan (download dengan progress terlihat → install → di Windows app keluar sendiri setelah installer jalan) — bukan background pre-download + konfirmasi terpisah, sesuai keputusan produk final (one-click-does-it-all, konsisten sama pola tombol Share/Install PHP version yang udah ada)
-- [ ] Generate keypair `tauri signer generate` (sekali, manual) — public key masuk `tauri.conf.json` (placeholder `REPLACE_WITH_PUBKEY_FROM_TAURI_SIGNER_GENERATE` sekarang), private key + password jadi secret rilis (CI/lokal), tidak pernah masuk git
-- [ ] `laravel-api` ubah response `GET /api/v1/version/latest` dari `{version, notes, published_at}` ke manifest bertanda tangan (`pub_date` + `platforms.windows-x86_64.{signature,url}`), plus tambah kolom `signature`/`url` di tabel `releases` dan bandingkan versi terhadap client yang minta (buat balikin `204` kalau gak ada update) — endpoint-nya **sudah live**, tapi shape-nya belum sesuai; detail di `api-documentation/telemetry-api.md`
-- [ ] Uji end-to-end lawan endpoint asli begitu `laravel-api` selesai diubah — sementara ini kode sisi app sudah bisa diuji lokal lawan manifest tiruan (lihat prosedur di `docs/version-contract.md`)
+- [x] Generate keypair `tauri signer generate` (sekali, manual) — public key sudah masuk `tauri.conf.json` menggantikan placeholder; private key + password disimpan maintainer di luar repo (bukan file, ditampilkan sekali di terminal), tidak pernah masuk git
+- [x] `laravel-api` ubah response `GET /api/v1/version/latest` dari `{version, notes, published_at}` ke manifest bertanda tangan (`pub_date` + `platforms.windows-x86_64.{signature,url}`) — `VersionController` (`app/Http/Controllers/Api/V1/VersionController.php`) sudah mengembalikan shape ini persis sesuai `docs/version-contract.md`, kolom `signature`/`download_url` sudah ada di tabel `releases` (migrasi `2026_09_15_042915_add_signature_and_download_url_to_releases_table.php`), dan `204` dibalikin saat client sudah current
+- [ ] Uji end-to-end lawan endpoint asli — masih tersisa karena belum ada pipeline rilis nyata: repo ini belum punya workflow CI (`.github/workflows`) yang build+sign installer pakai key barusan, jadi belum ada release sungguhan berisi `signature`/`download_url` untuk diuji. Sementara ini kode sisi app sudah bisa diuji lokal lawan manifest tiruan (lihat prosedur di `docs/version-contract.md`)
 
 ---
 
@@ -110,7 +104,7 @@ sudah dipakai di `PhpConfigCard.vue` dan `RuntimeSwitchRow.vue`.
 - [x] Section link donasi global: GitHub Sponsors / Ko-fi — tombol buka browser eksternal
 - [x] Section donasi crypto: tampilkan wallet address dengan tombol copy address dan QR code per wallet — QR digenerate client-side (`qrcode` package) dari address, gak pernah lewat layanan QR pihak ketiga
 - [x] Pesan singkat konteks beserta link ke halaman "About" — `AboutView.vue` baru (`/about`), isi masih placeholder generik, nunggu cerita project asli dari maintainer
-- [x] **Keputusan berubah dari sketsa awal roadmap**: link/alamat donasi **diambil dari API** (`GET /api/v1/support/donate`), bukan config statis di app — permintaan eksplisit user saat implementasi, memakai jalur pengecualian yang roadmap ini sendiri udah sediakan ("kecuali suatu saat ingin diubah dari server tanpa update app"). Pola fetch+cache+fallback sama persis kayak `services::changelog` (`services/donate.rs`). Endpoint-nya **belum ada** di `laravel-api` — spek lengkap di `api-documentation/telemetry-api.md` (`GET /support/donate`). Sampai endpoint itu jadi, halaman nampilin state "nothing configured yet" (fallback `DonateConfig::default()`)
+- [x] **Keputusan berubah dari sketsa awal roadmap**: link/alamat donasi **diambil dari API** (`GET /api/v1/support/donate`), bukan config statis di app — permintaan eksplisit user saat implementasi, memakai jalur pengecualian yang roadmap ini sendiri udah sediakan ("kecuali suatu saat ingin diubah dari server tanpa update app"). Pola fetch+cache+fallback sama persis kayak `services::changelog` (`services/donate.rs`). Endpoint-nya **sudah live** di `laravel-api` (`Api\V1\DonateController`) — spek lengkap di `api-documentation/telemetry-api.md` (`GET /support/donate`)
 
 ---
 
@@ -207,20 +201,97 @@ Rekomendasi: **(b)**, karena jumlah versi nginx yang relevan untuk local dev sed
 
 ---
 
+## Fase 3.11 — Per-Project PHP Version (Concurrent)
+
+**Tujuan:** Project bisa pin versi PHP sendiri, beda dari versi aktif global di halaman Switch —
+dan beberapa project dengan versi berbeda bisa **jalan bersamaan** (mis. project A di PHP 7.4,
+project B di 8.0, project C di 8.5, semua serve request di waktu yang sama). Sebelumnya cuma ada
+satu versi PHP aktif untuk seluruh app; mengganti versi berarti stop-start satu proses `php-cgi`
+yang sama, jadi dua project butuh dua versi berbeda tidak mungkin dijalankan bersamaan.
+
+Bukan item dari roadmap awal — ditambahkan setelah pertanyaan langsung dari maintainer soal
+kelayakan isolated-mode ala Laragon Pro. Dikerjakan lebih dulu dari 3.6/3.7/3.10 karena ternyata
+jadi fondasi yang juga dibutuhkan [Fase 3.3](#fase-33--project-health-dashboard) (project ↔
+service/port mapping yang tadinya belum ada sama sekali).
+
+### Cara kerja (ringkas)
+
+Windows tidak punya PHP-FPM asli — Rezure selalu jalanin `php-cgi -b 127.0.0.1:PORT` sebagai
+responder FastCGI stateless per versi (lihat `services/vhosts.rs`). Itu artinya satu proses cuma
+bisa satu versi, tapi tidak ada yang menghalangi banyak proses jalan bersamaan — jadi solusinya
+murni soal port allocation + service lifecycle, bukan batasan PHP itu sendiri.
+
+- **Service "php" default** (id `"php"`, port 9000 tetap) terus ikutin versi aktif global persis
+  seperti sebelumnya — project yang tidak pin apa-apa tidak berubah perilakunya sama sekali.
+- **Project yang pin versi berbeda dari default** dapat instance `php-cgi` pooled sendiri
+  (`services/php_pool.rs`), id `php-<versi>`, port dialokasikan mulai 9001 — dihitung deterministik
+  dari sorted set versi yang lagi dipin, bukan dari urutan scan, supaya alokasi port stabil.
+- **`ServiceManager`** yang tadinya list service tetap (`Vec<ServiceHandle>` dikunci sejak start)
+  sekarang bisa registrasi/unregister instance pooled saat runtime (`sync_php_pool`), dipanggil
+  setiap vhost sync — jadi versi yang baru dipin langsung muncul sebagai service yang bisa
+  di-Start/Stop di UI, konsisten dengan cara semua service lain dikontrol manual (bukan
+  auto-start/stop mengikuti project) — tidak ada proses tersembunyi yang jalan sendiri.
+- **`ProjectInfo.php_version`** (kolom SQLite baru, `NULL` = ikut default) — filesystem-scan tidak
+  bisa tahu ini (folder tidak punya opini soal versi PHP), jadi di-merge dari SQLite persis seperti
+  `last_opened_at`/`open_count`.
+
+### Tasks
+- [x] Migrasi SQLite: kolom `projects.php_version` (nullable, `NULL` = ikut versi aktif global)
+- [x] `db::projects`: `fetch_php_versions`/`set_php_version`, tidak ikut ditimpa saat rescan (pola
+      sama seperti history)
+- [x] `services::php_pool` — alokasi port murni & testable: `wanted()` (versi yang dipin → port,
+      deterministik dari sorted set), `port_for_project()` (fallback ke port default kalau tidak
+      dipin atau dipin ke versi yang sudah tidak terinstall)
+- [x] `services::php::exe_for(version)` — resolusi binary per-versi eksplisit, terpisah dari
+      `active_exe()` yang ikut versi global
+- [x] `ProcessService` digeneralisasi: `Launch::Php` bawa `Option<String>` (versi pinned), konstruktor
+      baru `php_pinned(version, port, sink)` untuk instance pooled — `id`/`name` jadi `String` owned
+      (dulu `&'static str`) supaya id dinamis seperti `"php-8.3.0"` bisa dibuat
+- [x] `ServiceManager` jadi bisa registrasi dinamis (`Mutex<Vec<ServiceHandle>>` + `PhpPoolFactory`),
+      `sync_php_pool()` reconcile instance pooled — tambah yang baru dibutuhkan, stop+buang yang
+      sudah tidak dipin siapa pun
+- [x] `services::vhosts::sync_vhosts` menghitung port per-project lewat `php_pool` dan menulisnya ke
+      `fastcgi_pass`, return `VhostSync.php_pool` buat di-reconcile `commands::projects` setiap kali
+      project di-scan/link/unlink/pin
+- [x] Command Tauri baru: `set_project_php_version` — tipis, delegasi ke `db::projects` +
+      re-sync vhosts/pool
+- [x] UI: tombol baru di `ProjectActionButtons.vue` (ikon terisi merah kalau sedang dipin) buka
+      `ProjectPhpVersionModal.vue` — pilih "Default" atau salah satu versi terinstall
+- [x] `TechIcon.vue` dan notifikasi crash di `real_services()` dikenali `"php-*"` sebagai PHP, bukan
+      jatuh ke initial-letter/id mentah
+- [x] Unit test: `php_pool` (alokasi port, stabilitas urutan, fallback versi tak terinstall),
+      `ProcessService::php_pinned`, `db::projects` (override survive rescan, clear balik ke default)
+- [x] `cargo fmt`/`cargo clippy -- -D warnings`/`cargo test --lib`, `npm run lint`/`type-check`
+      bersih — satu test gagal (`db_clients::tableplus_gets_a_connection_url_naming_the_database`)
+      sudah gagal sebelum perubahan ini, tidak terkait
+- [ ] **Belum diuji end-to-end lawan binary PHP sungguhan** — perlu minimal 2 versi PHP terinstall
+      di mesin nyata, pin project berbeda-beda, konfirmasi beberapa `php-cgi.exe` benar-benar jalan
+      bersamaan dan masing-masing vhost nyampe ke port yang benar (`curl` lewat nginx, bukan cuma
+      baca port dari `list_services`)
+- [ ] Filter log di `stores/logs.ts` (`LOG_SERVICES`) masih daftar statis `['nginx','php','mariadb']`
+      — instance pooled (`php-8.0.30`, dst.) tidak muncul sebagai opsi filter eksplisit (log-nya
+      sendiri tetap masuk, cuma tidak ada shortcut filter per-versi)
+- [ ] Nama tampilan `"PHP 8.3.0"` di kartu service belum dicek langsung di app sungguhan (cuma
+      diverifikasi lewat unit test `ServiceInfo`, bukan browser/UI manual)
+
+---
+
 ## Dependency ke Proyek Lain
 
-Fase 3.4 membutuhkan `GET /api/v1/version/latest` di `laravel-api` diubah dari shape lama (`{version, notes, published_at}`) ke manifest bertanda tangan sesuai [`docs/version-contract.md`](../version-contract.md) — endpoint-nya sendiri **sudah live**, ini soal ganti response shape + tambah kolom `signature`/`url` di `releases`, bukan bikin endpoint baru dari nol (lihat `api-documentation/telemetry-api.md` untuk kontraknya). Kode sisi app untuk fase ini sudah dibangun dan bisa diuji lokal lawan manifest tiruan (prosedur ada di doc kontrak itu); yang masih nunggu backend cuma verifikasi end-to-end lawan endpoint asli setelah shape-nya diubah. Fase 3.1–3.3, dan 3.5–3.10 sepenuhnya independen, tidak bergantung pada backend.
+Fase 3.4: `GET /api/v1/version/latest` di `laravel-api` **sudah** mengembalikan manifest bertanda tangan sesuai [`docs/version-contract.md`](../version-contract.md) (`VersionController`, kolom `signature`/`download_url` di `releases`). Yang masih tersisa cuma verifikasi end-to-end lawan rilis nyata — repo ini belum punya pipeline yang build+sign installer, jadi belum ada rilis sungguhan buat diuji; sementara kode sisi app sudah bisa diuji lokal lawan manifest tiruan (prosedur ada di doc kontrak itu). Fase 3.1, 3.3, 3.5–3.10, dan 3.11 sepenuhnya independen, tidak bergantung pada backend.
 
 **Catatan soal analytics lanjutan (v3 `rezure-dashboard`):** fitur traffic by hour, breakdown negara, cohort retention, dll di dashboard **tidak membutuhkan perubahan apapun di app ini** — semua data granular yang dibutuhkan (timestamp, OS version, metadata service) sudah terkirim sejak fondasi telemetry v2. Geolocation negara diproses di sisi server dari IP request yang masuk, bukan dikirim dari client.
 
 ## Urutan Pengerjaan yang Disarankan
 
 1. Fase 3.1 (One-click Tunneling) — independen, langsung menambah nilai bagi user
-2. Fase 3.6 (Bundled PHP Extension Toggle) — nempel langsung ke infrastruktur `php_ini.rs`/`php_ext.rs` yang sudah ada, scope kecil dan kontributor-friendly
-3. Fase 3.10 (Multi-Version Installer) — nyentuh halaman Switch dan `php_catalog.rs`, sebaiknya sebelum Fase 3.5.1 (Node.js switcher) yang bakal butuh katalognya
-4. Fase 3.7 (Xdebug sebagai Extension Resmi) — kelanjutan langsung dari 3.1b/3.6, sama-sama nyentuh `php_ext.rs`/`php_ini.rs`, cocok dikerjakan berurutan
-5. Fase 3.8 (Queue Worker Supervision) — pain point harian yang nempel di infra process management yang sudah ada
-6. Fase 3.2 (Docker Toggle Mode)
-7. Fase 3.3 (Project Health Dashboard)
+2. **Fase 3.11 (Per-Project PHP Version) — selesai duluan**, di luar urutan aslinya, karena jadi
+   fondasi yang dibutuhkan Fase 3.3 (project ↔ service/port mapping) dan nempel ke infrastruktur
+   yang sama dengan 3.6/3.7 (`php_ini.rs`/`php_ext.rs`/`vhosts.rs`)
+3. Fase 3.6 (Bundled PHP Extension Toggle) — nempel langsung ke infrastruktur `php_ini.rs`/`php_ext.rs` yang sudah ada, scope kecil dan kontributor-friendly
+4. Fase 3.10 (Multi-Version Installer) — nyentuh halaman Switch dan `php_catalog.rs`, sebaiknya sebelum Fase 3.5.1 (Node.js switcher) yang bakal butuh katalognya
+5. Fase 3.7 (Xdebug sebagai Extension Resmi) — kelanjutan langsung dari 3.1b/3.6, sama-sama nyentuh `php_ext.rs`/`php_ini.rs`, cocok dikerjakan berurutan
+6. Fase 3.8 (Queue Worker Supervision) — pain point harian yang nempel di infra process management yang sudah ada
+7. Fase 3.3 (Project Health Dashboard) — sekarang bisa langsung mulai dari mapping project↔PHP yang sudah ada dari Fase 3.11
 8. Fase 3.9 (Export/Import Workspace Config)
-9. Fase 3.4 (Auto-Update) — butuh endpoint `rezure-dashboard` siap, cocok dikerjakan setelah backend v2 matang
+9. Fase 3.4 (Auto-Update) — sisa cuma verifikasi E2E, butuh pipeline rilis nyata dulu

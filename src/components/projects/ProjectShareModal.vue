@@ -6,7 +6,9 @@ import LeafLoader from '@/components/common/LeafLoader.vue'
 const store = useProjectsStore()
 
 const project = computed(() => store.projects.find((p) => p.id === store.shareModalFor) ?? null)
-const url = computed(() => (store.shareModalFor ? (store.shareUrls[store.shareModalFor] ?? null) : null))
+const url = computed(() =>
+  store.shareModalFor ? (store.shareUrls[store.shareModalFor] ?? null) : null,
+)
 const isLoading = computed(
   () => store.shareModalFor !== null && store.sharingFor === store.shareModalFor,
 )
@@ -27,11 +29,7 @@ function stop() {
 /** Cycled while waiting on `share_project` — a single static "Loading…"
  *  reads as stuck once cloudflared's first-run download takes more than a
  *  couple of seconds, so this narrates roughly where the wait is going. */
-const LOADING_MESSAGES = [
-  'Setting up your project…',
-  'Starting the tunnel…',
-  'Almost done…',
-]
+const LOADING_MESSAGES = ['Setting up your project…', 'Starting the tunnel…', 'Almost done…']
 const loadingMessageIndex = ref(0)
 let loadingTimer: ReturnType<typeof setInterval> | null = null
 
@@ -110,7 +108,10 @@ onUnmounted(() => {
         </p>
       </template>
 
-      <p v-if="store.shareError" class="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
+      <p
+        v-if="store.shareError"
+        class="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+      >
         {{ store.shareError }}
       </p>
 

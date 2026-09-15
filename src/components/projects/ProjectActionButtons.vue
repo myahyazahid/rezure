@@ -2,7 +2,12 @@
 import { computed } from 'vue'
 import { useProjectsStore } from '@/stores/projects'
 
-const props = defineProps<{ projectId: string; domain: string; path: string }>()
+const props = defineProps<{
+  projectId: string
+  domain: string
+  path: string
+  phpVersion: string | null
+}>()
 
 const store = useProjectsStore()
 
@@ -119,6 +124,33 @@ function onShareClick() {
           d="M6 3v6a4 4 0 0 0 8 0V3M10 17a4 4 0 0 0 8 0v-2"
         />
         <circle cx="18" cy="13" r="2" />
+      </svg>
+    </button>
+
+    <!-- Pins this project to its own PHP version, distinct from the global
+         Switch — filled (not just outlined) once pinned, so a project
+         running on its own version is visible without opening the modal. -->
+    <button
+      type="button"
+      :class="[
+        'flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition',
+        props.phpVersion
+          ? 'border-red-300 bg-red-50 text-red-600 hover:bg-red-100 dark:border-red-800 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20'
+          : 'border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300 hover:text-neutral-800 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400 dark:hover:text-neutral-100',
+      ]"
+      :title="
+        props.phpVersion
+          ? `Pinned to PHP ${props.phpVersion} — click to change`
+          : 'Pin this project to its own PHP version'
+      "
+      @click="store.openPhpVersionModal(props.projectId)"
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="M8 4 4 12l4 8M16 4l4 8-4 8M14 4l-4 16"
+        />
       </svg>
     </button>
 

@@ -23,17 +23,21 @@ fn reload_nginx_if_running(manager: &ServiceManager) {
 }
 
 /// Brings the vhost files up to date with what's on disk and, when that
-/// actually changed something, makes a running nginx pick it up.
+/// actually changed something, makes a running nginx pick it up. Also
+/// reconciles the pooled PHP services (`ServiceManager::sync_php_pool`)
+/// against whatever versions the current projects pin — unconditionally,
+/// since that's cheap and idempotent even when nothing else changed.
 ///
-/// The `changed` check is what lets this be safe to call from
-/// `list_projects`, which runs on every visit to the Projects page: without
-/// it, simply opening that page would cycle nginx's workers.
+/// The `changed` check on the *vhost* reload is what lets this be safe to
+/// call from `list_projects`, which runs on every visit to the Projects
+/// page: without it, simply opening that page would cycle nginx's workers.
 ///
 /// Best-effort throughout — a vhost hiccup should leave a warning in the log,
 /// not fail the command the user actually asked for.
 fn sync_vhosts_and_reload(manager: &ServiceManager, context: &str) {
     match vhosts::sync_vhosts() {
         Ok(sync) => {
+            manager.sync_php_pool(&sync.php_pool);
             if sync.changed {
                 reload_nginx_if_running(manager);
             }
@@ -76,8 +80,37 @@ pub fn list_projects(
         }
         Err(err) => log::warn!("failed to load project history: {err}"),
     }
+    match db::projects::fetch_php_versions(&conn) {
+        Ok(versions) => {
+            for project in &mut detected {
+                if let Some(version) = versions.get(&project.id) {
+                    project.php_version = version.clone();
+                }
+            }
+        }
+        Err(err) => log::warn!("failed to load project PHP version overrides: {err}"),
+    }
 
     Ok(detected)
+}
+
+/// Pins (or, with `version: null`, clears back to the global default) the
+/// PHP version this one project is served by — see `services::php_pool` for
+/// what that makes possible. Re-syncs the vhosts (and, through it, the PHP
+/// pool) immediately, so the change is live without the user needing to
+/// revisit the Projects page first.
+#[tauri::command]
+pub fn set_project_php_version(
+    id: String,
+    version: Option<String>,
+    db_state: State<'_, DbState>,
+    manager: State<'_, ServiceManager>,
+) -> Result<(), AppError> {
+    let conn = db_state.0.lock().unwrap();
+    db::projects::set_php_version(&conn, &id, version.as_deref())?;
+    drop(conn);
+    sync_vhosts_and_reload(&manager, "after setting a project's PHP version");
+    Ok(())
 }
 
 /// Writes every detected project's domain into the OS hosts file, prompting

@@ -53,6 +53,15 @@ pub struct ProjectInfo {
     /// explanation rather than served, because serving it would mean
     /// emitting a config that stops every other site too.
     pub domain_invalid: bool,
+    /// This project's own pinned PHP version, if any — `None` means "follow
+    /// the global active version" (see `services::php`), same as a project
+    /// that's never set one. Filesystem-scanned fields can't carry this (a
+    /// folder has no opinion on PHP version), so it's filled in from SQLite
+    /// afterward, the same way `last_opened_at`/`open_count` are. See
+    /// `services::php_pool` for what setting this actually does — it can put
+    /// this project on a concurrently-running `php-cgi` distinct from every
+    /// other project's.
+    pub php_version: Option<String>,
 }
 
 fn now() -> i64 {
@@ -144,6 +153,43 @@ pub fn history_for(conn: &Connection, id: &str) -> Result<(Option<i64>, i64), Ap
     .map(|row| row.unwrap_or((None, 0)))
 }
 
+/// Every project's PHP version override, keyed by id, for merging into a
+/// freshly scanned list — same shape and purpose as [`fetch_history`].
+/// A project that's never set one, or was never scanned at all, simply
+/// isn't in the map; the caller treats that the same as an explicit `None`.
+pub fn fetch_php_versions(conn: &Connection) -> Result<HashMap<String, Option<String>>, AppError> {
+    let mut stmt = conn
+        .prepare("SELECT id, php_version FROM projects")
+        .map_err(db_err)?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })
+        .map_err(db_err)?;
+
+    let mut versions = HashMap::new();
+    for row in rows {
+        let (id, version) = row.map_err(db_err)?;
+        versions.insert(id, version);
+    }
+    Ok(versions)
+}
+
+/// Sets (or clears, with `None`) a project's PHP version override. Creates
+/// the row if `upsert_seen` hasn't run for it yet — same reasoning as
+/// `record_opened`, since a project the frontend already knows the id of may
+/// not have reached SQLite yet.
+pub fn set_php_version(conn: &Connection, id: &str, version: Option<&str>) -> Result<(), AppError> {
+    conn.execute(
+        "INSERT INTO projects (id, name, path, domain, stack, first_seen_at, last_opened_at, open_count, php_version)
+         VALUES (?1, '', '', '', '', ?2, NULL, 0, ?3)
+         ON CONFLICT(id) DO UPDATE SET php_version = excluded.php_version",
+        (id, now(), version),
+    )
+    .map_err(db_err)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,6 +208,7 @@ mod tests {
             kind: ProjectKind::Scanned,
             missing: false,
             domain_invalid: false,
+            php_version: None,
         }
     }
 
@@ -205,5 +252,51 @@ mod tests {
         let (last_opened, count) = history_for(&conn, "ghost").unwrap();
         assert_eq!(last_opened, None);
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn a_project_with_no_override_has_no_entry_in_the_php_version_map() {
+        let conn = init_migrations_for_test();
+        upsert_seen(&conn, &sample("blog")).unwrap();
+
+        let versions = fetch_php_versions(&conn).unwrap();
+        assert_eq!(versions.get("blog"), Some(&None));
+    }
+
+    #[test]
+    fn setting_a_php_version_survives_a_rescan() {
+        let conn = init_migrations_for_test();
+        upsert_seen(&conn, &sample("blog")).unwrap();
+        set_php_version(&conn, "blog", Some("8.3.0")).unwrap();
+
+        // A rescan re-upserts the same project — the override must survive
+        // it, same as history does.
+        upsert_seen(&conn, &sample("blog")).unwrap();
+
+        let versions = fetch_php_versions(&conn).unwrap();
+        assert_eq!(versions.get("blog"), Some(&Some("8.3.0".to_string())));
+    }
+
+    #[test]
+    fn clearing_a_php_version_sets_it_back_to_none() {
+        let conn = init_migrations_for_test();
+        upsert_seen(&conn, &sample("blog")).unwrap();
+        set_php_version(&conn, "blog", Some("8.3.0")).unwrap();
+        set_php_version(&conn, "blog", None).unwrap();
+
+        let versions = fetch_php_versions(&conn).unwrap();
+        assert_eq!(versions.get("blog"), Some(&None));
+    }
+
+    #[test]
+    fn set_php_version_creates_a_row_if_the_project_was_never_scanned() {
+        let conn = init_migrations_for_test();
+        set_php_version(&conn, "not-yet-scanned", Some("7.4.33")).unwrap();
+
+        let versions = fetch_php_versions(&conn).unwrap();
+        assert_eq!(
+            versions.get("not-yet-scanned"),
+            Some(&Some("7.4.33".to_string()))
+        );
     }
 }

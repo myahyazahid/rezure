@@ -183,6 +183,45 @@ export const useProjectsStore = defineStore('projects', () => {
     }
   }
 
+  const phpVersionError = ref<string | null>(null)
+  /** The project whose PHP version picker is open, or null — one at a time,
+   *  same shape as `doctorFor`/`shareModalFor` above. */
+  const phpVersionModalFor = ref<string | null>(null)
+  const settingPhpVersion = ref(false)
+
+  /**
+   * Pins (or, with `version: null`, clears back to the global default) the
+   * PHP version this project is served by. Distinct projects on distinct
+   * pinned versions each get their own concurrently-running `php-cgi` — see
+   * `services::php_pool` on the Rust side. Refetches the list so the card
+   * reflects the new port/version immediately.
+   */
+  async function setPhpVersion(id: string, version: string | null) {
+    settingPhpVersion.value = true
+    phpVersionError.value = null
+    try {
+      await invoke('set_project_php_version', { id, version })
+      await fetchAll()
+      phpVersionModalFor.value = null
+      return true
+    } catch (e) {
+      phpVersionError.value = errorMessage(e)
+      return false
+    } finally {
+      settingPhpVersion.value = false
+    }
+  }
+
+  function openPhpVersionModal(id: string) {
+    phpVersionError.value = null
+    phpVersionModalFor.value = id
+  }
+
+  function closePhpVersionModal() {
+    phpVersionModalFor.value = null
+    phpVersionError.value = null
+  }
+
   /**
    * Starts sharing a project publicly via a Cloudflare Quick Tunnel, or
    * reuses one already running for it. The first call for a fresh install
@@ -232,7 +271,9 @@ export const useProjectsStore = defineStore('projects', () => {
    */
   async function restoreShareStatus() {
     const entries = await Promise.all(
-      projects.value.map(async (p) => [p.id, await invoke<string | null>('sharing_status', { id: p.id })] as const),
+      projects.value.map(
+        async (p) => [p.id, await invoke<string | null>('sharing_status', { id: p.id })] as const,
+      ),
     )
     const active: Record<string, string> = {}
     for (const [id, url] of entries) {
@@ -248,6 +289,12 @@ export const useProjectsStore = defineStore('projects', () => {
     previewLink,
     linkProject,
     unlinkProject,
+    phpVersionError,
+    phpVersionModalFor,
+    settingPhpVersion,
+    setPhpVersion,
+    openPhpVersionModal,
+    closePhpVersionModal,
     syncingHosts,
     hostsError,
     openError,

@@ -113,6 +113,18 @@ pub fn active_exe() -> Result<PathBuf, AppError> {
         .ok_or(AppError::PhpVersionNotFound(active))
 }
 
+/// A specific version's own `php.exe`, regardless of which one is active —
+/// what a pooled, per-project `php-cgi` instance resolves against (see
+/// `services::php_pool`), as opposed to [`active_exe`], which always
+/// follows the global switch.
+pub fn exe_for(version: &str) -> Result<PathBuf, AppError> {
+    installed()
+        .into_iter()
+        .find(|runtime| runtime.version == version)
+        .map(|runtime| runtime.exe)
+        .ok_or_else(|| AppError::PhpVersionNotFound(version.to_string()))
+}
+
 /// Switches the active version. Rejects anything not on disk — installing
 /// is a separate, explicit step.
 pub fn set_active(version: &str) -> Result<Vec<PhpVersionStatus>, AppError> {

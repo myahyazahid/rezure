@@ -39,7 +39,11 @@ const MARKS: Record<string, { color: string; path: string }> = {
   },
 }
 
-const mark = computed(() => MARKS[props.id] ?? null)
+// A pooled PHP instance's id is "php-<version>" (see `services::php_pool`
+// on the Rust side) — it's still PHP, just not the default instance, so it
+// gets the same mark rather than falling through to a bare "P" initial.
+const markKey = computed(() => (props.id.startsWith('php-') ? 'php' : props.id))
+const mark = computed(() => MARKS[markKey.value] ?? null)
 const initial = computed(() => props.id.charAt(0).toUpperCase())
 </script>
 

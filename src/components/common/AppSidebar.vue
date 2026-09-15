@@ -35,9 +35,7 @@ const hasUnseenChangelog = computed(() => {
 // A binary update and a "new" changelog entry are independent signals (one
 // can exist without the other), but the nav row only has room for one dot —
 // it lights up if either is true.
-const hasChangelogAlert = computed(
-  () => hasUnseenChangelog.value || updateStore.available !== null,
-)
+const hasChangelogAlert = computed(() => hasUnseenChangelog.value || updateStore.available !== null)
 
 const navItems = computed(() => [
   {

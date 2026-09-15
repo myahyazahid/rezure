@@ -32,16 +32,17 @@ watch(
 
 <template>
   <section>
-    <h1 class="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">
-      Support Developer
-    </h1>
+    <h1 class="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Support Developer</h1>
 
     <p v-if="store.loading && !store.config" class="mt-6 text-sm text-neutral-500">Loading…</p>
 
     <template v-else-if="store.config">
       <p class="mt-1 text-sm text-neutral-500">
         {{ store.config.message }}
-        <RouterLink to="/about" class="font-semibold text-red-600 hover:underline dark:text-red-400">
+        <RouterLink
+          to="/about"
+          class="font-semibold text-red-600 hover:underline dark:text-red-400"
+        >
           Read the story
         </RouterLink>
       </p>

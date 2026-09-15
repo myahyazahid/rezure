@@ -19,6 +19,7 @@ use super::database;
 use super::db_engine;
 use super::db_profiles;
 use super::php_ini;
+use super::php_pool;
 use super::vhosts::{self, PHP_FASTCGI_PORT};
 use super::{Service, ServiceHandle, ServiceInfo, ServiceManager, ServiceStatus, CPU_HISTORY_LEN};
 use crate::utils::command::HiddenWindow;
@@ -79,7 +80,16 @@ enum Launch {
     /// Only useful behind a reverse proxy that sets `SCRIPT_FILENAME` per
     /// request (i.e. an Nginx vhost) — visiting the port directly does
     /// nothing, unlike the old built-in-server mode.
-    Php,
+    ///
+    /// `None` follows `services::php`'s global active version, like the one
+    /// PHP service that has always existed. `Some(version)` pins this
+    /// instance to a specific version regardless of what's globally active —
+    /// how a project can pin a version distinct from every other project's,
+    /// each getting its own concurrently-running responder. See
+    /// `services::php_pool` for how versions get ports and
+    /// `ServiceManager::sync_php_pool` for how pinned instances are
+    /// registered and torn down as projects change.
+    Php { version: Option<String> },
     /// `mysqld --datadir=<dir> --port=<port>`, where all three of the binary,
     /// the datadir and the port come from whichever profile is active (see
     /// `services::db_profiles`) — resolved at spawn time, not construction,
@@ -89,8 +99,8 @@ enum Launch {
 }
 
 pub struct ProcessService {
-    id: &'static str,
-    name: &'static str,
+    id: String,
+    name: String,
     category: &'static str,
     port: u16,
     launch: Launch,
@@ -125,8 +135,8 @@ impl ProcessService {
     pub fn nginx(log_sink: LogSink) -> Result<Self, AppError> {
         binaries::find("nginx")?; // fail fast if the manifest entry is ever missing
         Ok(Self {
-            id: "nginx",
-            name: "Nginx",
+            id: "nginx".to_string(),
+            name: "Nginx".to_string(),
             category: "Web server",
             port: 80,
             launch: Launch::Nginx,
@@ -138,16 +148,20 @@ impl ProcessService {
         })
     }
 
+    /// The default PHP service — follows `services::php`'s global active
+    /// version and always binds `PHP_FASTCGI_PORT`, exactly like the one PHP
+    /// service that has always existed. Every project that hasn't pinned a
+    /// version of its own is served by this one.
     pub fn php(log_sink: LogSink) -> Result<Self, AppError> {
         if binaries::family_packages("php").is_empty() {
             return Err(AppError::UnknownBinary("php".to_string()));
         }
         Ok(Self {
-            id: "php",
-            name: "PHP",
+            id: "php".to_string(),
+            name: "PHP".to_string(),
             category: "Runtime",
             port: PHP_FASTCGI_PORT,
-            launch: Launch::Php,
+            launch: Launch::Php { version: None },
             log_sink,
             crash_sink: no_op_crash_sink(),
             child: Mutex::new(None),
@@ -156,14 +170,37 @@ impl ProcessService {
         })
     }
 
+    /// A pooled PHP service pinned to one specific `version`, on its own
+    /// `port` — see `services::php_pool`. Unlike the other constructors this
+    /// doesn't fail on a missing install: the caller (`ServiceManager::sync_php_pool`,
+    /// fed from `php_pool::wanted`) only ever asks for a version it has
+    /// already confirmed is installed, so there is nothing left to check
+    /// here that wouldn't just be re-verifying the caller's own input.
+    pub fn php_pinned(version: &str, port: u16, log_sink: LogSink) -> Self {
+        Self {
+            id: php_pool::service_id(version),
+            name: format!("PHP {version}"),
+            category: "Runtime",
+            port,
+            launch: Launch::Php {
+                version: Some(version.to_string()),
+            },
+            log_sink,
+            crash_sink: no_op_crash_sink(),
+            child: Mutex::new(None),
+            sys: Mutex::new(System::new()),
+            cpu_history: Mutex::new(Vec::new()),
+        }
+    }
+
     /// The database service. Keeps the `mariadb` id it has always had — the
     /// frontend and stored logs key off it — while everything it actually
     /// runs now follows the active profile, which may well be MySQL.
     pub fn mariadb(log_sink: LogSink) -> Result<Self, AppError> {
         binaries::find("mariadb")?;
         Ok(Self {
-            id: "mariadb",
-            name: "Database",
+            id: "mariadb".to_string(),
+            name: "Database".to_string(),
             category: "Database",
             // Fallback only, for when no profile is resolvable — the real
             // port comes from the active profile via `current_port`.
@@ -187,11 +224,14 @@ impl ProcessService {
         self
     }
 
-    /// The version shown on the service card — for PHP and the database,
-    /// whichever one is active right now, not a fixed manifest entry.
+    /// The version shown on the service card — for the default PHP service
+    /// and the database, whichever one is active right now rather than a
+    /// fixed manifest entry; for a pinned PHP instance, always its own
+    /// pinned version.
     fn version(&self) -> String {
-        match self.launch {
-            Launch::Php => super::php::active_id(),
+        match &self.launch {
+            Launch::Php { version: Some(v) } => v.clone(),
+            Launch::Php { version: None } => super::php::active_id(),
             Launch::Nginx => binaries::find("nginx")
                 .map(|pkg| pkg.version.to_string())
                 .unwrap_or_default(),
@@ -240,9 +280,12 @@ impl ProcessService {
     /// recognize a leftover from a previous run), so the two can never
     /// drift apart.
     fn resolved_exe(&self) -> Result<PathBuf, AppError> {
-        match self.launch {
-            Launch::Php => {
-                let exe = super::php::active_exe()?;
+        match &self.launch {
+            Launch::Php { version } => {
+                let exe = match version {
+                    Some(v) => super::php::exe_for(v)?,
+                    None => super::php::active_exe()?,
+                };
                 Ok(exe
                     .parent()
                     .ok_or_else(|| AppError::Io("php.exe has no parent directory".to_string()))?
@@ -272,7 +315,7 @@ impl ProcessService {
                     .args(["-p".as_ref(), vhosts::nginx_runtime_dir()?.as_os_str()]);
                 cmd
             }
-            Launch::Php => {
+            Launch::Php { .. } => {
                 let ini_path = php_ini::ensure_php_ini(&exe)?;
                 let mut cmd = Command::new(&exe);
                 cmd.arg("-c")
@@ -344,7 +387,7 @@ impl ProcessService {
     fn bind_addr(&self) -> &'static str {
         match self.launch {
             Launch::Nginx => "0.0.0.0",
-            Launch::Php | Launch::Database => "127.0.0.1",
+            Launch::Php { .. } | Launch::Database => "127.0.0.1",
         }
     }
 
@@ -353,10 +396,20 @@ impl ProcessService {
     /// killed) — no shutdown signal needed, it just runs out of input.
     fn spawn_log_readers(&self, child: &mut Child) {
         if let Some(stdout) = child.stdout.take() {
-            spawn_log_reader(self.log_sink.clone(), self.id, LogStream::Stdout, stdout);
+            spawn_log_reader(
+                self.log_sink.clone(),
+                self.id.clone(),
+                LogStream::Stdout,
+                stdout,
+            );
         }
         if let Some(stderr) = child.stderr.take() {
-            spawn_log_reader(self.log_sink.clone(), self.id, LogStream::Stderr, stderr);
+            spawn_log_reader(
+                self.log_sink.clone(),
+                self.id.clone(),
+                LogStream::Stderr,
+                stderr,
+            );
         }
     }
 
@@ -375,7 +428,7 @@ impl ProcessService {
             Some(Ok(Some(_status))) => {
                 *child_guard = None;
                 drop(child_guard);
-                (self.crash_sink)(self.id);
+                (self.crash_sink)(&self.id);
                 None
             }
             Some(Err(_)) | None => {
@@ -414,14 +467,14 @@ impl ProcessService {
 
 fn spawn_log_reader(
     sink: LogSink,
-    service_id: &'static str,
+    service_id: String,
     stream: LogStream,
     reader: impl Read + Send + 'static,
 ) {
     std::thread::spawn(move || {
         for line in BufReader::new(reader).lines() {
             let Ok(line) = line else { break };
-            sink(service_id, stream, &line);
+            sink(&service_id, stream, &line);
         }
     });
 }
@@ -563,7 +616,7 @@ fn wait_for_exit(child: &mut Child, timeout: Duration) -> bool {
 
 impl Service for ProcessService {
     fn id(&self) -> &str {
-        self.id
+        &self.id
     }
 
     fn info(&self) -> ServiceInfo {
@@ -609,7 +662,7 @@ impl Service for ProcessService {
         }
 
         self.reap_orphan()?;
-        ensure_port_available(self.bind_addr(), self.current_port(), self.name)?;
+        ensure_port_available(self.bind_addr(), self.current_port(), &self.name)?;
 
         let mut cmd = self.command()?;
         let mut child = cmd.spawn().map_err(|e| AppError::ProcessSpawnFailed {
@@ -617,7 +670,7 @@ impl Service for ProcessService {
             reason: e.to_string(),
         })?;
 
-        if let Ok(path) = pid_file_path(self.id) {
+        if let Ok(path) = pid_file_path(&self.id) {
             let _ = fs::write(&path, child.id().to_string());
         }
 
@@ -634,7 +687,7 @@ impl Service for ProcessService {
                 // holding the datadir.
                 kill_process_tree(child.id());
                 let _ = child.wait();
-                if let Ok(path) = pid_file_path(self.id) {
+                if let Ok(path) = pid_file_path(&self.id) {
                     let _ = fs::remove_file(&path);
                 }
                 return Err(AppError::ProcessSpawnFailed {
@@ -700,7 +753,7 @@ impl ProcessService {
             let _ = child.wait();
         }
         drop(child_guard);
-        if let Ok(path) = pid_file_path(self.id) {
+        if let Ok(path) = pid_file_path(&self.id) {
             let _ = fs::remove_file(&path);
         }
         self.cpu_history.lock().unwrap().clear();
@@ -717,7 +770,7 @@ impl ProcessService {
     /// record is the only thing this can verify — it's never treated as
     /// license to kill whatever happens to be using the port.
     fn reap_orphan(&self) -> Result<(), AppError> {
-        let pid_path = pid_file_path(self.id)?;
+        let pid_path = pid_file_path(&self.id)?;
         let Ok(recorded) = fs::read_to_string(&pid_path) else {
             return Ok(());
         };
@@ -809,11 +862,14 @@ pub fn real_services(app: AppHandle) -> ServiceManager {
         if !settings.0.lock().unwrap().notify_on_crash {
             return;
         }
-        let name = match service_id {
-            "nginx" => "Nginx",
-            "php" => "PHP",
-            "mariadb" => "Database",
-            other => other,
+        let name: String = match service_id {
+            "nginx" => "Nginx".to_string(),
+            "php" => "PHP".to_string(),
+            "mariadb" => "Database".to_string(),
+            other => match other.strip_prefix("php-") {
+                Some(version) => format!("PHP {version}"),
+                None => other.to_string(),
+            },
         };
         use tauri_plugin_notification::NotificationExt;
         if let Err(err) = app
@@ -826,6 +882,11 @@ pub fn real_services(app: AppHandle) -> ServiceManager {
             log::warn!("failed to show crash notification for {service_id}: {err}");
         }
     });
+
+    // Kept for the PHP pool factory below — every pinned instance gets the
+    // same log/crash wiring as the default "php" service.
+    let php_pool_sink = sink.clone();
+    let php_pool_crash_sink = crash_sink.clone();
 
     let services: Vec<ServiceHandle> = vec![
         Arc::new(
@@ -844,7 +905,15 @@ pub fn real_services(app: AppHandle) -> ServiceManager {
                 .with_crash_sink(crash_sink),
         ),
     ];
-    ServiceManager::new(services)
+
+    let php_factory: super::PhpPoolFactory = Arc::new(move |version, port| {
+        Arc::new(
+            ProcessService::php_pinned(version, port, php_pool_sink.clone())
+                .with_crash_sink(php_pool_crash_sink.clone()),
+        )
+    });
+
+    ServiceManager::new(services).with_php_factory(php_factory)
 }
 
 #[cfg(test)]
@@ -856,6 +925,21 @@ mod tests {
         assert!(ProcessService::nginx(no_op_sink()).is_ok());
         assert!(ProcessService::php(no_op_sink()).is_ok());
         assert!(ProcessService::mariadb(no_op_sink()).is_ok());
+    }
+
+    /// A pooled instance never fails to construct — the caller already
+    /// confirmed the version is installed — and reports its own pinned
+    /// version and port rather than whatever's globally active.
+    #[test]
+    fn a_pinned_php_instance_reports_its_own_version_and_port() {
+        let service = ProcessService::php_pinned("8.3.0", 9002, no_op_sink());
+        let info = service.info();
+
+        assert_eq!(info.id, "php-8.3.0");
+        assert_eq!(info.name, "PHP 8.3.0");
+        assert_eq!(info.version, "8.3.0");
+        assert_eq!(info.port, 9002);
+        assert_eq!(info.status, ServiceStatus::Stopped);
     }
 
     #[test]
@@ -928,7 +1012,7 @@ mod tests {
     #[test]
     fn reap_orphan_is_a_no_op_when_theres_no_recorded_pid() {
         let service = ProcessService::mariadb(no_op_sink()).unwrap();
-        let pid_path = pid_file_path(service.id).unwrap();
+        let pid_path = pid_file_path(&service.id).unwrap();
         let _ = fs::remove_file(&pid_path);
 
         assert!(service.reap_orphan().is_ok());
@@ -937,7 +1021,7 @@ mod tests {
     #[test]
     fn reap_orphan_leaves_a_live_pid_alone_when_its_not_this_services_binary() {
         let service = ProcessService::nginx(no_op_sink()).unwrap();
-        let pid_path = pid_file_path(service.id).unwrap();
+        let pid_path = pid_file_path(&service.id).unwrap();
         fs::create_dir_all(pid_path.parent().unwrap()).unwrap();
         // The current test process is guaranteed alive, but it's the test
         // binary, not nginx.exe — reap_orphan must recognize the mismatch

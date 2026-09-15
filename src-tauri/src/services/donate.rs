@@ -193,7 +193,10 @@ async fn fetch_live(cached_last_modified: Option<&str>) -> Result<FetchOutcome, 
         .await
         .map_err(|e| AppError::Io(format!("unexpected response: {e}")))?;
 
-    Ok(FetchOutcome::Fresh(DonateConfig::from(config), last_modified))
+    Ok(FetchOutcome::Fresh(
+        DonateConfig::from(config),
+        last_modified,
+    ))
 }
 
 /// Fetches the donation config, refreshing the local cache on a fresh `200`

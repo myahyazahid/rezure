@@ -8,6 +8,7 @@ import NewProjectModal from '@/components/projects/NewProjectModal.vue'
 import LinkProjectModal from '@/components/projects/LinkProjectModal.vue'
 import ProjectDoctorModal from '@/components/projects/ProjectDoctorModal.vue'
 import ProjectShareModal from '@/components/projects/ProjectShareModal.vue'
+import ProjectPhpVersionModal from '@/components/projects/ProjectPhpVersionModal.vue'
 import BusyOverlay from '@/components/common/BusyOverlay.vue'
 
 const store = useProjectsStore()
@@ -191,6 +192,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
          is about one project at a time, and the store already says which. -->
     <ProjectDoctorModal />
     <ProjectShareModal />
+    <ProjectPhpVersionModal />
 
     <BusyOverlay :show="busy !== null" :label="busy?.label ?? ''" :detail="busy?.detail ?? ''" />
 
@@ -358,6 +360,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
             :project-id="project.id"
             :domain="project.domain"
             :path="project.path"
+            :php-version="project.phpVersion"
           />
           <button
             v-if="project.kind === 'linked'"
@@ -447,12 +450,13 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
                to be dropped rather than hidden, so a row without an unlink
                button pushed Open to the right and the actions never lined up
                down the list. -->
-          <div class="flex w-80 shrink-0 items-center justify-end gap-1">
+          <div class="flex w-88 shrink-0 items-center justify-end gap-1">
             <ProjectActionButtons
               :class="project.missing || project.domainInvalid ? 'invisible' : ''"
               :project-id="project.id"
               :domain="project.domain"
               :path="project.path"
+              :php-version="project.phpVersion"
             />
             <!-- Unlink only exists for linked projects: a scanned one is
                removed by moving its folder out of www, not from here. The
