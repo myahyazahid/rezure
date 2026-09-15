@@ -28,16 +28,37 @@ fn reload_nginx_if_running(manager: &ServiceManager) {
 /// against whatever versions the current projects pin — unconditionally,
 /// since that's cheap and idempotent even when nothing else changed.
 ///
+/// Reads each project's PHP version override from SQLite first — a
+/// filesystem scan alone can't know it (see `db::projects::fetch_php_versions`),
+/// and skipping this step would make every pin silently a no-op: every vhost
+/// would keep resolving to the global default port regardless of what it's
+/// pinned to.
+///
+/// `vhosts::sync_vhosts` is handed `ServiceManager::sync_php_pool` itself as
+/// its port resolver, rather than this function computing ports separately —
+/// `ServiceManager` is the only thing that knows which port an
+/// already-registered pooled service is really bound to, so routing every
+/// vhost write through it is what keeps a pinned project's port from ever
+/// drifting out from under its own running `php-cgi` (see
+/// `php_pool::assign_ports`'s doc comment for the bug this fixes).
+///
 /// The `changed` check on the *vhost* reload is what lets this be safe to
 /// call from `list_projects`, which runs on every visit to the Projects
 /// page: without it, simply opening that page would cycle nginx's workers.
 ///
 /// Best-effort throughout — a vhost hiccup should leave a warning in the log,
 /// not fail the command the user actually asked for.
-fn sync_vhosts_and_reload(manager: &ServiceManager, context: &str) {
-    match vhosts::sync_vhosts() {
+pub(crate) fn sync_vhosts_and_reload(manager: &ServiceManager, db_state: &DbState, context: &str) {
+    let php_versions = {
+        let conn = db_state.0.lock().unwrap();
+        db::projects::fetch_php_versions(&conn).unwrap_or_else(|err| {
+            log::warn!("failed to load PHP version overrides {context}: {err}");
+            Default::default()
+        })
+    };
+
+    match vhosts::sync_vhosts(&php_versions, |wanted| manager.sync_php_pool(wanted)) {
         Ok(sync) => {
-            manager.sync_php_pool(&sync.php_pool);
             if sync.changed {
                 reload_nginx_if_running(manager);
             }
@@ -56,7 +77,7 @@ pub fn list_projects(
     // A folder dropped into `www` by hand shows up in this scan and nowhere
     // else, so this is the only place its vhost gets written — and without
     // the reload nginx would keep 404ing it until its next restart.
-    sync_vhosts_and_reload(&manager, "while listing projects");
+    sync_vhosts_and_reload(&manager, &db_state, "while listing projects");
 
     // Best-effort, same reasoning: a SQLite hiccup shouldn't stop the list
     // from loading, just leave it without history for this call.
@@ -109,7 +130,7 @@ pub fn set_project_php_version(
     let conn = db_state.0.lock().unwrap();
     db::projects::set_php_version(&conn, &id, version.as_deref())?;
     drop(conn);
-    sync_vhosts_and_reload(&manager, "after setting a project's PHP version");
+    sync_vhosts_and_reload(&manager, &db_state, "after setting a project's PHP version");
     Ok(())
 }
 
@@ -127,8 +148,11 @@ pub fn set_project_php_version(
 /// the other leaves the user on a connection-refused page having done
 /// everything the UI asked of them.
 #[tauri::command]
-pub async fn sync_hosts(manager: State<'_, ServiceManager>) -> Result<bool, AppError> {
-    sync_vhosts_and_reload(&manager, "while syncing hosts");
+pub async fn sync_hosts(
+    manager: State<'_, ServiceManager>,
+    db_state: State<'_, DbState>,
+) -> Result<bool, AppError> {
+    sync_vhosts_and_reload(&manager, &db_state, "while syncing hosts");
 
     tokio::task::spawn_blocking(hosts::sync_hosts_entries)
         .await
@@ -155,10 +179,11 @@ pub async fn create_project(
     name: String,
     template: String,
     manager: State<'_, ServiceManager>,
+    db_state: State<'_, DbState>,
 ) -> Result<(), AppError> {
     scaffold::create_project(&name, &template).await?;
     // The new project needs a vhost before it can serve.
-    sync_vhosts_and_reload(&manager, "after creating a project");
+    sync_vhosts_and_reload(&manager, &db_state, "after creating a project");
     Ok(())
 }
 
@@ -224,18 +249,23 @@ pub fn link_project(
     name: Option<String>,
     domain: Option<String>,
     manager: State<'_, ServiceManager>,
+    db_state: State<'_, DbState>,
 ) -> Result<(), AppError> {
     projects::link(&path, name, domain)?;
     // The newly linked project needs a vhost before it can serve.
-    sync_vhosts_and_reload(&manager, "after linking");
+    sync_vhosts_and_reload(&manager, &db_state, "after linking");
     Ok(())
 }
 
 /// Forgets a linked project. The folder and everything in it is left
 /// exactly as it was — this only removes Rezure's pointer to it.
 #[tauri::command]
-pub fn unlink_project(id: String, manager: State<'_, ServiceManager>) -> Result<(), AppError> {
+pub fn unlink_project(
+    id: String,
+    manager: State<'_, ServiceManager>,
+    db_state: State<'_, DbState>,
+) -> Result<(), AppError> {
     projects::unlink(&id)?;
-    sync_vhosts_and_reload(&manager, "after unlinking");
+    sync_vhosts_and_reload(&manager, &db_state, "after unlinking");
     Ok(())
 }

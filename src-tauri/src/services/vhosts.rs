@@ -11,7 +11,7 @@
 //! `php-cgi -b 127.0.0.1:PHP_FASTCGI_PORT` (see `services::process`) — the
 //! standard substitute FastCGI responder on this platform.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -174,18 +174,35 @@ pub struct VhostSync {
     /// workers each time the user opened a tab; reloading only on a real
     /// change makes the reload free when nothing moved.
     pub changed: bool,
-    /// Every PHP version this pass' projects need a pooled instance for
-    /// (version -> port), straight from [`php_pool::wanted`] — the caller
-    /// feeds this to `ServiceManager::sync_php_pool` so a pinned version
-    /// shows up as a startable service the moment its vhost does.
-    pub php_pool: BTreeMap<String, u16>,
 }
 
 /// Rewrites every project's vhost to match the current scan of
 /// `projects::www_root()`, deleting `.conf` files for projects that no
 /// longer exist. Only touches the files on disk — call [`reload`] afterward,
 /// when [`VhostSync::changed`] is set, to make a running nginx pick it up.
-pub fn sync_vhosts() -> Result<VhostSync, AppError> {
+///
+/// `php_versions` is each project's SQLite-stored PHP version override
+/// (`db::projects::fetch_php_versions`) — a filesystem scan alone has no way
+/// to know it (a folder has no opinion on PHP version), same reason
+/// `commands::projects::list_projects` merges it in separately for the
+/// frontend. Without this, every project would resolve to the global
+/// default port regardless of what it's pinned to, silently making every
+/// pin a no-op.
+///
+/// `resolve_pool` is handed the set of versions this pass' projects need a
+/// pooled instance for (via `php_pool::wanted_versions`) and must return
+/// their actual ports — in practice always `ServiceManager::sync_php_pool`,
+/// the one thing that knows which port an already-registered pooled
+/// service is really bound to. Taking a closure rather than computing ports
+/// here directly is deliberate: an earlier version of this function
+/// computed them independently, and that's exactly what let a pinned
+/// project's port silently move out from under its own already-running
+/// `php-cgi` (see `php_pool::assign_ports`'s doc comment) — routing every
+/// caller through `ServiceManager` is what makes that impossible now.
+pub fn sync_vhosts(
+    php_versions: &HashMap<String, Option<String>>,
+    resolve_pool: impl FnOnce(&BTreeSet<String>) -> BTreeMap<String, u16>,
+) -> Result<VhostSync, AppError> {
     let vhosts = vhosts_dir()?;
     ensure_dir(&vhosts)?;
     let fastcgi_params = nginx_conf_dir()?.join("fastcgi_params");
@@ -193,17 +210,21 @@ pub fn sync_vhosts() -> Result<VhostSync, AppError> {
     // A linked project whose folder is gone gets no vhost — nginx would be
     // pointed at a root that doesn't exist. It stays in the list, though,
     // since the folder may simply be on a drive that isn't plugged in.
-    let current: Vec<_> = scan_projects()?
+    let mut current: Vec<_> = scan_projects()?
         .into_iter()
         .filter(|project| !project.missing && !project.domain_invalid)
         .collect();
-    let current_ids: std::collections::HashSet<&str> =
-        current.iter().map(|p| p.id.as_str()).collect();
+    for project in &mut current {
+        if let Some(version) = php_versions.get(&project.id) {
+            project.php_version = version.clone();
+        }
+    }
+    let current_ids: HashSet<&str> = current.iter().map(|p| p.id.as_str()).collect();
 
-    let installed: std::collections::BTreeSet<String> =
-        php::installed().into_iter().map(|r| r.version).collect();
+    let installed: BTreeSet<String> = php::installed().into_iter().map(|r| r.version).collect();
     let global_active = php::active_id();
-    let pool = php_pool::wanted(&current, &installed, &global_active);
+    let wanted = php_pool::wanted_versions(&current, &installed, &global_active);
+    let pool = resolve_pool(&wanted);
 
     let mut changed = false;
 
@@ -250,7 +271,6 @@ pub fn sync_vhosts() -> Result<VhostSync, AppError> {
     Ok(VhostSync {
         active: current.len(),
         changed,
-        php_pool: pool,
     })
 }
 

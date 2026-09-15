@@ -264,10 +264,45 @@ murni soal port allocation + service lifecycle, bukan batasan PHP itu sendiri.
 - [x] `cargo fmt`/`cargo clippy -- -D warnings`/`cargo test --lib`, `npm run lint`/`type-check`
       bersih — satu test gagal (`db_clients::tableplus_gets_a_connection_url_naming_the_database`)
       sudah gagal sebelum perubahan ini, tidak terkait
+- [x] **Bug ditemukan lewat pemakaian nyata, sudah diperbaiki**: `vhosts::sync_vhosts()` manggil
+      `services::projects::scan_projects()` (scan filesystem mentah) langsung — field `php_version`
+      di situ **selalu `None`**, karena override cuma di-merge dari SQLite di `commands::projects::list_projects`,
+      pass terpisah yang hasilnya tidak pernah sampai ke penulisan vhost. Akibatnya pin project
+      manapun **jadi no-op total**: config nginx selalu resolve ke port default, tidak peduli versi
+      apa yang dipilih di modal. Fix: `sync_vhosts()` sekarang menerima `php_versions: &HashMap<String, Option<String>>`
+      (dari `db::projects::fetch_php_versions`) dan meng-merge-nya sebelum hitung pool — `commands::projects::sync_vhosts_and_reload`
+      yang fetch dari SQLite dan mengoper ke bawah, jadi satu-satunya sumber kebenaran
+- [x] **Bug kedua, ditemukan pas maintainer nyoba pin 3+ project ke versi berbeda-beda lewat app
+      sungguhan**: alokasi port versi pooled dihitung ulang dari nol tiap `sync_vhosts` jalan —
+      posisi dalam sorted-set versi yang lagi dipin **saat itu juga**. Pin project baru ke versi
+      lain mengubah himpunan itu, dan port versi yang **sudah jalan** bisa ikut geser di config
+      nginx yang baru ditulis — padahal proses `php-cgi`-nya sendiri tetap di port lama. Nginx jadi
+      nunjuk ke port kosong → 502 buat project yang sama sekali tidak disentuh. Fix: alokasi port
+      dipindah jadi *sticky* dan otoritasnya cuma satu — `ServiceManager::sync_php_pool`
+      (`services/mod.rs`), satu-satunya yang tahu port asli tempat service pooled yang sudah
+      terdaftar itu bind. `php_pool::assign_ports` (murni, testable) reuse port yang sudah ada,
+      cuma alokasi port baru buat versi yang genar-genar baru. `vhosts::sync_vhosts` sekarang minta
+      port lewat closure (`resolve_pool`) yang dioper dari `commands::projects`, bukan hitung
+      sendiri — satu jalur data, nggak ada lagi dua tempat yang bisa saling beda pendapat soal port
+- [x] **Bug ketiga, ketemu dari `openssl_cipher_iv_length()` undefined di project yang dipin ke PHP
+      7.4**: `php_ini::ensure_php_ini` nulis **satu `php.ini` bersama** (`data/php/php.ini`) untuk
+      semua proses PHP. Aman selama cuma satu versi yang pernah jalan; begitu beberapa versi start
+      berdekatan, versi yang start belakangan bisa kebaca `extension_dir` versi lain, gagal load DLL
+      beda ABI, dan extension-nya hilang. Fix: satu ini per install
+      (`data/php/ini/<folder>-<hash path>/php.ini`), plus tulis ulang hanya kalau isinya berubah
+- [x] **Bug keempat, semua project 502 setelah restart app**: service pooled baru didaftarkan saat
+      halaman Projects dibuka, jadi "Start all" di halaman Services cuma menyalakan Nginx/PHP
+      default/Database — semua project yang dipin nunjuk ke port yang tidak ada prosesnya. Fix:
+      `lib.rs` menjalankan `sync_vhosts_and_reload` sekali saat startup, begitu `DbState` siap.
+      Sekalian: folder `data/php-<versi>` untuk pid file service pooled tidak pernah dibuat, jadi
+      pid-nya gagal ditulis diam-diam dan `reap_orphan` buta terhadap instance itu setelah crash —
+      sekarang foldernya dibuat sebelum menulis
 - [ ] **Belum diuji end-to-end lawan binary PHP sungguhan** — perlu minimal 2 versi PHP terinstall
       di mesin nyata, pin project berbeda-beda, konfirmasi beberapa `php-cgi.exe` benar-benar jalan
       bersamaan dan masing-masing vhost nyampe ke port yang benar (`curl` lewat nginx, bukan cuma
-      baca port dari `list_services`)
+      baca port dari `list_services`) — **prioritas tinggi**, kebukti dua kali lewat testing manual
+      pengguna, bukan test suite (`php_pool`'s unit test sudah benar dalam isolasi tapi tidak
+      nangkep salahnya pemanggil)
 - [ ] Filter log di `stores/logs.ts` (`LOG_SERVICES`) masih daftar statis `['nginx','php','mariadb']`
       — instance pooled (`php-8.0.30`, dst.) tidak muncul sebagai opsi filter eksplisit (log-nya
       sendiri tetap masuk, cuma tidak ada shortcut filter per-versi)

@@ -76,6 +76,14 @@ export const useServicesStore = defineStore('services', () => {
     return Promise.all(services.value.filter((s) => s.status === 'running').map((s) => stop(s.id)))
   }
 
+  /** Restarts every running service. Stopped ones stay stopped — that's
+   *  what Start all is for. */
+  function restartAll() {
+    return Promise.all(
+      services.value.filter((s) => s.status === 'running').map((s) => restart(s.id)),
+    )
+  }
+
   function isPending(id: string) {
     return pendingIds.value.has(id)
   }
@@ -94,6 +102,7 @@ export const useServicesStore = defineStore('services', () => {
     restart,
     startAll,
     stopAll,
+    restartAll,
     isPending,
   }
 })

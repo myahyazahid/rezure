@@ -355,6 +355,17 @@ pub fn run() {
 
                         app.manage(db::DbState::new(conn));
 
+                        // Registers the pooled PHP services for pinned projects
+                        // right away. Otherwise they only appear once the
+                        // Projects page is opened, and "Start all" on the
+                        // Services page silently skips them — every pinned
+                        // project then answers 502.
+                        commands::projects::sync_vhosts_and_reload(
+                            &app.state::<services::ServiceManager>(),
+                            &app.state::<db::DbState>(),
+                            "on startup",
+                        );
+
                         // Heartbeat recorder — queues a "still open" ping every 5
                         // minutes (and once immediately, since `interval`'s first
                         // tick fires right away). Only ever writes to the local

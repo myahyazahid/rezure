@@ -670,7 +670,13 @@ impl Service for ProcessService {
             reason: e.to_string(),
         })?;
 
+        // A pooled PHP service's folder (`data/php-<version>`) is never created
+        // by anything else, and without it this write fails silently — which
+        // leaves `reap_orphan` blind to that instance after a crash.
         if let Ok(path) = pid_file_path(&self.id) {
+            if let Some(dir) = path.parent() {
+                let _ = fs::create_dir_all(dir);
+            }
             let _ = fs::write(&path, child.id().to_string());
         }
 
@@ -1262,7 +1268,10 @@ mod tests {
         )
         .unwrap();
 
-        sync_vhosts().expect("project must be detected and its vhost written");
+        sync_vhosts(&std::collections::HashMap::new(), |_wanted| {
+            std::collections::BTreeMap::new()
+        })
+        .expect("project must be detected and its vhost written");
 
         let php = ProcessService::php(no_op_sink()).unwrap();
         let nginx = ProcessService::nginx(no_op_sink()).unwrap();

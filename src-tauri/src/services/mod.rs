@@ -32,7 +32,7 @@ pub mod telemetry;
 pub mod tunnel;
 pub mod vhosts;
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
@@ -172,39 +172,68 @@ impl ServiceManager {
         }
     }
 
-    /// Reconciles the pooled PHP services against `wanted` (version -> port,
-    /// from [`php_pool::wanted`](php_pool::wanted)): registers a pooled
-    /// instance for every version that doesn't have one yet, and stops and
-    /// unregisters any pooled instance no project pins anymore.
+    /// Reconciles the pooled PHP services against `wanted` (the versions at
+    /// least one project currently pins, from
+    /// [`php_pool::wanted_versions`](php_pool::wanted_versions)) and returns
+    /// the version -> port assignment that resulted.
     ///
-    /// Called after every vhost sync (see `commands::projects`), so a
-    /// project's override taking effect or being cleared shows up as a
-    /// startable/removed service card immediately — it does not start the
-    /// service itself, staying consistent with every other service here
-    /// being manually started.
+    /// This is the **one place** a pooled version's port is decided — not
+    /// `services::vhosts`, even though it's the one writing `fastcgi_pass`
+    /// lines. Only `ServiceManager` actually knows which port an
+    /// already-registered pooled service is bound to, so only it can keep
+    /// [`php_pool::assign_ports`] from moving a still-wanted version's port
+    /// out from under its already-running process — which is exactly what
+    /// happened when port assignment used to be computed independently,
+    /// position-in-a-sorted-set style, wherever a vhost needed one: pinning
+    /// a *third* project could silently reindex a *second*, already-running
+    /// one's port, leaving its vhost pointing at a port nothing was
+    /// listening on (a 502 for a project nobody had touched). Callers must
+    /// use the returned map — not recompute their own — for exactly that
+    /// reason.
     ///
-    /// A no-op if no factory was attached (every test `ServiceManager` and,
-    /// in principle, any future headless use).
-    pub fn sync_php_pool(&self, wanted: &BTreeMap<String, u16>) {
+    /// Registers a pooled instance for every version newly in `wanted`, and
+    /// stops and unregisters any pooled instance no project pins anymore —
+    /// it does not start a newly registered instance itself, staying
+    /// consistent with every other service here being manually started.
+    ///
+    /// A no-op (empty result) if no factory was attached (every test
+    /// `ServiceManager` and, in principle, any future headless use).
+    pub fn sync_php_pool(&self, wanted: &BTreeSet<String>) -> BTreeMap<String, u16> {
         let Some(factory) = &self.php_factory else {
-            return;
+            return BTreeMap::new();
         };
+
+        // What's already registered and the live port each is actually
+        // bound to — the only source `assign_ports` is allowed to keep a
+        // still-wanted version's port from.
+        let existing: BTreeMap<String, u16> = {
+            let services = self.services.lock().unwrap();
+            services
+                .iter()
+                .filter_map(|s| {
+                    s.id()
+                        .strip_prefix("php-")
+                        .map(|version| (version.to_string(), s.info().port))
+                })
+                .collect()
+        };
+        let assignment = php_pool::assign_ports(wanted, &existing);
 
         // Stopping a process can take a moment (see `ProcessService::stop`),
         // so it happens with the lock released rather than held for the
         // duration — nothing else needs to observe the half-removed state.
         let stale: Vec<ServiceHandle> = {
             let mut services = self.services.lock().unwrap();
-            let wanted_ids: HashSet<String> =
-                wanted.keys().map(|v| php_pool::service_id(v)).collect();
             let mut stale = Vec::new();
             services.retain(|service| {
-                let id = service.id();
-                if id.starts_with("php-") && !wanted_ids.contains(id) {
+                let Some(version) = service.id().strip_prefix("php-") else {
+                    return true;
+                };
+                if wanted.contains(version) {
+                    true
+                } else {
                     stale.push(service.clone());
                     false
-                } else {
-                    true
                 }
             });
             stale
@@ -219,12 +248,15 @@ impl ServiceManager {
         }
 
         let mut services = self.services.lock().unwrap();
-        let existing: HashSet<String> = services.iter().map(|s| s.id().to_string()).collect();
-        for (version, port) in wanted {
+        let already_registered: HashSet<String> =
+            services.iter().map(|s| s.id().to_string()).collect();
+        for (version, port) in &assignment {
             let id = php_pool::service_id(version);
-            if !existing.contains(&id) {
+            if !already_registered.contains(&id) {
                 services.push(factory(version, *port));
             }
         }
+
+        assignment
     }
 }

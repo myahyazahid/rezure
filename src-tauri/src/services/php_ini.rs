@@ -9,9 +9,10 @@
 //!
 //! Rezure writes two copies, because PHP gets started two different ways:
 //!
-//! - [`ensure_php_ini`] writes one under Rezure's own data folder and
-//!   returns its path to pass as `php -c` — that covers every process
-//!   Rezure spawns itself (the FastCGI service, Composer, scaffolding).
+//! - [`ensure_php_ini`] writes one under Rezure's own data folder — one per
+//!   PHP install, since several versions can now run at once — and returns
+//!   its path to pass as `php -c`. That covers every process Rezure spawns
+//!   itself (the FastCGI services, Composer, scaffolding).
 //! - [`ensure_cli_php_ini`] writes one *inside the install folder*, which
 //!   is the only copy a `php artisan …` typed into the user's own terminal
 //!   will ever read. `-c` isn't in play there: the global PATH switch
@@ -311,29 +312,67 @@ fn render(extension_dir: &Path, tmp: &Path, ca_bundle: Option<&Path>, conf_d: &P
 /// location, nothing in it is meant to be hand-edited, and this keeps it
 /// correct if the PHP version ever changes.
 pub fn ensure_php_ini(php_exe: &Path) -> Result<PathBuf, AppError> {
-    let dir = runtime_dir()?;
-    fs::create_dir_all(&dir)
-        .map_err(|e| AppError::Io(format!("could not create {}: {e}", dir.display())))?;
-
-    let tmp = ensure_tmp_dir()?;
-
     let php_dir = php_exe
         .parent()
         .ok_or_else(|| AppError::Io("php.exe has no parent directory".to_string()))?;
 
+    let dir = generated_ini_dir(php_dir)?;
+    fs::create_dir_all(&dir)
+        .map_err(|e| AppError::Io(format!("could not create {}: {e}", dir.display())))?;
+
+    let tmp = ensure_tmp_dir()?;
+    let content = render(
+        &extension_dir(php_dir),
+        &tmp,
+        ca_bundle().as_deref(),
+        &ensure_conf_d()?,
+    );
+
     let ini_path = dir.join("php.ini");
-    fs::write(
-        &ini_path,
-        render(
-            &extension_dir(php_dir),
-            &tmp,
-            ca_bundle().as_deref(),
-            &ensure_conf_d()?,
-        ),
-    )
-    .map_err(|e| AppError::Io(format!("could not write {}: {e}", ini_path.display())))?;
+    // Skipped when unchanged: rewriting truncates the file first, and another
+    // process of this same install (Composer, the doctor) may be reading it
+    // at that moment.
+    if fs::read_to_string(&ini_path).ok().as_deref() != Some(content.as_str()) {
+        fs::write(&ini_path, content)
+            .map_err(|e| AppError::Io(format!("could not write {}: {e}", ini_path.display())))?;
+    }
 
     Ok(ini_path)
+}
+
+/// The folder holding the generated ini for the install at `php_dir`.
+///
+/// One per install, not one shared file: `extension_dir` names that install's
+/// own `ext/`, and pooled versions (`services::php_pool`) start side by side.
+/// With a single file, PHP 7.4 starting a moment after PHP 8.5 wrote it read
+/// 8.5's `extension_dir`, failed to load `php_openssl.dll` built for another
+/// ABI, and served `openssl_cipher_iv_length()` as undefined.
+///
+/// Keyed by folder name plus a hash of the full path, since the managed and
+/// drop-in roots can each hold a folder with the same version name.
+fn generated_ini_dir(php_dir: &Path) -> Result<PathBuf, AppError> {
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    php_dir.hash(&mut hasher);
+
+    let name: String = php_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("php")
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+
+    Ok(runtime_dir()?
+        .join("ini")
+        .join(format!("{name}-{:016x}", hasher.finish())))
 }
 
 /// Writes `php.ini` into a PHP install folder, so the `php` a user types
@@ -488,10 +527,8 @@ pub fn repair_extension_dir(php_dir: &Path) -> Result<bool, AppError> {
 mod tests {
     use super::*;
 
-    /// `ensure_php_ini` writes one fixed path by design, so every test that
-    /// calls it has to take a turn: run in parallel, one test reads the file
-    /// while another is still writing it and sees a truncated ini. The failure
-    /// looks like a missing extension, which is a lie about the code.
+    /// Tests that touch the shared `conf.d` take turns: one test's fragment
+    /// would otherwise change what another test's generated ini leaves out.
     fn ini_guard() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
         LOCK.get_or_init(|| std::sync::Mutex::new(()))
@@ -596,8 +633,7 @@ mod tests {
         assert!(content.contains("extension_dir"));
         assert!(!content.contains('\\'), "paths must use forward slashes");
 
-        // Both tests write the same php.ini, so neither owns the cleanup.
-        let _ = fs::remove_file(&ini_path);
+        let _ = fs::remove_dir_all(ini_path.parent().unwrap());
     }
     /// The one directive a Laragon-era project silently depends on: without
     /// it, a stray byte before the response drops `Set-Cookie` and logins
@@ -623,8 +659,7 @@ mod tests {
         }
         assert!(tmp.is_dir(), "the temp dir php.ini points at must exist");
 
-        // Both tests write the same php.ini, so neither owns the cleanup.
-        let _ = fs::remove_file(&ini_path);
+        let _ = fs::remove_dir_all(ini_path.parent().unwrap());
     }
 
     /// The regression this guards: the PATH switch exposes the install
@@ -952,6 +987,30 @@ extension=curl
         );
 
         let _ = fs::remove_file(&fragment);
-        let _ = fs::remove_file(&ini_path);
+        let _ = fs::remove_dir_all(ini_path.parent().unwrap());
+    }
+
+    /// Two installs running at once must never share a generated ini — each
+    /// has to point at its own `ext/`.
+    #[test]
+    fn each_php_install_gets_its_own_generated_ini() {
+        let _guard = ini_guard();
+        let root =
+            std::env::temp_dir().join(format!("rezure-test-perinstall-{}", std::process::id()));
+        let old_exe = root.join("7.4.33").join("php.exe");
+        let new_exe = root.join("8.5.10").join("php.exe");
+
+        let old_ini = ensure_php_ini(&old_exe).unwrap();
+        let new_ini = ensure_php_ini(&new_exe).unwrap();
+
+        assert_ne!(old_ini, new_ini);
+        let old_content = fs::read_to_string(&old_ini).unwrap();
+        let new_content = fs::read_to_string(&new_ini).unwrap();
+        assert!(old_content.contains(&ini_value(&extension_dir(&root.join("7.4.33")))));
+        assert!(new_content.contains(&ini_value(&extension_dir(&root.join("8.5.10")))));
+        assert!(!old_content.contains("8.5.10"));
+
+        let _ = fs::remove_dir_all(old_ini.parent().unwrap());
+        let _ = fs::remove_dir_all(new_ini.parent().unwrap());
     }
 }

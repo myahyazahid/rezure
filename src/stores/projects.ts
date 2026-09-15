@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { LinkPreview, ProjectInfo, ProjectTemplate } from '@/types/project'
 import type { ProjectDiagnosis } from '@/types/php'
+import { useServicesStore } from '@/stores/services'
 
 function errorMessage(e: unknown): string {
   if (typeof e === 'string') return e
@@ -54,6 +55,9 @@ export const useProjectsStore = defineStore('projects', () => {
 
   async function fetchAll() {
     projects.value = await invoke<ProjectInfo[]>('list_projects')
+    // `list_projects` is also what registers/removes the pooled PHP service
+    // for each pinned version, so the services list is stale until refetched.
+    await useServicesStore().fetchAll()
   }
 
   /**
