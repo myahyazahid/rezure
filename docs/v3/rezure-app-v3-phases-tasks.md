@@ -35,7 +35,8 @@ langsung dari dalam app, tanpa berburu DLL.
 - [x] Aktifkan untuk web (ini generated) dan untuk terminal (baris aditif di ini versi)
 - [x] Tombol Install di requirements check project, lalu cek ulang otomatis
 - [ ] Uji klik pertama di app sungguhan (unduhan nyata lewat `AppHandle`, tidak bisa headless)
-- [ ] Putuskan cakupan katalog berikutnya (`imagick`? `xdebug`?) sebelum daftarnya jadi beban rawat
+- [ ] Putuskan cakupan katalog berikutnya (`imagick`? dst.) sebelum daftarnya jadi beban rawat —
+      `xdebug` sendiri sudah punya rencana sendiri, lihat [Fase 4.3](../v4/rezure-app-v4-phases-tasks.md#fase-43--xdebug-sebagai-extension-resmi) di v4
 
 ---
 
@@ -109,51 +110,6 @@ Konsolidasi status di bawah ini bisa langsung baca dari situ, bukan mulai dari n
 
 ---
 
-## Fase 3.7 — Xdebug sebagai Extension Resmi
-
-**Tujuan:** Tutup pertanyaan terbuka di Fase 3.1b ("imagick? xdebug?") dengan menjadikan Xdebug
-ekstensi PECL resmi yang bisa dipasang lewat app, plus konfigurasi step-debugging yang biasanya
-jadi hambatan tersendiri di luar sekadar "install DLL"-nya.
-
-### Tasks
-- [ ] Tambahkan `xdebug` ke katalog `php_ext.rs` (SHA-256 per branch PHP, mengikuti pola `redis`)
-- [ ] Xdebug beda dari extension biasa: butuh `zend_extension=xdebug` (bukan `extension=`), jadi `php_ini.rs` perlu jalur khusus buat baris ini
-- [ ] UI konfigurasi dasar: `xdebug.mode` (off/debug/develop), `xdebug.client_port`, `xdebug.client_host` — bukan raw ini editor, cukup pilihan umum yang paling sering dipakai
-- [ ] Auto-generate `.vscode/launch.json` di root project saat Xdebug diaktifkan untuk project itu (kalau folder `.vscode` belum ada/belum punya konfigurasi PHP debug) — nilai tambah yang gak ditawarkan Laragon maupun kompetitor lain
-- [ ] Peringatan performa: aktif tapi `xdebug.mode=off` tetap ada overhead loading modul — jelaskan di UI, jangan nyalain semua mode sekaligus by default
-
----
-
-## Fase 3.8 — Queue Worker Supervision
-
-**Tujuan:** `php artisan queue:work` gak lagi jadi proses yang ditinggal manual di satu terminal
-yang gampang ke-close atau kelupaan — disupervisi persis kayak service lain.
-
-### Tasks
-- [ ] Manfaatkan infra process management yang sama dengan `Service` trait (start/stop/restart, log lewat `ServiceLogPanel.vue`)
-- [ ] Scope per-project, bukan global — satu project bisa punya worker sendiri, jalan/berhenti independen dari project lain
-- [ ] Deteksi otomatis project mana yang punya `artisan` (Laravel) sebagai syarat munculnya opsi ini
-- [ ] UI: tombol "Start Queue Worker" di project card/detail (dekat tombol Open/Terminal yang sudah ada), dengan indikator running/stopped
-- [ ] Opsi dasar: pilih koneksi queue (`--queue=default`, dst) kalau project punya lebih dari satu — sisanya pakai default `artisan`
-- [ ] Worker ikut berhenti kalau PHP di-restart/di-switch versi (proses lama sudah tidak valid), dengan notice ke user — bukan dibiarkan jadi proses PHP versi lama yang nyangkut
-
----
-
-## Fase 3.9 — Export/Import Workspace Config
-
-**Tujuan:** Manfaatkan filosofi portable Rezure (semua di `C:\rezure`, config berbasis file/SQLite,
-bukan registry) — pindah ke laptop baru atau nge-share setup ke tim gak perlu setup ulang manual
-satu-satu.
-
-### Tasks
-- [ ] Export: kumpulkan project list (`links.json`), vhosts config, `conf.d/*.ini` milik user, dan `settings.json` jadi satu file arsip (`.zip`)
-- [ ] **Tidak** menyertakan binary PHP/nginx/MariaDB itu sendiri (terlalu besar, dan sudah bisa di-download ulang) — cukup referensi versi yang dipakai, diunduh ulang di mesin tujuan kalau belum ada
-- [ ] Import: baca arsip, tampilkan preview apa yang bakal ditambahkan/ditimpa sebelum eksekusi (terutama kalau ada domain yang bentrok dengan project yang sudah ada di mesin tujuan)
-- [ ] Path absolut project (`C:\Users\...`) di mesin lama jelas gak valid di mesin baru — import harus nanya lokasi baru per project atau nawarin re-link manual, bukan gagal diam-diam
-- [ ] Tombol Export/Import ditaruh di halaman Settings
-
----
-
 ## Fase 3.10 — Multi-Version Installer untuk Semua Runtime
 
 **Tujuan:** Tombol "Install version" di halaman Switch berlaku untuk semua runtime, bukan cuma PHP.
@@ -174,15 +130,19 @@ Pembagian perannya tegas:
 Modal harus digeneralisasi **lebih dulu**, baru dropdown dibersihkan. Kalau dibalik, Nginx/MariaDB/Composer kehilangan satu-satunya jalur install yang mereka punya.
 
 ### Tasks
-- [ ] Modal install jadi runtime-aware: pilih runtime dulu, lalu versi — menggantikan `InstallPhpVersionModal` yang PHP-only
-- [ ] Angkat `php_catalog.rs` jadi abstraksi katalog per-runtime. Fondasinya sudah generic: `binaries::install_archive()` sudah dipakai bersama oleh php_catalog + php_ext, dan `binaries::discover(family, exe_name)` sudah per-family (malah sudah ada test untuk MariaDB) — yang perlu ditulis tinggal parser per sumber
-- [ ] Dropdown jadi switch-only: `pick()` tidak lagi emit `install`, dan entry yang belum terinstall tidak dilistkan sama sekali
-- [ ] Row tetap menampilkan progress bar install yang sedang jalan — install dimulai dari modal, modalnya boleh ditutup, progressnya dilaporkan row (pola yang sudah ada untuk PHP, tinggal disamakan untuk runtime lain)
-- [ ] Runtime dengan 0 versi terinstall: dropdown-nya disabled dan mengarahkan ke tombol Install, bukan dropdown kosong yang bisa diklik
-- [ ] Katalog MariaDB dari REST API `downloads.mariadb.org/rest-api/mariadb/<branch>/` — `sha256sum` sudah inline di response, filter `package_type: "ZIP file"` dan buang varian `-debugsymbols`
-- [ ] Katalog Composer dari `getcomposer.org/versions` — checksum ada di sidecar `.sha256sum` per versi (fetch kedua)
-- [ ] Katalog Node.js dari `nodejs.org/dist/index.json` + `SHASUMS256.txt` per versi — sekalian jadi fondasi Fase 3.5.1 (Node.js version switching)
-- [ ] Nginx: lihat open question di bawah, jangan diikutkan sebelum diputuskan
+- [x] Modal install jadi runtime-aware: pilih runtime dulu, lalu versi — `InstallVersionModal.vue` (baru) menggantikan `InstallPhpVersionModal.vue` yang PHP-only (dihapus). Step 1 grid pilih runtime (PHP/Nginx/MariaDB/Composer/Node.js — Python sengaja tidak diikutkan, lihat catatan Python di bawah), step 2 tampilkan katalog runtime itu lewat `CatalogVersionList.vue` (baru, presentational, dipakai bersama oleh 4 dari 5 runtime); folder-add PHP ("Add from folder…") dipindah apa adanya ke dalam modal ini
+- [x] Angkat `php_catalog.rs` jadi abstraksi katalog per-runtime — bukan lewat satu trait generik (API tiap sumber beda bentuk: MariaDB per-branch, Composer sidecar checksum, Node butuh filter LTS), tapi lewat modul paralel dengan bentuk struct yang sama (`version/latest/installed` + field opsional) mengikuti pola `php_catalog.rs` sendiri: `mariadb_catalog.rs`, `composer_catalog.rs`, `node_catalog.rs` (baru). `binaries::install_archive()`/`binaries::discover()` dipakai ulang persis seperti dugaan task ini
+- [x] Dropdown jadi switch-only: `RuntimeSwitchRow.vue`'s `pick()` tidak lagi emit `install` (emit `install` dihapus total dari komponen), dan `installedVersions` (computed baru) memfilter entry yang belum terinstall — tidak pernah dilistkan sama sekali
+- [x] Row tetap menampilkan progress bar install yang sedang jalan — pola yang sudah ada untuk PHP disamakan ke MariaDB/Composer/Node lewat `installingXxxVersion`/`progressFor` di masing-masing store (`stores/binaries.ts`, `stores/composer.ts`, `stores/node.ts` baru)
+- [x] Runtime dengan 0 versi terinstall: tombol dropdown di-disable (`installedVersions.length === 0`) dengan title mengarahkan ke tombol "Install version", bukan dropdown kosong yang bisa diklik
+- [x] Katalog MariaDB dari REST API `downloads.mariadb.org/rest-api/mariadb/<branch>/` — `services::mariadb_catalog`, daftar branch di-hardcode (`10.6`/`10.11`/`11.4`/`11.8`, perlu di-bump manual kalau MariaDB rilis branch baru) karena API-nya tidak punya endpoint "list semua branch" yang layak diandalkan; checksum SHA-256 tetap dari response live, bukan pinned manual
+- [x] Katalog Composer dari `getcomposer.org/versions` — `services::composer_catalog` + `services::composer` (baru, install/active-version tracking, `composer.phar` sekarang per-versi di `bin/composer/<versi>/` bukan satu file flat tanpa checksum seperti sebelumnya). Checksum dicoba dari field JSON dulu, fallback ke sidecar `.sha256sum` kalau field-nya kosong — dua-duanya di-support sekaligus karena skema asli `getcomposer.org/versions` tidak bisa dipastikan tanpa akses live
+- [x] Katalog Node.js dari `nodejs.org/dist/index.json` + `SHASUMS256.txt` per versi — `services::node_catalog`, cuma tampilkan versi terbaru tiap LTS line + 1 Current terbaru (bukan semua ratusan rilis). **Instalasi doang** (`bin/node/<versi>/node.exe` muncul di disk, checksum-verified) — belum ada PATH/per-project switching, itu memang fondasi buat Fase 3.5.1 sesuai rencana awal, bukan bagian dari task ini
+- [ ] Nginx: masih sesuai open question di bawah, **belum diputuskan/diikutkan** — tapi modalnya sudah siap kalau nanti ada katalog: step Nginx di `InstallVersionModal.vue` sekarang menampilkan satu entry pinned dari `binaries::MANIFEST` (jalur yang sudah ada), tinggal diganti ke katalog beneran begitu opsi (b)/(c) diputuskan
+
+**Belum diuji lawan API sungguhan** — `mariadb_catalog.rs`/`composer_catalog.rs`/`node_catalog.rs` ditulis tanpa akses jaringan dari sesi kerja ini, jadi parsing-nya berdasarkan dokumentasi/pengetahuan bentuk API masing-masing, bukan response nyata yang sudah dicek. Test unit-nya pakai sample JSON hasil rekonstruksi (didokumentasikan begitu di tiap file), dan tiap modul punya test `#[ignore]` (`fetches_the_real_index`) yang harus dijalankan manual lawan API sungguhan sebelum rilis — kalau bentuk field-nya meleset, gejalanya "katalog kosong/error" (aman, bukan install tanpa verifikasi), tapi tetap perlu dikonfirmasi.
+
+**Python sengaja tidak diikutkan** — python.org tidak menerbitkan index rilis dengan SHA-256 yang bisa diambil otomatis (API publiknya cuma expose MD5), persis masalah yang sama dengan Nginx di bawah. Ditunda sampai ada keputusan serupa opsi (a)/(b)/(c) untuk Python, bukan diselesaikan diam-diam dengan checksum yang lebih lemah.
 
 ### Catatan: MariaDB itu stateful
 
@@ -211,7 +171,7 @@ satu versi PHP aktif untuk seluruh app; mengganti versi berarti stop-start satu 
 yang sama, jadi dua project butuh dua versi berbeda tidak mungkin dijalankan bersamaan.
 
 Bukan item dari roadmap awal — ditambahkan setelah pertanyaan langsung dari maintainer soal
-kelayakan isolated-mode ala Laragon Pro. Dikerjakan lebih dulu dari 3.6/3.7/3.10 karena ternyata
+kelayakan isolated-mode ala Laragon Pro. Dikerjakan lebih dulu dari 3.6/3.10 karena ternyata
 jadi fondasi yang juga dibutuhkan [Fase 3.3](#fase-33--project-health-dashboard) (project ↔
 service/port mapping yang tadinya belum ada sama sekali).
 
@@ -333,7 +293,7 @@ murni soal port allocation + service lifecycle, bukan batasan PHP itu sendiri.
 
 ## Dependency ke Proyek Lain
 
-Fase 3.4: `GET /api/v1/version/latest` di `laravel-api` **sudah** mengembalikan manifest bertanda tangan sesuai [`docs/version-contract.md`](../version-contract.md) (`VersionController`, kolom `signature`/`download_url` di `releases`). Yang masih tersisa cuma verifikasi end-to-end lawan rilis nyata — repo ini belum punya pipeline yang build+sign installer, jadi belum ada rilis sungguhan buat diuji; sementara kode sisi app sudah bisa diuji lokal lawan manifest tiruan (prosedur ada di doc kontrak itu). Fase 3.1, 3.3, 3.5–3.10, dan 3.11 sepenuhnya independen, tidak bergantung pada backend.
+Fase 3.4: `GET /api/v1/version/latest` di `laravel-api` **sudah** mengembalikan manifest bertanda tangan sesuai [`docs/version-contract.md`](../version-contract.md) (`VersionController`, kolom `signature`/`download_url` di `releases`). Yang masih tersisa cuma verifikasi end-to-end lawan rilis nyata — repo ini belum punya pipeline yang build+sign installer, jadi belum ada rilis sungguhan buat diuji; sementara kode sisi app sudah bisa diuji lokal lawan manifest tiruan (prosedur ada di doc kontrak itu). Fase 3.1, 3.3, 3.5, 3.6, 3.10, dan 3.11 sepenuhnya independen, tidak bergantung pada backend.
 
 **Catatan soal analytics lanjutan (v3 `rezure-dashboard`):** fitur traffic by hour, breakdown negara, cohort retention, dll di dashboard **tidak membutuhkan perubahan apapun di app ini** — semua data granular yang dibutuhkan (timestamp, OS version, metadata service) sudah terkirim sejak fondasi telemetry v2. Geolocation negara diproses di sisi server dari IP request yang masuk, bukan dikirim dari client.
 
@@ -342,11 +302,8 @@ Fase 3.4: `GET /api/v1/version/latest` di `laravel-api` **sudah** mengembalikan 
 1. Fase 3.1 (One-click Tunneling) — independen, langsung menambah nilai bagi user
 2. **Fase 3.11 (Per-Project PHP Version) — selesai duluan**, di luar urutan aslinya, karena jadi
    fondasi yang dibutuhkan Fase 3.3 (project ↔ service/port mapping) dan nempel ke infrastruktur
-   yang sama dengan 3.6/3.7 (`php_ini.rs`/`php_ext.rs`/`vhosts.rs`)
+   yang sama dengan 3.6 (`php_ini.rs`/`php_ext.rs`/`vhosts.rs`)
 3. Fase 3.6 (Bundled PHP Extension Toggle) — nempel langsung ke infrastruktur `php_ini.rs`/`php_ext.rs` yang sudah ada, scope kecil dan kontributor-friendly
 4. Fase 3.10 (Multi-Version Installer) — nyentuh halaman Switch dan `php_catalog.rs`, sebaiknya sebelum Fase 3.5.1 (Node.js switcher) yang bakal butuh katalognya
-5. Fase 3.7 (Xdebug sebagai Extension Resmi) — kelanjutan langsung dari 3.1b/3.6, sama-sama nyentuh `php_ext.rs`/`php_ini.rs`, cocok dikerjakan berurutan
-6. Fase 3.8 (Queue Worker Supervision) — pain point harian yang nempel di infra process management yang sudah ada
-7. Fase 3.3 (Project Health Dashboard) — sekarang bisa langsung mulai dari mapping project↔PHP yang sudah ada dari Fase 3.11
-8. Fase 3.9 (Export/Import Workspace Config)
-9. Fase 3.4 (Auto-Update) — sisa cuma verifikasi E2E, butuh pipeline rilis nyata dulu
+5. Fase 3.3 (Project Health Dashboard) — sekarang bisa langsung mulai dari mapping project↔PHP yang sudah ada dari Fase 3.11
+6. Fase 3.4 (Auto-Update) — sisa cuma verifikasi E2E, butuh pipeline rilis nyata dulu

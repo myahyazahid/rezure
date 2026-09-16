@@ -207,6 +207,55 @@ Tidak ada — sepenuhnya perubahan internal `rezureapp`. Dependency baru satu-sa
 
 ---
 
+## Fase 4.3 — Xdebug sebagai Extension Resmi
+
+**Beda kelas dari Fase 4.1/4.2 di atas** — bukan riset arsitektur, task-nya sudah siap kerja
+langsung. Dipindah ke v4 dari v3 (bekas Fase 3.7) atas permintaan maintainer, bukan karena
+mengubah asumsi inti seperti dua fase lain di file ini.
+
+**Tujuan:** Tutup pertanyaan terbuka di [Fase 3.1b](../v3/rezure-app-v3-phases-tasks.md#fase-31b--pecl-extension-installer-redis)
+("`imagick`? dst.") dengan menjadikan Xdebug ekstensi PECL resmi yang bisa dipasang lewat app,
+plus konfigurasi step-debugging yang biasanya jadi hambatan tersendiri di luar sekadar
+"install DLL"-nya.
+
+### Tasks
+- [ ] Tambahkan `xdebug` ke katalog `php_ext.rs` (SHA-256 per branch PHP, mengikuti pola `redis`)
+- [ ] Xdebug beda dari extension biasa: butuh `zend_extension=xdebug` (bukan `extension=`), jadi
+      `php_ini.rs` perlu jalur khusus buat baris ini — pola ini sudah ada presedennya:
+      `services::php_ext_toggle` (v3 Fase 3.6) sudah menangani kasus yang sama persis untuk
+      `opcache`, lihat `ExtensionMeta::zend_extension` dan lookup di `php_ini::render()`
+- [ ] UI konfigurasi dasar: `xdebug.mode` (off/debug/develop), `xdebug.client_port`, `xdebug.client_host` — bukan raw ini editor, cukup pilihan umum yang paling sering dipakai
+- [ ] Auto-generate `.vscode/launch.json` di root project saat Xdebug diaktifkan untuk project itu (kalau folder `.vscode` belum ada/belum punya konfigurasi PHP debug) — nilai tambah yang gak ditawarkan Laragon maupun kompetitor lain
+- [ ] Peringatan performa: aktif tapi `xdebug.mode=off` tetap ada overhead loading modul — jelaskan di UI, jangan nyalain semua mode sekaligus by default
+
+### Dependency ke Proyek Lain
+
+Tidak ada — sepenuhnya perubahan internal `rezureapp`, sama seperti Fase 4.1.
+
+---
+
+## Fase 4.4 — Queue Worker Supervision
+
+**Sama seperti Fase 4.3** — bukan riset arsitektur, task-nya sudah siap kerja langsung. Dipindah
+ke v4 dari v3 (bekas Fase 3.8) atas permintaan maintainer.
+
+**Tujuan:** `php artisan queue:work` gak lagi jadi proses yang ditinggal manual di satu terminal
+yang gampang ke-close atau kelupaan — disupervisi persis kayak service lain.
+
+### Tasks
+- [ ] Manfaatkan infra process management yang sama dengan `Service` trait (start/stop/restart, log lewat `ServiceLogPanel.vue`)
+- [ ] Scope per-project, bukan global — satu project bisa punya worker sendiri, jalan/berhenti independen dari project lain
+- [ ] Deteksi otomatis project mana yang punya `artisan` (Laravel) sebagai syarat munculnya opsi ini
+- [ ] UI: tombol "Start Queue Worker" di project card/detail (dekat tombol Open/Terminal yang sudah ada), dengan indikator running/stopped
+- [ ] Opsi dasar: pilih koneksi queue (`--queue=default`, dst) kalau project punya lebih dari satu — sisanya pakai default `artisan`
+- [ ] Worker ikut berhenti kalau PHP di-restart/di-switch versi (proses lama sudah tidak valid), dengan notice ke user — bukan dibiarkan jadi proses PHP versi lama yang nyangkut
+
+### Dependency ke Proyek Lain
+
+Tidak ada — sepenuhnya perubahan internal `rezureapp`.
+
+---
+
 ## Status
 
 - **Fase 4.1** — belum ada task checklist resmi. Langkah berikutnya: tulis proposal desain
@@ -224,3 +273,11 @@ Tidak ada — sepenuhnya perubahan internal `rezureapp`. Dependency baru satu-sa
   tidak disimpan (ditanya sekali per sesi, disimpan di memori saja), client engine yang tidak
   cocok **tidak** ditolak di awal melainkan dipakai dengan fallback ke engine satunya, dan dump
   remote mendarat di folder `dumps` yang sama dengan prefix nama connection.
+- **Fase 4.3** — belum dikerjakan, task-nya sudah siap (dipindah apa adanya dari v3 Fase 3.7).
+  Fondasi `zend_extension=` untuk directive khusus sudah ada duluan lewat `php_ext_toggle`
+  (v3 Fase 3.6, dibuat untuk `opcache`) — tinggal dipakai ulang buat `xdebug`, bukan dibangun
+  dari nol.
+- **Fase 4.4** — belum dikerjakan, task-nya sudah siap (dipindah apa adanya dari v3 Fase 3.8).
+  Pola registrasi/unregistrasi service secara dinamis saat runtime sudah ada duluan lewat
+  `ServiceManager::sync_php_pool` (v3 Fase 3.11, dibuat untuk instance PHP pooled per-project) —
+  worker per-project bisa ikut pola yang sama, bukan dibangun dari nol.

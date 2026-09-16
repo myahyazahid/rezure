@@ -4,10 +4,11 @@ import { usePhpStore } from '@/stores/php'
 import { useBinariesStore } from '@/stores/binaries'
 import { useServicesStore } from '@/stores/services'
 import { useComposerStore } from '@/stores/composer'
+import { useNodeStore } from '@/stores/node'
 import RuntimeSwitchRow, {
   type RuntimeVersionEntry,
 } from '@/components/services/RuntimeSwitchRow.vue'
-import InstallPhpVersionModal from '@/components/services/InstallPhpVersionModal.vue'
+import InstallVersionModal from '@/components/services/InstallVersionModal.vue'
 import PhpPathLinkCard from '@/components/services/PhpPathLinkCard.vue'
 import PhpConfigCard from '@/components/services/PhpConfigCard.vue'
 import BusyOverlay from '@/components/common/BusyOverlay.vue'
@@ -16,6 +17,7 @@ const phpStore = usePhpStore()
 const binariesStore = useBinariesStore()
 const servicesStore = useServicesStore()
 const composerStore = useComposerStore()
+const nodeStore = useNodeStore()
 
 const showInstallModal = ref(false)
 
@@ -33,6 +35,10 @@ async function switchPhp(id: string) {
 // Kept-alive view: fires on first mount and on every return to the page.
 onActivated(() => {
   composerStore.fetchStatus()
+  composerStore.fetchVersions()
+  binariesStore.fetchAll()
+  binariesStore.fetchMariaDbVersions()
+  nodeStore.fetchVersions()
   phpStore.fetchDropInDir()
   phpStore.fetchConfigDir()
   phpStore.fetchPathStatus()
@@ -46,15 +52,10 @@ const phpVersions = computed<RuntimeVersionEntry[]>(() =>
 const phpInstalledCount = computed(() => phpStore.versions.length)
 const customPhpCount = computed(() => phpStore.versions.filter((v) => !v.managed).length)
 
-const mariadb = computed(() => binariesStore.binaries.find((b) => b.id === 'mariadb') ?? null)
-const mariadbVersions = computed<RuntimeVersionEntry[]>(() =>
-  mariadb.value
-    ? [{ id: 'mariadb', version: mariadb.value.version, installed: mariadb.value.installed }]
-    : [],
-)
-
-// Only one build is offered, so there's nothing to switch between — the row
-// is here because this is the one place that installs it.
+// Only one build is offered for now (see the open question in
+// docs/v3/rezure-app-v3-phases-tasks.md about Nginx having no checksum
+// source to build a real catalog from), so there's nothing to switch
+// between yet — the row exists so the page has one place that installs it.
 const nginx = computed(() => binariesStore.binaries.find((b) => b.id === 'nginx') ?? null)
 const nginxVersions = computed<RuntimeVersionEntry[]>(() =>
   nginx.value
@@ -62,9 +63,43 @@ const nginxVersions = computed<RuntimeVersionEntry[]>(() =>
     : [],
 )
 
-const composerVersions = computed<RuntimeVersionEntry[]>(() => [
-  { id: 'composer', version: 'latest', installed: composerStore.installed },
-])
+// MariaDB can have several versions installed (each database profile picks
+// its own compatible build — see `db_profiles::resolve_server_exe`), so
+// there's no single "active" version at this page's level the way PHP has
+// one. The newest installed build is shown as a label, not a real switch.
+const mariadbVersions = computed<RuntimeVersionEntry[]>(() =>
+  binariesStore.mariadbVersions.map((v) => ({
+    id: v.version,
+    version: v.version,
+    installed: true,
+  })),
+)
+const mariadbActiveVersion = computed(() => binariesStore.mariadbVersions[0]?.version ?? null)
+const mariadbProgress = computed(() =>
+  binariesStore.installingMariaDbVersion
+    ? binariesStore.progressFor(`mariadb-${binariesStore.installingMariaDbVersion}`)
+    : null,
+)
+
+const composerVersions = computed<RuntimeVersionEntry[]>(() =>
+  composerStore.versions.map((v) => ({ id: v.id, version: v.version, installed: true })),
+)
+const composerProgress = computed(() =>
+  composerStore.installingVersion
+    ? composerStore.progressFor(composerStore.installingVersion)
+    : null,
+)
+
+// Catalog-and-install only for now — see `services::node_catalog`'s module
+// doc for why there's no real "active version" to switch to yet. The
+// newest installed build is shown the same way MariaDB's is, as a label.
+const nodeVersions = computed<RuntimeVersionEntry[]>(() =>
+  nodeStore.versions.map((v) => ({ id: v.version, version: v.version, installed: true })),
+)
+const nodeActiveVersion = computed(() => nodeStore.versions[0]?.version ?? null)
+const nodeProgress = computed(() =>
+  nodeStore.installingVersion ? nodeStore.progressFor(nodeStore.installingVersion) : null,
+)
 
 // A PHP install can be started from the modal and keeps running after it's
 // closed, so the row reports the progress of whichever version is in flight.
@@ -107,7 +142,7 @@ const hasPhpConfig = computed(
       </button>
     </div>
 
-    <InstallPhpVersionModal v-if="showInstallModal" @close="showInstallModal = false" />
+    <InstallVersionModal v-if="showInstallModal" @close="showInstallModal = false" />
 
     <p v-if="phpStore.error" class="mt-3 text-sm text-red-600 dark:text-red-400">
       {{ phpStore.error }}
@@ -117,6 +152,12 @@ const hasPhpConfig = computed(
     </p>
     <p v-if="composerStore.error" class="mt-3 text-sm text-red-600 dark:text-red-400">
       {{ composerStore.error }}
+    </p>
+    <p v-if="binariesStore.mariadbCatalogError" class="mt-3 text-sm text-red-600 dark:text-red-400">
+      {{ binariesStore.mariadbCatalogError }}
+    </p>
+    <p v-if="nodeStore.catalogError" class="mt-3 text-sm text-red-600 dark:text-red-400">
+      {{ nodeStore.catalogError }}
     </p>
 
     <h2 class="mt-6 mb-2 text-xs font-semibold tracking-wide text-neutral-400 uppercase">
@@ -135,7 +176,6 @@ const hasPhpConfig = computed(
         :progress="phpProgress"
         :busy="phpStore.switching !== null"
         @select="switchPhp"
-        @install="phpStore.install"
       />
       <RuntimeSwitchRow
         icon="nginx"
@@ -145,34 +185,34 @@ const hasPhpConfig = computed(
         :versions="nginxVersions"
         :installing-id="binariesStore.isInstalling('nginx') ? 'nginx' : null"
         :progress="binariesStore.progressFor('nginx')"
-        @install="binariesStore.install('nginx')"
       />
       <RuntimeSwitchRow
         icon="mariadb"
         name="MariaDB"
-        :active-version="mariadb?.installed ? mariadb.version : null"
-        :installed-count="mariadb?.installed ? 1 : 0"
+        :active-version="mariadbActiveVersion"
+        :installed-count="binariesStore.mariadbVersions.length"
         :versions="mariadbVersions"
-        :installing-id="binariesStore.isInstalling('mariadb') ? 'mariadb' : null"
-        :progress="binariesStore.progressFor('mariadb')"
-        @install="binariesStore.install('mariadb')"
+        :installing-id="binariesStore.installingMariaDbVersion"
+        :progress="mariadbProgress"
       />
       <RuntimeSwitchRow
         icon="composer"
         name="Composer"
-        :active-version="composerStore.installed ? 'latest' : null"
-        :installed-count="composerStore.installed ? 1 : 0"
+        :active-version="composerStore.active?.version ?? null"
+        :installed-count="composerStore.versions.length"
         :versions="composerVersions"
-        :installing-id="composerStore.installing ? 'composer' : null"
-        @install="composerStore.install"
+        :installing-id="composerStore.installingVersion"
+        :progress="composerProgress"
+        @select="composerStore.setActive"
       />
       <RuntimeSwitchRow
         icon="node"
         name="Node.js"
-        active-version=""
-        :installed-count="0"
-        :versions="[]"
-        disabled
+        :active-version="nodeActiveVersion"
+        :installed-count="nodeStore.versions.length"
+        :versions="nodeVersions"
+        :installing-id="nodeStore.installingVersion"
+        :progress="nodeProgress"
       />
       <RuntimeSwitchRow
         icon="python"
@@ -188,8 +228,9 @@ const hasPhpConfig = computed(
       hand — Rezure didn't checksum those.
     </p>
     <p class="mt-2 text-xs text-neutral-400">
-      Node.js and Python aren't available yet — Rezure doesn't bundle a portable runtime for either,
-      so there's nothing installable to switch between.
+      Node.js installs go straight to disk — using one from a project (PATH, per-project switching)
+      is a separate feature that isn't built yet. Python isn't available yet — it publishes no
+      checksum Rezure can verify a download against.
     </p>
 
     <h2

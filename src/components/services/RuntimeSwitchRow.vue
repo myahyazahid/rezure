@@ -32,11 +32,16 @@ const props = withDefaults(
   { installingId: null, progress: null, disabled: false, busy: false },
 )
 
-const emit = defineEmits<{ select: [id: string]; install: [id: string] }>()
+const emit = defineEmits<{ select: [id: string] }>()
 
 const open = ref(false)
 
 const installing = computed(() => props.installingId !== null)
+
+/** Only installed entries are ever listed here now — the dropdown is
+ *  switch-only, and "Install version" (the page-level button) is the one
+ *  place a new version gets added. */
+const installedVersions = computed(() => props.versions.filter((v) => v.installed))
 
 /** Null while the download hasn't reported a total — a large binary sends
  *  its first bytes before the server's content length is known. */
@@ -60,12 +65,8 @@ const stageLabel = computed(() => {
 })
 
 function pick(entry: RuntimeVersionEntry) {
-  if (entry.installed) {
-    emit('select', entry.id)
-    open.value = false
-  } else {
-    emit('install', entry.id)
-  }
+  emit('select', entry.id)
+  open.value = false
 }
 </script>
 
@@ -118,8 +119,13 @@ function pick(entry: RuntimeVersionEntry) {
       <div v-if="!disabled" class="relative shrink-0">
         <button
           type="button"
-          class="flex items-center gap-1.5 rounded-full border border-neutral-200 bg-white/70 px-3 py-1.5 font-mono text-sm font-semibold text-neutral-700 transition hover:bg-white disabled:cursor-wait disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
-          :disabled="busy"
+          class="flex items-center gap-1.5 rounded-full border border-neutral-200 bg-white/70 px-3 py-1.5 font-mono text-sm font-semibold text-neutral-700 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
+          :disabled="busy || installedVersions.length === 0"
+          :title="
+            installedVersions.length === 0
+              ? 'Nothing installed — use “Install version” above'
+              : undefined
+          "
           @click="open = !open"
         >
           {{ activeVersion ?? '—' }}
@@ -140,17 +146,14 @@ function pick(entry: RuntimeVersionEntry) {
           <div
             class="absolute top-full right-0 z-20 mt-2 w-48 rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
           >
+            <p v-if="installedVersions.length === 0" class="px-2.5 py-1.5 text-xs text-neutral-400">
+              Nothing installed yet
+            </p>
             <button
-              v-for="(entry, i) in versions"
+              v-for="(entry, i) in installedVersions"
               :key="entry.id"
               type="button"
-              class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left font-mono text-sm transition disabled:cursor-wait"
-              :class="
-                entry.installed
-                  ? 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
-                  : 'text-neutral-400 hover:bg-neutral-100 dark:text-neutral-500 dark:hover:bg-neutral-800'
-              "
-              :disabled="installingId === entry.id"
+              class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left font-mono text-sm transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
               @click="pick(entry)"
             >
               <span
@@ -163,24 +166,6 @@ function pick(entry: RuntimeVersionEntry) {
               ></span>
               <span class="flex-1 truncate">{{ entry.version }}</span>
               <span v-if="i === 0" class="text-[10px] text-neutral-400">latest</span>
-              <span v-if="installingId === entry.id" class="text-[10px] text-neutral-400"
-                >installing…</span
-              >
-              <svg
-                v-else-if="!entry.installed"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                class="h-3.5 w-3.5 shrink-0"
-                aria-label="Download"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"
-                />
-              </svg>
             </button>
           </div>
         </template>

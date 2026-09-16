@@ -3,10 +3,12 @@
 
 pub mod binaries;
 pub mod changelog;
+pub mod composer;
 pub mod connections;
 pub mod database;
 pub mod db_profiles;
 pub mod donate;
+pub mod node;
 pub mod php;
 pub mod projects;
 pub mod services;

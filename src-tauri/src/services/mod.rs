@@ -5,6 +5,8 @@
 
 pub mod binaries;
 pub mod changelog;
+pub mod composer;
+pub mod composer_catalog;
 pub mod connections;
 pub mod database;
 pub mod db_clients;
@@ -14,6 +16,8 @@ pub mod doctor;
 pub mod donate;
 pub mod hosts;
 pub mod launcher;
+pub mod mariadb_catalog;
+pub mod node_catalog;
 pub mod php;
 pub mod php_catalog;
 pub mod php_ext;

@@ -9,6 +9,9 @@ pub enum AppError {
     #[error("php version not installed: {0}")]
     PhpVersionNotFound(String),
 
+    #[error("no {runtime} version {version} in the catalog")]
+    CatalogVersionNotFound { runtime: String, version: String },
+
     #[error("PHP {0} is already installed")]
     PhpVersionAlreadyInstalled(String),
 

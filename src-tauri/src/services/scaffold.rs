@@ -17,9 +17,9 @@ use serde::Serialize;
 
 use super::php_ini;
 use super::projects::www_root;
+use super::{composer, composer_catalog};
 use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
-use crate::utils::paths;
 
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -211,43 +211,37 @@ fn common_top_level_dir(
     Ok(common)
 }
 
-fn composer_phar_path() -> Result<PathBuf, AppError> {
-    Ok(paths::bin()?.join("composer").join("composer.phar"))
-}
-
-/// Whether `composer.phar` has been downloaded — there's no fixed version
-/// to switch between (`ensure_composer` always fetches whatever's current
-/// at Composer's stable download URL), just "have we cached it yet".
+/// Whether at least one Composer version is installed. Version-aware now —
+/// see `services::composer`'s module doc for why this used to be a single
+/// fixed-path check.
 pub fn composer_installed() -> bool {
-    composer_phar_path().map(|p| p.is_file()).unwrap_or(false)
+    !composer::installed().is_empty()
 }
 
-/// Downloads `composer.phar` if it isn't cached yet — the explicit,
-/// user-triggered counterpart to `ensure_composer`'s lazy on-demand fetch
-/// during a Laravel scaffold.
+/// Downloads the newest catalog version if nothing is installed yet — the
+/// explicit, user-triggered counterpart to `ensure_composer`'s on-demand
+/// fetch during a Laravel scaffold. Neither path reports progress: this one
+/// never did (there was no version-specific download to report on before
+/// `services::composer` existed), and the Switch page's own install button
+/// is what shows a progress bar now, through `composer::install`.
 pub async fn install_composer() -> Result<(), AppError> {
     ensure_composer().await.map(|_| ())
 }
 
-/// Composer self-updates constantly, so unlike the pinned-version binaries
-/// in `services::binaries`, this always fetches whatever's current at the
-/// official, HTTPS-only download URL and caches it — there's no stable
-/// per-version checksum to pin against.
+/// Resolves the active Composer version, self-healing by installing the
+/// newest catalog release first if nothing is on disk yet. PHP's
+/// `active_exe` needs no such fallback — a version ships bundled — but
+/// nothing is bundled for Composer, so scaffolding on a fresh install would
+/// otherwise fail outright instead of just taking a moment longer.
 async fn ensure_composer() -> Result<PathBuf, AppError> {
-    let path = composer_phar_path()?;
-    if path.is_file() {
-        return Ok(path);
+    if composer::installed().is_empty() {
+        let releases = composer_catalog::list(false).await?;
+        let newest = releases.first().ok_or_else(|| {
+            AppError::Download("Composer's version index listed nothing to install".to_string())
+        })?;
+        return composer::install_silent(&newest.version).await;
     }
-
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir)
-            .map_err(|e| AppError::Io(format!("could not create {}: {e}", dir.display())))?;
-    }
-
-    let bytes = download_bytes("https://getcomposer.org/composer.phar").await?;
-    fs::write(&path, bytes)
-        .map_err(|e| AppError::Io(format!("could not write {}: {e}", path.display())))?;
-    Ok(path)
+    composer::active_exe()
 }
 
 async fn scaffold_laravel(target: &Path) -> Result<(), AppError> {

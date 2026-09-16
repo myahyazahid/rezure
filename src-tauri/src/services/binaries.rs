@@ -284,6 +284,33 @@ pub fn discover(family: &str, exe_name: &str) -> Vec<InstalledRuntime> {
     found
 }
 
+/// [`InstalledRuntime`] reshaped for a Tauri command's return value —
+/// `InstalledRuntime` itself carries `PathBuf`s, which this codebase always
+/// converts to a display string before sending to the frontend rather than
+/// leaning on `serde`'s own (platform-`OsStr`-shaped) path serialization.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstalledVersionStatus {
+    pub version: String,
+    pub path: String,
+    /// `false` for anything under [`user_bin_root`] — Rezure never
+    /// checksum-verified those.
+    pub managed: bool,
+}
+
+/// [`discover`], reshaped for sending to the frontend — see
+/// [`InstalledVersionStatus`].
+pub fn discover_status(family: &str, exe_name: &str) -> Vec<InstalledVersionStatus> {
+    discover(family, exe_name)
+        .into_iter()
+        .map(|runtime| InstalledVersionStatus {
+            version: runtime.version,
+            path: runtime.dir.display().to_string(),
+            managed: runtime.managed,
+        })
+        .collect()
+}
+
 fn package_dir(pkg: &BinaryPackage) -> Result<PathBuf, AppError> {
     Ok(install_root()?.join(pkg.family).join(pkg.version))
 }

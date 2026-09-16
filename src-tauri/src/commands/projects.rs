@@ -187,16 +187,6 @@ pub async fn create_project(
     Ok(())
 }
 
-#[tauri::command]
-pub fn composer_installed() -> bool {
-    scaffold::composer_installed()
-}
-
-#[tauri::command]
-pub async fn install_composer() -> Result<(), AppError> {
-    scaffold::install_composer().await
-}
-
 /// Best-effort history write — the open itself already succeeded by the
 /// time this runs, so a database hiccup here must not turn into a failed
 /// command.
