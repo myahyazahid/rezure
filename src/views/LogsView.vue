@@ -1,14 +1,30 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { LOG_SERVICES, useLogsStore } from '@/stores/logs'
+import { useServicesStore } from '@/stores/services'
 import type { LogLevel } from '@/types/log'
 import SearchInput from '@/components/common/SearchInput.vue'
 
 const store = useLogsStore()
+const servicesStore = useServicesStore()
 
 const search = ref('')
 const selectedService = ref<string | null>(null)
 const selectedLevel = ref<LogLevel | null>(null)
+
+/** Pooled PHP instances (`php-8.3.0`, ...) aren't in the static
+ *  `LOG_SERVICES` list — they're registered dynamically per pinned
+ *  version (see `services::php_pool`). Add one filter shortcut per
+ *  instance currently known to the services store, alongside the fixed
+ *  ones, so their logs get the same one-click filter. */
+const pooledPhpServices = computed(() =>
+  servicesStore.services
+    .map((s) => s.id)
+    .filter((id) => id.startsWith('php-'))
+    .sort(),
+)
+
+const filterableServices = computed(() => [...LOG_SERVICES, ...pooledPhpServices.value])
 
 const LEVELS: { value: LogLevel | null; label: string }[] = [
   { value: null, label: 'All' },
@@ -76,7 +92,7 @@ function levelClass(level: LogLevel) {
           All services
         </button>
         <button
-          v-for="service in LOG_SERVICES"
+          v-for="service in filterableServices"
           :key="service"
           type="button"
           class="rounded-full px-3.5 py-1.5 text-sm font-medium transition"

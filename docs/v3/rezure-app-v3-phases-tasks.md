@@ -297,17 +297,36 @@ murni soal port allocation + service lifecycle, bukan batasan PHP itu sendiri.
       Sekalian: folder `data/php-<versi>` untuk pid file service pooled tidak pernah dibuat, jadi
       pid-nya gagal ditulis diam-diam dan `reap_orphan` buta terhadap instance itu setelah crash —
       sekarang foldernya dibuat sebelum menulis
-- [ ] **Belum diuji end-to-end lawan binary PHP sungguhan** — perlu minimal 2 versi PHP terinstall
-      di mesin nyata, pin project berbeda-beda, konfirmasi beberapa `php-cgi.exe` benar-benar jalan
-      bersamaan dan masing-masing vhost nyampe ke port yang benar (`curl` lewat nginx, bukan cuma
-      baca port dari `list_services`) — **prioritas tinggi**, kebukti dua kali lewat testing manual
-      pengguna, bukan test suite (`php_pool`'s unit test sudah benar dalam isolasi tapi tidak
-      nangkep salahnya pemanggil)
-- [ ] Filter log di `stores/logs.ts` (`LOG_SERVICES`) masih daftar statis `['nginx','php','mariadb']`
+- [x] **Bug kelima, ketemu pas maintainer pin `pabrik-baut` ke versi baru dan kartunya nggak muncul
+      di halaman Services**: `stores/services.ts`'s `services` cuma di-fetch sekali waktu app dibuka
+      (`App.vue`'s `onMounted`) — `commands::projects::list_projects` yang mendaftarkan service
+      pooled baru di backend tidak pernah memicu refetch itu di frontend, jadi service-nya beneran
+      ada dan bisa di-start lewat command langsung, tapi user nggak lihat kartunya sama sekali
+      tanpa restart app. Fix: `stores/projects.ts`'s `fetchAll()` sekarang ikut manggil
+      `useServicesStore().fetchAll()` — daftar project dan daftar service selalu disegarkan bareng
+- [x] **Verifikasi manual di mesin sungguhan** (bukan lewat UI, langsung cek proses/port/ini):
+      3 `php-cgi.exe` (7.4.33, 8.4.25, 8.5.10) kebukti jalan **bersamaan**, masing-masing bind port
+      sendiri (9001/9000/9002) dan resolve `openssl_cipher_iv_length()` dengan benar dari
+      `ext_dir`-nya masing-masing — mekanisme inti (banyak versi PHP jalan bareng, tiap project
+      nyampe ke versi yang benar) terbukti bekerja. **Belum ada** verifikasi `curl` end-to-end lewat
+      browser buat tiap kombinasi setelah rentetan fix bug 1-5 di atas — sesi ini berhenti di tahap
+      diagnosis manual, bukan konfirmasi "semua project sudah normal lagi" dari maintainer
+- [x] Filter log di `stores/logs.ts` (`LOG_SERVICES`) masih daftar statis `['nginx','php','mariadb']`
       — instance pooled (`php-8.0.30`, dst.) tidak muncul sebagai opsi filter eksplisit (log-nya
-      sendiri tetap masuk, cuma tidak ada shortcut filter per-versi)
+      sendiri tetap masuk, cuma tidak ada shortcut filter per-versi). Fix: `LogsView.vue` sekarang
+      turunan `filterableServices` dari `LOG_SERVICES` digabung id pooled (`id.startsWith('php-')`)
+      yang lagi terdaftar di `useServicesStore()` — shortcut filter per-versi muncul otomatis begitu
+      project dipin, tanpa nyentuh `stores/logs.ts` sendiri. Diuji manual oleh maintainer, jalan baik
 - [ ] Nama tampilan `"PHP 8.3.0"` di kartu service belum dicek langsung di app sungguhan (cuma
       diverifikasi lewat unit test `ServiceInfo`, bukan browser/UI manual)
+- [x] **Tambahan UI di luar rencana awal, diminta maintainer selama sesi debugging ini**: tombol
+      "Restart all" di halaman Services, di antara "Start all" dan "Stop all" — merestart tiap
+      service yang lagi Running (yang Stopped tetap dibiarkan, itu tugas "Start all"), overlay dan
+      animasi ikon yang sama gayanya dengan dua tombol lain. Berguna khusus buat alur pool PHP: bug
+      kelima di atas bikin kartu service pooled baru nggak nongol tanpa refresh manual, jadi tombol
+      restart cepat ini mempercepat siklus pin-versi → cek-hasil selagi bug itu (sekarang sudah
+      diperbaiki lewat auto-refresh) belum ada. `stores/services.ts`'s `restartAll()`,
+      `src/views/DashboardView.vue`
 
 ---
 
