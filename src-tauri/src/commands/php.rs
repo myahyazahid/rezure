@@ -14,6 +14,7 @@ use crate::services::doctor::{self, ProjectDiagnosis};
 use crate::services::php::{self, PhpVersionStatus};
 use crate::services::php_catalog::{self, PhpRelease};
 use crate::services::php_ext::{self, ExtensionStatus};
+use crate::services::php_ext_toggle::{self, ExtensionToggle};
 use crate::services::php_ini;
 use crate::services::php_path::{self, PhpPathStatus};
 use crate::services::{ServiceManager, ServiceStatus};
@@ -183,6 +184,33 @@ pub async fn install_php_extension(
 ) -> Result<Vec<ExtensionStatus>, AppError> {
     php_ext::install(&app, &id, &php_version).await?;
     php_ext::status_for(&php_version)
+}
+
+/// Every bundled extension Rezure knows about, for one PHP version: whether
+/// it's on right now, whether that's the default or a user override, and
+/// whether the build even ships the DLL. Distinct from [`php_extensions`],
+/// which is about PECL extensions the zip doesn't ship at all.
+#[tauri::command]
+pub async fn list_bundled_php_extensions(
+    php_version: String,
+) -> Result<Vec<ExtensionToggle>, AppError> {
+    tokio::task::spawn_blocking(move || php_ext_toggle::status_for(&php_version))
+        .await
+        .map_err(joined)?
+}
+
+/// Turns one bundled extension on or off for a PHP version. Only writes
+/// that version's own toggle state — the change reaches PHP the next time
+/// it starts, same as installing a PECL extension does.
+#[tauri::command]
+pub async fn set_bundled_php_extension(
+    php_version: String,
+    id: String,
+    enabled: bool,
+) -> Result<Vec<ExtensionToggle>, AppError> {
+    tokio::task::spawn_blocking(move || php_ext_toggle::set_enabled(&php_version, &id, enabled))
+        .await
+        .map_err(joined)?
 }
 
 /// Reads a project's `ext-*` requirements back against the active PHP.

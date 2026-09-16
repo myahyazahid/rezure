@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type {
+  BundledExtension,
   ExtensionStatus,
   PhpPathStatus,
   PhpRelease,
@@ -39,6 +40,12 @@ export const usePhpStore = defineStore('php', () => {
   const extensions = ref<ExtensionStatus[]>([])
   /** The extension id currently being downloaded, or null. */
   const installingExtension = ref<string | null>(null)
+
+  /** Extensions already in the zip, for the PHP version last asked about —
+   *  distinct from `extensions` above, which is PECL. */
+  const bundledExtensions = ref<BundledExtension[]>([])
+  /** The extension id currently being toggled, or null. */
+  const togglingExtension = ref<string | null>(null)
 
   /** The optional system-wide PATH link. Null until first read. */
   const pathStatus = ref<PhpPathStatus | null>(null)
@@ -257,6 +264,41 @@ export const usePhpStore = defineStore('php', () => {
     }
   }
 
+  /** Every bundled extension Rezure knows about, for one PHP version. */
+  async function fetchBundledExtensions(phpVersion: string) {
+    try {
+      bundledExtensions.value = await invoke<BundledExtension[]>('list_bundled_php_extensions', {
+        phpVersion,
+      })
+    } catch (e) {
+      error.value = errorMessage(e)
+      bundledExtensions.value = []
+    }
+  }
+
+  /**
+   * Turns one bundled extension on or off for a PHP version. Purely a state
+   * write — the running service keeps whatever it loaded at its last start
+   * until it's restarted, same as toggling a PECL extension.
+   */
+  async function setBundledExtension(phpVersion: string, id: string, enabled: boolean) {
+    togglingExtension.value = id
+    error.value = null
+    try {
+      bundledExtensions.value = await invoke<BundledExtension[]>('set_bundled_php_extension', {
+        phpVersion,
+        id,
+        enabled,
+      })
+      return true
+    } catch (e) {
+      error.value = errorMessage(e)
+      return false
+    } finally {
+      togglingExtension.value = null
+    }
+  }
+
   async function openDropInDir() {
     error.value = null
     try {
@@ -283,6 +325,8 @@ export const usePhpStore = defineStore('php', () => {
     configDir,
     extensions,
     installingExtension,
+    bundledExtensions,
+    togglingExtension,
     notice,
     switching,
     pathStatus,
@@ -292,6 +336,8 @@ export const usePhpStore = defineStore('php', () => {
     fetchConfigDir,
     fetchExtensions,
     installExtension,
+    fetchBundledExtensions,
+    setBundledExtension,
     fetchPathStatus,
     setPathLink,
     fetchCatalog,

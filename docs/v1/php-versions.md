@@ -165,6 +165,37 @@ or keep them out of the shared list.
 
 ---
 
+## Turning on extensions already in the zip
+
+php.net's Windows build ships a large `ext/` folder, but Rezure only auto-enables a dozen of them
+by default (`curl`, `intl`, `mbstring`, `pdo_mysql`, `zip`, and a few others most Laravel/WordPress
+projects need). Everything else in that folder — `bz2`, `sodium`, `exif`, `xsl`, `sockets`, `ldap`,
+and more — used to mean a hand-edited fragment in `conf.d` with the exact `extension=` spelling.
+
+The **PHP Extensions** menu (sidebar, right below Switch) turns that into a toggle. Pick the PHP version
+(several can be pinned to different projects at once — see
+[per-project PHP versions](../v3/rezure-app-v3-phases-tasks.md#fase-311--per-project-php-version-concurrent)),
+find the extension, flip it on or off. A few things worth knowing:
+
+- **It's per version**, same as the PECL extensions below — the toggle only affects `ext/` DLLs
+  that build actually ships. One greyed out and labelled "not in this build" means there's nothing
+  to turn on for that version.
+- **Choices are stored outside `conf.d`** — in `data\php\<version>\extensions.json` — precisely
+  because `conf.d` is documented above as the one folder Rezure never writes to. A toggle flipped
+  from the UI is Rezure's own write, not yours.
+- **Restart PHP for a change to reach running sites** — a toggle only changes what the *next* start
+  writes into the generated `php.ini`; the process already answering requests keeps whatever it
+  loaded when it started.
+- A handful of entries (`oci8`, `pdo_oci`, `zend_test`, `phpdbg_webhelper`) are marked **special**
+  and left off by default even when the DLL is there — they need something Rezure doesn't bundle
+  (Oracle's own client libraries) or aren't meant for an application to load at all.
+- **`opcache` is off by default too**, for a different reason: it caches compiled bytecode, and a
+  stale cache can hide a code change during local development until it's invalidated. Turning it on
+  writes `zend_extension=opcache` rather than the ordinary `extension=` line every other toggle
+  uses — PHP requires that specific directive for it, and Rezure handles the difference for you.
+
+---
+
 ## Extensions that aren't in the PHP zip
 
 php.net's Windows build ships a large `ext/` folder, but **PECL extensions are not in it** —

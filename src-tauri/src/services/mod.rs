@@ -17,6 +17,7 @@ pub mod launcher;
 pub mod php;
 pub mod php_catalog;
 pub mod php_ext;
+pub mod php_ext_toggle;
 pub mod php_ini;
 pub mod php_path;
 pub mod php_pool;

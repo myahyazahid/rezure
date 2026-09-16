@@ -67,6 +67,13 @@ const navItems = computed(() => [
     variant: 'default' as const,
   },
   {
+    to: '/php-extensions',
+    icon: 'puzzle' as const,
+    label: 'PHP Extensions',
+    badge: '',
+    variant: 'default' as const,
+  },
+  {
     to: '/logs',
     icon: 'logs' as const,
     label: 'Logs',
@@ -195,6 +202,20 @@ const ringOffset = computed(() => {
             class="h-4 w-4"
           >
             <path stroke-linecap="round" stroke-linejoin="round" d="M4 8h13l-3-3M20 16H7l3 3" />
+          </svg>
+          <svg
+            v-else-if="item.icon === 'puzzle'"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="h-4 w-4"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M9 4h3a1 1 0 0 1 1 1v1.5a1.5 1.5 0 0 0 3 0V5a1 1 0 0 1 1-1h1a2 2 0 0 1 2 2v1a1 1 0 0 1-1 1h-1.5a1.5 1.5 0 0 0 0 3H19a1 1 0 0 1 1 1v3a2 2 0 0 1-2 2h-1a1 1 0 0 1-1-1v-1.5a1.5 1.5 0 0 0-3 0V17a1 1 0 0 1-1 1H8a2 2 0 0 1-2-2v-1a1 1 0 0 1 1-1h1.5a1.5 1.5 0 0 0 0-3H7a1 1 0 0 1-1-1V7a2 2 0 0 1 2-2h1Z"
+            />
           </svg>
           <svg
             v-else-if="item.icon === 'logs'"

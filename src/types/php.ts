@@ -78,3 +78,23 @@ export interface ExtensionStatus {
   /** A verified build exists for this PHP branch. */
   available: boolean
 }
+
+/** One extension the official PHP zip already ships in `ext/`, and whether
+ *  it's turned on for one specific PHP version. Distinct from
+ *  {@link ExtensionStatus}, which is about PECL extensions the zip doesn't
+ *  ship at all. */
+export interface BundledExtension {
+  id: string
+  label: string
+  category: string
+  description: string
+  /** Whether Rezure will write `extension=<id>` for this version right now. */
+  enabled: boolean
+  /** Whether `enabled` is Rezure's own default rather than a user choice. */
+  defaultOn: boolean
+  /** Environment-dependent or debug-only — shown with a warning instead of
+   *  as an ordinary toggle. */
+  debugOnly: boolean
+  /** The DLL isn't in this version's ext/ build at all. */
+  available: boolean
+}

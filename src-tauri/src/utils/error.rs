@@ -18,6 +18,9 @@ pub enum AppError {
     #[error("{id} isn't available for PHP {php_version} yet")]
     ExtensionUnavailable { id: String, php_version: String },
 
+    #[error("unknown PHP extension: {0}")]
+    UnknownExtension(String),
+
     #[error("download failed: {0}")]
     Download(String),
 

@@ -4,6 +4,7 @@ import DashboardView from '../views/DashboardView.vue'
 import ProjectsView from '../views/ProjectsView.vue'
 import DatabasesView from '../views/DatabasesView.vue'
 import SwitchView from '../views/SwitchView.vue'
+import PhpExtensionsView from '../views/PhpExtensionsView.vue'
 import LogsView from '../views/LogsView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import SupportView from '../views/SupportView.vue'
@@ -38,6 +39,11 @@ const router = createRouter({
       path: '/switch',
       name: 'switch',
       component: SwitchView,
+    },
+    {
+      path: '/php-extensions',
+      name: 'php-extensions',
+      component: PhpExtensionsView,
     },
     {
       path: '/logs',
