@@ -94,6 +94,9 @@ pub enum AppError {
     #[error("SSH tunnel failed: {0}")]
     TunnelFailed(String),
 
+    #[error("export of \"{0}\" was cancelled")]
+    ExportCancelled(String),
+
     #[error("couldn't share this project: {0}")]
     ShareFailed(String),
 

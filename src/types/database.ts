@@ -27,6 +27,19 @@ export interface DatabaseServerInfo {
   readOnly: boolean
 }
 
+/** Emitted on `database://export-progress` while `exportDatabase` runs. See
+ *  `services::database::ExportProgress` on the Rust side. */
+export interface ExportProgress {
+  name: string
+  bytesWritten: number
+  /** A `.sql` dump is text written from the schema's raw storage size, so
+   *  the two rarely match exactly — this is an estimate to divide by, not a
+   *  promise the file will stop growing there. `null` when the size
+   *  couldn't be read, in which case there's nothing to show a percentage
+   *  against. */
+  estimatedTotalBytes: number | null
+}
+
 export interface DbClientInfo {
   id: string
   name: string

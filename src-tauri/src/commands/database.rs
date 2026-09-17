@@ -7,6 +7,8 @@
 
 use std::path::PathBuf;
 
+use tauri::AppHandle;
+
 use crate::services::database::{self, DatabaseInfo, ServerInfo};
 use crate::services::db_clients::{self, DbClientInfo};
 use crate::utils::error::AppError;
@@ -50,12 +52,23 @@ pub async fn drop_database(name: String) -> Result<(), AppError> {
 
 /// Dumps a database and returns the path of the `.sql` it wrote, so the UI
 /// can tell the user where it landed instead of just claiming success.
+///
+/// Progress ticks over `database::EXPORT_PROGRESS_EVENT` while this runs;
+/// see `database::watch_export`.
 #[tauri::command]
-pub async fn export_database(name: String) -> Result<String, AppError> {
-    let dump = tokio::task::spawn_blocking(move || database::export_database(&name))
+pub async fn export_database(app: AppHandle, name: String) -> Result<String, AppError> {
+    let dump = tokio::task::spawn_blocking(move || database::export_database(Some(&app), &name))
         .await
         .map_err(joined)??;
     Ok(dump.display().to_string())
+}
+
+/// Stops a dump that's still running, if `name` has one. Returns whether
+/// there was one to stop — racing a dump that just finished on its own is
+/// normal, not an error.
+#[tauri::command]
+pub fn cancel_export(name: String) -> bool {
+    database::cancel_export(&name)
 }
 
 #[tauri::command]

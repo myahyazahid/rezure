@@ -15,18 +15,29 @@
  * the caller happens to sit in, at `z-60` so it clears the modals — which sit
  * at `z-50` — rather than relying on which one happens to render last.
  */
+import { computed } from 'vue'
 import LeafLoader from '@/components/common/LeafLoader.vue'
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     show: boolean
     /** What is happening, in the user's words — "Starting services…" */
     label?: string
     /** Optional second line, e.g. which version is being applied. */
     detail?: string
+    /** 0-100, when the caller has a real number to show — an export
+     *  tracking bytes written, say. `null`/omitted keeps the plain spinner,
+     *  which is still the right call for anything that can't estimate how
+     *  much of it is left. */
+    percent?: number | null
+    /** Shown next to the bar when `percent` is set — stops a double-submit
+     *  the same way every other button here does, by disabling itself. */
+    onCancel?: () => void
   }>(),
-  { label: 'Working…', detail: '' },
+  { label: 'Working…', detail: '', percent: null, onCancel: undefined },
 )
+
+const showBar = computed(() => props.percent !== null)
 </script>
 
 <template>
@@ -39,7 +50,7 @@ withDefaults(
         aria-live="polite"
       >
         <div
-          class="flex flex-col items-center gap-3 rounded-2xl border border-neutral-200 bg-white/95 px-7 py-5 shadow-2xl shadow-neutral-900/15 backdrop-blur-sm dark:border-neutral-700 dark:bg-neutral-900/95 dark:shadow-black/50"
+          class="pointer-events-auto flex flex-col items-center gap-3 rounded-2xl border border-neutral-200 bg-white/95 px-7 py-5 shadow-2xl shadow-neutral-900/15 backdrop-blur-sm dark:border-neutral-700 dark:bg-neutral-900/95 dark:shadow-black/50"
         >
           <LeafLoader :size="56" />
           <div class="text-center">
@@ -48,6 +59,32 @@ withDefaults(
               {{ detail }}
             </p>
           </div>
+
+          <!-- Only for a caller with a real number, like an export tracking
+               bytes written — everything else keeps the plain spinner
+               above, which is honest about not knowing how much is left. -->
+          <div v-if="showBar" class="w-56">
+            <div
+              class="h-1.5 w-full overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-700"
+            >
+              <div
+                class="h-full rounded-full bg-red-500 transition-[width] duration-300 ease-out"
+                :style="{ width: `${percent}%` }"
+              />
+            </div>
+            <p class="mt-1.5 text-center text-xs text-neutral-500 dark:text-neutral-400">
+              {{ percent }}%
+            </p>
+          </div>
+
+          <button
+            v-if="onCancel"
+            type="button"
+            class="mt-1 rounded-full border border-neutral-200 px-4 py-1.5 text-xs font-semibold text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-900 dark:border-neutral-700 dark:text-neutral-300 dark:hover:text-neutral-50"
+            @click="onCancel"
+          >
+            Cancel
+          </button>
         </div>
       </div>
     </Transition>

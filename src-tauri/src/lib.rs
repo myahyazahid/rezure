@@ -91,6 +91,7 @@ pub fn run() {
                 commands::database::create_database,
                 commands::database::drop_database,
                 commands::database::export_database,
+                commands::database::cancel_export,
                 commands::database::import_sql,
                 commands::database::open_dumps_folder,
                 commands::database::list_db_clients,

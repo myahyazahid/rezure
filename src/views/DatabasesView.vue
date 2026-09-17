@@ -112,6 +112,13 @@ const busyDetail = computed(() => {
     ? `Pulling a .sql dump from ${store.server?.label} to C:\\rezure\\dumps.`
     : 'Writing a .sql dump to C:\\rezure\\dumps.'
 })
+
+/** Progress and Cancel are an export's alone — switching a profile and
+ *  importing a file have no byte count to show one for, and killing either
+ *  mid-flight is a different, riskier thing than killing a dump. */
+const exporting = computed(
+  () => store.busy !== null && !switchingProfile.value && !store.importingInto,
+)
 </script>
 
 <template>
@@ -282,7 +289,13 @@ const busyDetail = computed(() => {
     <NewDatabaseModal v-if="showNewDatabaseModal" @close="showNewDatabaseModal = false" />
     <ImportSqlModal v-if="importFile" :file="importFile" @close="importFile = null" />
 
-    <BusyOverlay :show="busyLabel !== ''" :label="busyLabel" :detail="busyDetail" />
+    <BusyOverlay
+      :show="busyLabel !== ''"
+      :label="busyLabel"
+      :detail="busyDetail"
+      :percent="exporting ? store.exportPercent : null"
+      :on-cancel="exporting ? store.cancelExport : undefined"
+    />
 
     <!-- Search, import and the totals sit above the table so the table itself
          can take the rest of the height and scroll inside its own frame. -->

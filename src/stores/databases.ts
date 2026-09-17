@@ -1,7 +1,16 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import type { DatabaseInfo, DatabaseServerInfo, DbClientInfo } from '@/types/database'
+import { listen } from '@tauri-apps/api/event'
+import type {
+  DatabaseInfo,
+  DatabaseServerInfo,
+  DbClientInfo,
+  ExportProgress,
+} from '@/types/database'
+
+// Keep in sync with `EXPORT_PROGRESS_EVENT` in src-tauri/src/services/database.rs
+const EXPORT_PROGRESS_EVENT = 'database://export-progress'
 
 function errorMessage(e: unknown): string {
   if (typeof e === 'string') return e
@@ -36,6 +45,9 @@ export const useDatabasesStore = defineStore('databases', () => {
   /** Name of the database a long-running action is currently working on,
    *  so only that row shows a pending state. */
   const busy = ref<string | null>(null)
+  /** Latest progress tick for the export named by `busy`, or `null` before
+   *  the first tick lands (or once the export has ended). */
+  const exportProgress = ref<ExportProgress | null>(null)
 
   const creating = ref(false)
   const createError = ref<string | null>(null)
@@ -47,6 +59,28 @@ export const useDatabasesStore = defineStore('databases', () => {
 
   const serverDown = computed(() => error.value !== null && CONNECTION_REFUSED.test(error.value))
   const totalTables = computed(() => databases.value.reduce((sum, db) => sum + db.tableCount, 0))
+
+  /** 0-100, or `null` before the first progress tick or when the schema's
+   *  size couldn't be read up front.
+   *
+   *  Capped below 100 while still running: `estimatedTotalBytes` is the
+   *  schema's raw storage size, and a `.sql` dump — text, `INSERT`
+   *  statements, hex-escaped BLOBs — almost never lands on that exact byte
+   *  count. A bar that hits 100% and then keeps churning for another minute
+   *  reads as broken, so the last few percent are reserved for the export
+   *  actually finishing. */
+  const exportPercent = computed(() => {
+    const progress = exportProgress.value
+    if (!progress || !progress.estimatedTotalBytes) return null
+    const raw = (progress.bytesWritten / progress.estimatedTotalBytes) * 100
+    return Math.min(95, Math.round(raw))
+  })
+
+  listen<ExportProgress>(EXPORT_PROGRESS_EVENT, (event) => {
+    // Guards against a straggling tick from a just-finished or just-
+    // cancelled export landing after `busy` has already moved on.
+    if (event.payload.name === busy.value) exportProgress.value = event.payload
+  })
 
   /** The client named in the page subtitle — whichever real GUI was found
    *  first, rather than the bundled console fallback. */
@@ -112,14 +146,31 @@ ezure\dumps` and reports back where the file landed. */
     busy.value = name
     error.value = null
     notice.value = null
+    exportProgress.value = null
     try {
       const path = await invoke<string>('export_database', { name })
       notice.value = `Exported ${name} to ${path}`
     } catch (e) {
-      error.value = errorMessage(e)
+      const message = errorMessage(e)
+      // The one failure the user asked for — reads as a status, not a
+      // problem to fix, so it doesn't belong in the error banner.
+      if (message.includes('was cancelled')) {
+        notice.value = message
+      } else {
+        error.value = message
+      }
     } finally {
       busy.value = null
+      exportProgress.value = null
     }
+  }
+
+  /** Stops the export named by `busy`, if there is one. A no-op once it has
+   *  already finished on its own — `exportDatabase`'s own catch/finally
+   *  handles the cleanup either way. */
+  async function cancelExport() {
+    if (!busy.value) return
+    await invoke('cancel_export', { name: busy.value })
   }
 
   async function importSql(name: string, file: string) {
@@ -168,6 +219,8 @@ ezure\dumps` and reports back where the file landed. */
     error,
     notice,
     busy,
+    exportProgress,
+    exportPercent,
     creating,
     createError,
     importing,
@@ -180,6 +233,7 @@ ezure\dumps` and reports back where the file landed. */
     fetchCollations,
     createDatabase,
     exportDatabase,
+    cancelExport,
     importSql,
     openInClient,
     openDumpsFolder,

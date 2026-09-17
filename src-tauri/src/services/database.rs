@@ -25,10 +25,15 @@
 //! `--defaults-file` and never on the command line, where every process
 //! listing on the machine could read it.
 
+use std::collections::HashMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command, Stdio};
+use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::time::Duration;
 
 use serde::Serialize;
+use tauri::{AppHandle, Emitter};
 
 use super::connections;
 use super::db_engine::{self, Engine};
@@ -469,6 +474,13 @@ fn client_error(conn: &Conn, stderr: &[u8], fallback: &str) -> AppError {
 ///   client cannot speak. Rezure falls back to a MariaDB client when no
 ///   MySQL build is installed (see `connections::client_dir`), so this is
 ///   reachable with a perfectly correct username and password.
+/// * **`utf8mb4_0900_*`** — MySQL 8's own default collation family, which
+///   MariaDB has never implemented (it stopped at the `unicode_520` set).
+///   `mysqldump` writes the source server's default collation into every
+///   `CREATE TABLE`, so a dump taken from a MySQL 8 server — including one
+///   of Rezure's own remote connections — fails on line one of the import
+///   if the target is MariaDB, with no correct username, password or grant
+///   that would have prevented it.
 fn hint_for(detail: &str) -> Option<&'static str> {
     let lower = detail.to_lowercase();
     if detail.contains("1698") {
@@ -483,6 +495,15 @@ fn hint_for(detail: &str) -> Option<&'static str> {
             "this account uses MySQL 8's authentication plugin, which the MariaDB client can't \
              speak. Install a MySQL build under C:\\rezure\\custom\\mysql\\ so Rezure has a \
              matching client, or give the account mysql_native_password on the server",
+        );
+    }
+    if lower.contains("unknown collation") && lower.contains("0900") {
+        return Some(
+            "this dump came from a MySQL 8 server, and utf8mb4_0900_* is a MySQL-8-only \
+             collation family MariaDB has never implemented. Import it against a MySQL build \
+             instead (add one under C:\\rezure\\custom\\mysql\\), or open the .sql file and \
+             replace utf8mb4_0900_ai_ci (and any other utf8mb4_0900_* entries) with \
+             utf8mb4_unicode_ci before importing",
         );
     }
     None
@@ -779,12 +800,104 @@ fn remote_dump_args(conn: &Conn) -> Vec<String> {
     args
 }
 
+/// How often the destination file's size is checked while a dump is in
+/// flight — frequent enough that a progress bar reads as live, not so
+/// frequent that polling the filesystem competes with the dump itself for
+/// disk time.
+const EXPORT_POLL_INTERVAL: Duration = Duration::from_millis(400);
+
+/// What the Databases page renders as a progress bar during
+/// [`export_database`].
+///
+/// `estimated_total_bytes` is exactly that — an estimate, not a promise. A
+/// `.sql` dump is text (`INSERT` statements, hex-escaped BLOBs) written from
+/// the schema's raw `data_length + index_length`, and the two rarely match
+/// byte for byte. The frontend is expected to cap the displayed percentage
+/// below 100% until the export actually finishes, the same way a download
+/// with a rough `Content-Length` would.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportProgress {
+    pub name: String,
+    pub bytes_written: u64,
+    pub estimated_total_bytes: Option<u64>,
+}
+
+/// Event name the frontend subscribes to via `listen()` for export progress.
+pub const EXPORT_PROGRESS_EVENT: &str = "database://export-progress";
+
+fn emit_export_progress(app: &AppHandle, progress: &ExportProgress) {
+    // Best-effort — a dropped event shouldn't abort an otherwise-fine
+    // export, it just costs the progress bar one tick.
+    if let Err(err) = app.emit(EXPORT_PROGRESS_EVENT, progress) {
+        log::warn!("failed to emit export progress: {err}");
+    }
+}
+
+/// A dump in flight, tracked so [`cancel_export`] has something to kill.
+struct RunningExport {
+    child: Child,
+    /// Set by [`cancel_export`], so once the killed process actually exits
+    /// [`watch_export`] can tell "the user stopped this" apart from "the
+    /// client crashed" — the exit status alone can't distinguish them.
+    cancelled: bool,
+}
+
+fn export_registry() -> &'static Mutex<HashMap<String, RunningExport>> {
+    static EXPORTS: OnceLock<Mutex<HashMap<String, RunningExport>>> = OnceLock::new();
+    EXPORTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn exports() -> MutexGuard<'static, HashMap<String, RunningExport>> {
+    export_registry().lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Kills a dump still in progress, if `name` has one.
+///
+/// A race with the dump finishing on its own is expected and harmless: if
+/// it has already exited there's nothing left to kill, and this just
+/// reports that rather than treating it as an error.
+pub fn cancel_export(name: &str) -> bool {
+    match exports().get_mut(name) {
+        Some(export) => {
+            export.cancelled = true;
+            let _ = export.child.kill();
+            true
+        }
+        None => false,
+    }
+}
+
+/// The schema's current size, in the same bytes [`list_databases`] reports.
+///
+/// Used only as the progress bar's denominator, so a failure here (a schema
+/// that vanished between listing and exporting, a query hiccup) costs a
+/// percentage, not the export — callers treat it as best-effort.
+fn schema_size_bytes(conn: &Conn, name: &str) -> Result<u64, AppError> {
+    let rows = query_on(
+        conn,
+        &format!(
+            "SELECT COALESCE(SUM(data_length + index_length), 0) FROM \
+             information_schema.tables WHERE table_schema = '{name}'"
+        ),
+    )?;
+    rows.first()
+        .and_then(|row| row.first())
+        .and_then(|value| value.parse().ok())
+        .ok_or_else(|| AppError::DatabaseQueryFailed("no size reported".to_string()))
+}
+
 /// Dumps `name` to a timestamped `.sql` file and returns its path.
 ///
 /// A remote dump is prefixed with the connection's name: a `blog-*.sql`
 /// pulled from staging and one taken locally are otherwise indistinguishable
 /// in the dumps folder, and importing the wrong one is silent.
-pub fn export_database(name: &str) -> Result<PathBuf, AppError> {
+///
+/// `app` is `None` only from the `#[ignore]`d integration test at the bottom
+/// of this module, which has no running Tauri app to emit progress through.
+/// Every real caller goes through `commands::database::export_database`,
+/// which always has one.
+pub fn export_database(app: Option<&AppHandle>, name: &str) -> Result<PathBuf, AppError> {
     validate_identifier(name, "database")?;
     let conn = active_conn()?;
 
@@ -798,6 +911,10 @@ pub fn export_database(name: &str) -> Result<PathBuf, AppError> {
         .unwrap_or_default();
     let dest = dir.join(format!("{prefix}{name}-{}.sql", timestamp()));
 
+    // Best-effort: a database whose size can't be re-read here still
+    // exports, just without a percentage to show for it.
+    let estimated_total_bytes = schema_size_bytes(&conn, name).ok();
+
     // `mariadb-dump` writes the dump to stdout, so this redirects it into
     // the file rather than passing a path the client would have to quote.
     let file = std::fs::File::create(&dest)
@@ -807,20 +924,102 @@ pub fn export_database(name: &str) -> Result<PathBuf, AppError> {
     if conn.is_remote() {
         command.args(remote_dump_args(&conn));
     }
-    let output = command
-        .args(["--databases", name])
+    // Deliberately *not* `--databases name`: that flag makes `mysqldump`
+    // embed its own `CREATE DATABASE`/`USE \`name\`` at the top of the
+    // file, and a dump imported into a *different* database name — the
+    // whole point of the "Import into" field — would run every statement
+    // in it under that embedded `USE` instead, silently writing into the
+    // original database (creating it first if it happens not to exist) and
+    // leaving the one the user actually asked for empty. Passing `name`
+    // bare dumps just that database's tables, with no `USE` to fight the
+    // one `import_sql` already selects.
+    let child = command
+        .arg(name)
         .stdout(file)
+        .stderr(Stdio::piped())
         .hidden()
-        .output()
+        .spawn()
         .map_err(|e| AppError::DatabaseQueryFailed(e.to_string()))?;
 
-    if !output.status.success() {
+    exports().insert(
+        name.to_string(),
+        RunningExport {
+            child,
+            cancelled: false,
+        },
+    );
+
+    // The registry entry is this function's own, start to finish — removed
+    // here regardless of how `watch_export` returned, so a failed or
+    // cancelled dump can't leave a dead entry that shadows the next export
+    // of the same database.
+    let result = watch_export(app, &conn, name, &dest, estimated_total_bytes);
+    exports().remove(name);
+    result
+}
+
+/// Polls the running dump until it exits, emitting [`ExportProgress`] as the
+/// destination file grows.
+///
+/// A file-size poll rather than instrumenting `ssh.exe`'s traffic: the
+/// tunnel forwards raw, uncompressed bytes (see `services::tunnel`), so the
+/// file this writes is already the most direct measurement of progress
+/// there is — no extra plumbing, and it works identically for a local
+/// export that has no tunnel at all.
+fn watch_export(
+    app: Option<&AppHandle>,
+    conn: &Conn,
+    name: &str,
+    dest: &Path,
+    estimated_total_bytes: Option<u64>,
+) -> Result<PathBuf, AppError> {
+    loop {
+        std::thread::sleep(EXPORT_POLL_INTERVAL);
+
+        if let Some(app) = app {
+            let bytes_written = std::fs::metadata(dest).map(|m| m.len()).unwrap_or(0);
+            emit_export_progress(
+                app,
+                &ExportProgress {
+                    name: name.to_string(),
+                    bytes_written,
+                    estimated_total_bytes,
+                },
+            );
+        }
+
+        let mut guard = exports();
+        // Only `export_database` ever removes its own entry, and it does so
+        // after this loop returns — so a missing one here points at a bug
+        // in that bookkeeping, not a race worth handling quietly.
+        let export = guard
+            .get_mut(name)
+            .expect("export_database's own registry entry is missing");
+        let status = match export.child.try_wait() {
+            Ok(Some(status)) => status,
+            Ok(None) => continue,
+            Err(e) => return Err(AppError::DatabaseQueryFailed(e.to_string())),
+        };
+        let cancelled = export.cancelled;
+        let mut stderr = Vec::new();
+        if let Some(mut pipe) = export.child.stderr.take() {
+            let _ = pipe.read_to_end(&mut stderr);
+        }
+        drop(guard);
+
         // Don't leave a half-written or empty .sql behind looking like a
-        // successful export.
-        let _ = std::fs::remove_file(&dest);
-        return Err(client_error(&conn, &output.stderr, "the export failed"));
+        // successful export, whether it was cancelled or it failed on its
+        // own.
+        if cancelled {
+            let _ = std::fs::remove_file(dest);
+            return Err(AppError::ExportCancelled(name.to_string()));
+        }
+        if !status.success() {
+            let _ = std::fs::remove_file(dest);
+            return Err(client_error(conn, &stderr, "the export failed"));
+        }
+        return Ok(dest.to_path_buf());
     }
-    Ok(dest)
 }
 
 /// A connection name reduced to something safe to put in a filename.
@@ -1193,6 +1392,23 @@ mod tests {
         assert!(message.contains("MariaDB client can't speak"), "{message}");
     }
 
+    /// The exact failure of importing a MySQL 8 dump into MariaDB: no wrong
+    /// credential or grant is involved, just a collation MariaDB has never
+    /// implemented.
+    #[test]
+    fn a_mysql_8_only_collation_names_the_cross_engine_cause() {
+        let conn = conn_for(TlsMode::Preferred, Engine::MariaDb, None);
+        let message = client_error(
+            &conn,
+            b"ERROR 1273 (HY000) at line 22: Unknown collation: 'utf8mb4_0900_ai_ci'",
+            "the import failed",
+        )
+        .to_string();
+        assert!(message.contains("ERROR 1273"), "{message}");
+        assert!(message.contains("MySQL 8 server"), "{message}");
+        assert!(message.contains("utf8mb4_unicode_ci"), "{message}");
+    }
+
     #[test]
     fn an_error_with_no_known_pitfall_is_left_exactly_as_the_server_wrote_it() {
         let conn = conn_for(TlsMode::Preferred, Engine::MariaDb, None);
@@ -1207,6 +1423,13 @@ mod tests {
     fn option_values_escape_what_an_option_file_would_otherwise_eat() {
         assert_eq!(escape_option_value(r#"pa\ss"word"#), r#"pa\\ss\"word"#);
         assert_eq!(escape_option_value("plain"), "plain");
+    }
+
+    /// The ordinary race: the user clicks Cancel just as the dump finishes
+    /// on its own. This must read as "nothing to stop", not as an error.
+    #[test]
+    fn cancelling_an_export_that_is_not_running_reports_nothing_to_stop() {
+        assert!(!cancel_export("no_such_export_is_running"));
     }
 
     #[test]
@@ -1263,7 +1486,7 @@ mod tests {
         assert_eq!(created.collation, "utf8mb4_unicode_ci");
         assert_eq!(created.table_count, 0);
 
-        let dump = export_database(name).unwrap();
+        let dump = export_database(None, name).unwrap();
         assert!(dump.is_file(), "export must leave a real file behind");
         println!("dumped to {}", dump.display());
 
@@ -1272,6 +1495,51 @@ mod tests {
             !list_databases().unwrap().iter().any(|db| db.name == name),
             "the dropped database must be gone from the list"
         );
+        let _ = std::fs::remove_file(dump);
+    }
+
+    /// The bug this guards against: `mysqldump --databases` bakes a `USE
+    /// \`source\`;` into the file, and importing it under a *different*
+    /// name used to run every statement under that embedded `USE` instead
+    /// — silently recreating `source` (even after it had just been
+    /// dropped) and leaving the name actually typed into "Import into"
+    /// empty.
+    ///
+    /// `cargo test --lib services::database::tests::an_export_survives_being_imported_under_a_new_name -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn an_export_survives_being_imported_under_a_new_name() {
+        let source = "rezure_selftest_rename_src";
+        let target = "rezure_selftest_rename_dst";
+        let _ = drop_database(source);
+        let _ = drop_database(target);
+
+        create_database(source, "utf8mb4_unicode_ci").unwrap();
+        execute(&format!("CREATE TABLE `{source}`.`t` (id INT PRIMARY KEY)")).unwrap();
+        execute(&format!("INSERT INTO `{source}`.`t` VALUES (1)")).unwrap();
+
+        let dump = export_database(None, source).unwrap();
+
+        // Gone, so a dump that still names `source` internally has nothing
+        // to silently resurrect — if the bug were back, it would reappear
+        // here instead of `target` getting the data.
+        drop_database(source).unwrap();
+
+        import_sql(target, &dump).unwrap();
+
+        let found = list_databases().unwrap();
+        assert!(
+            found
+                .iter()
+                .any(|db| db.name == target && db.table_count == 1),
+            "the renamed import must land in {target}, not {source}: {found:?}"
+        );
+        assert!(
+            !found.iter().any(|db| db.name == source),
+            "the import must not have silently recreated {source}: {found:?}"
+        );
+
+        drop_database(target).unwrap();
         let _ = std::fs::remove_file(dump);
     }
 }
