@@ -9,9 +9,14 @@
 //! turns that into one line, before the browser is even opened.
 //!
 //! The PHP it asks is deliberately the *serving* one: the active version,
-//! started with the same generated ini and the same [`php_ini::SCAN_DIR_ENV`]
-//! the FastCGI service gets. Asking a differently configured PHP would produce
-//! an answer that is true of nothing.
+//! started with the same generated ini and the same environment
+//! ([`php_ini::apply_process_env`]) the FastCGI service gets. Asking a
+//! differently configured PHP would produce an answer that is true of nothing.
+//!
+//! It also asks one question no `composer.json` states: can that PHP verify
+//! an HTTPS certificate at all? Without a CA bundle the answer is no, and the
+//! symptom — cURL error 60 on the first outbound API call — lands far from
+//! the cause. See [`TlsCheck`].
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -19,7 +24,7 @@ use std::process::Command;
 
 use serde::Serialize;
 
-use super::{php, php_ini};
+use super::{ca_bundle, php, php_ini};
 use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
 
@@ -52,6 +57,104 @@ pub struct ProjectDiagnosis {
     /// that what counts as "a problem" — required, not dev-only, not loaded
     /// — is defined once, next to the data it is about.
     pub missing: Vec<String>,
+}
+
+/// What an outbound HTTPS request from the serving PHP ran into.
+///
+/// A separate check from [`diagnose`], not a field of it: it's about the PHP,
+/// not the project — a WordPress site with no `composer.json` breaks on it
+/// just the same — and it waits on the network, which the extension check
+/// shouldn't have to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TlsOutcome {
+    /// The certificate verified.
+    Verified,
+    /// The connection worked but the certificate couldn't be verified — the
+    /// cURL error 60 case, almost always a missing or stale CA bundle.
+    Untrusted,
+    /// Never got as far as a certificate (offline, DNS, a firewall). Says
+    /// nothing about the bundle either way.
+    Unreachable,
+    /// Couldn't be tested: `curl` isn't loaded, or PHP didn't run.
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TlsCheck {
+    /// Whether `etc/cacert.pem` exists — reported on its own because it's
+    /// the fix, and it's knowable even when the network test is not.
+    pub bundle_installed: bool,
+    pub outcome: TlsOutcome,
+    /// cURL's own message, for anything but [`TlsOutcome::Verified`].
+    pub detail: Option<String>,
+}
+
+/// Where the HTTPS test goes. Packagist because it's what Composer talks to
+/// first — a PHP that can't reach it can't install anything either.
+const TLS_PROBE_URL: &str = "https://repo.packagist.org/packages.json";
+
+/// Prints `<curl errno> <curl error>`, or `nocurl`. No double quotes, so it
+/// passes through Windows argument quoting untouched. `{url}` is replaced
+/// with [`TLS_PROBE_URL`].
+const TLS_PROBE_SCRIPT: &str = "if (!function_exists('curl_init')) { echo 'nocurl'; exit; } \
+    $c = curl_init('{url}'); \
+    curl_setopt_array($c, [CURLOPT_NOBODY => true, CURLOPT_CONNECTTIMEOUT => 4, CURLOPT_TIMEOUT => 6]); \
+    curl_exec($c); \
+    echo curl_errno($c), ' ', curl_error($c);";
+
+/// cURL error codes that mean "reached the server, didn't trust it":
+/// 60 `CURLE_PEER_FAILED_VERIFICATION`, 77 `CURLE_SSL_CACERT_BADFILE`.
+const UNTRUSTED_CODES: [u32; 2] = [60, 77];
+
+/// Reads the probe's output into an outcome and, unless it verified, why.
+fn classify_tls(output: &str) -> (TlsOutcome, Option<String>) {
+    let output = output.trim();
+    if output == "nocurl" {
+        return (
+            TlsOutcome::Unavailable,
+            Some("the curl extension isn't loaded".to_string()),
+        );
+    }
+    let (code, message) = output.split_once(' ').unwrap_or((output, ""));
+    let message = Some(message.trim().to_string()).filter(|m| !m.is_empty());
+    match code.parse::<u32>() {
+        Ok(0) => (TlsOutcome::Verified, None),
+        Ok(code) if UNTRUSTED_CODES.contains(&code) => (TlsOutcome::Untrusted, message),
+        Ok(_) => (TlsOutcome::Unreachable, message),
+        Err(_) => (
+            TlsOutcome::Unavailable,
+            Some(format!("unexpected output from PHP: {output}")),
+        ),
+    }
+}
+
+/// Runs the HTTPS probe under the serving configuration. Never an error:
+/// whatever goes wrong is itself the finding.
+fn check_tls(php_exe: &Path) -> TlsCheck {
+    let script = TLS_PROBE_SCRIPT.replace("{url}", TLS_PROBE_URL);
+    let ran = serving_php(php_exe).and_then(|mut cmd| {
+        cmd.arg("-r")
+            .arg(&script)
+            .output()
+            .map_err(|e| AppError::Io(format!("could not run {}: {e}", php_exe.display())))
+    });
+    let (outcome, detail) = match ran {
+        Ok(output) => classify_tls(&String::from_utf8_lossy(&output.stdout)),
+        Err(err) => (TlsOutcome::Unavailable, Some(err.to_string())),
+    };
+    TlsCheck {
+        bundle_installed: ca_bundle::installed().is_some(),
+        outcome,
+        detail,
+    }
+}
+
+/// [`check_tls`] against the active PHP — the one serving every project that
+/// doesn't pin its own version.
+pub fn check_active_tls() -> Result<TlsCheck, AppError> {
+    Ok(check_tls(&php::active_exe()?))
 }
 
 /// The subset of `extensions` the served app actually breaks without.
@@ -126,15 +229,20 @@ fn parse_modules(output: &str) -> BTreeSet<String> {
         .collect()
 }
 
+/// `php_exe` set up exactly the way a served request's PHP is — the
+/// generated ini and the same environment — ready for its arguments.
+fn serving_php(php_exe: &Path) -> Result<Command, AppError> {
+    let ini_path = php_ini::ensure_php_ini(php_exe)?;
+    let mut cmd = Command::new(php_exe);
+    php_ini::apply_process_env(&mut cmd, php_exe)?;
+    cmd.arg("-c").arg(&ini_path).hidden();
+    Ok(cmd)
+}
+
 /// Runs `php -m` under exactly the configuration a served request gets.
 fn loaded_modules(php_exe: &Path) -> Result<BTreeSet<String>, AppError> {
-    let ini_path = php_ini::ensure_php_ini(php_exe)?;
-    let output = Command::new(php_exe)
-        .env(php_ini::SCAN_DIR_ENV, php_ini::ensure_conf_d()?)
-        .arg("-c")
-        .arg(&ini_path)
+    let output = serving_php(php_exe)?
         .arg("-m")
-        .hidden()
         .output()
         .map_err(|e| AppError::Io(format!("could not run {}: {e}", php_exe.display())))?;
 
@@ -333,6 +441,57 @@ mod tests {
         println!("missing: {:?}", diagnosis.missing);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_verified_probe_carries_no_detail() {
+        assert_eq!(classify_tls("0 "), (TlsOutcome::Verified, None));
+    }
+
+    /// The case this check exists for.
+    #[test]
+    fn error_60_reads_as_an_untrusted_certificate() {
+        let (outcome, detail) =
+            classify_tls("60 SSL certificate problem: unable to get local issuer certificate");
+        assert_eq!(outcome, TlsOutcome::Untrusted);
+        assert_eq!(
+            detail.as_deref(),
+            Some("SSL certificate problem: unable to get local issuer certificate")
+        );
+        assert_eq!(
+            classify_tls("77 error setting certificate file").0,
+            TlsOutcome::Untrusted
+        );
+    }
+
+    /// Offline says nothing about the bundle, so it mustn't read as a fault.
+    #[test]
+    fn network_failures_are_unreachable_not_untrusted() {
+        assert_eq!(
+            classify_tls("6 Could not resolve host: repo.packagist.org").0,
+            TlsOutcome::Unreachable
+        );
+        assert_eq!(
+            classify_tls("28 Connection timed out").0,
+            TlsOutcome::Unreachable
+        );
+    }
+
+    #[test]
+    fn a_php_without_curl_or_with_garbled_output_is_unavailable() {
+        assert_eq!(classify_tls("nocurl").0, TlsOutcome::Unavailable);
+        assert_eq!(
+            classify_tls("PHP Warning: something").0,
+            TlsOutcome::Unavailable
+        );
+    }
+
+    /// Runs the real probe against the installed PHP. Run with:
+    /// `cargo test --lib services::doctor::tests::print_tls_check -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn print_tls_check() {
+        println!("{:?}", check_active_tls().unwrap());
     }
 
     /// A project with no `composer.json` is a result, not a failure — most of

@@ -9,14 +9,22 @@
 //!
 //! # Where the checksum comes from
 //!
-//! `getcomposer.org/versions` is not documented as a stable public API and
-//! its exact shape hasn't been confirmed against a live response from this
-//! environment (no network access here) — see the module's tests. Two
+//! `getcomposer.org/versions` is not documented as a stable public API. Two
 //! plausible shapes exist in the wild: the JSON entry carrying its own
 //! `sha256` field, or the checksum living in a sidecar file at
 //! `<download url>.sha256sum`. [`checksum_for`] tries the first and falls
 //! back to the second, so this works either way without needing to guess
 //! which one is current before shipping.
+//!
+//! # `path` is root-relative, not a bare filename
+//!
+//! Confirmed against a live response (a user's failed install produced
+//! `.../download/2.10.3//download/2.10.3/composer.phar.sha256sum` — the
+//! doubled segment is what a bare-filename assumption looks like once the
+//! real value turns out to already be `/download/2.10.3/composer.phar`).
+//! [`resolve_download_url`] normalizes every shape the field is known to
+//! take — root-relative, absolute, or a plain filename — so it can't
+//! silently double up again if the shape changes.
 
 use std::sync::{Mutex, OnceLock};
 
@@ -27,7 +35,7 @@ use super::binaries;
 use crate::utils::error::AppError;
 
 const VERSIONS_URL: &str = "https://getcomposer.org/versions";
-const DOWNLOAD_BASE: &str = "https://getcomposer.org/download";
+const SITE_ROOT: &str = "https://getcomposer.org";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -45,6 +53,21 @@ pub struct ComposerRelease {
 fn cache() -> &'static Mutex<Option<Vec<ComposerRelease>>> {
     static CACHE: OnceLock<Mutex<Option<Vec<ComposerRelease>>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(None))
+}
+
+/// Turns a `getcomposer.org/versions` entry's `path` field into a full
+/// download URL, whatever shape that field takes: already absolute
+/// (`https://…`), root-relative (`/download/2.10.3/composer.phar` — the
+/// shape confirmed live, see the module doc), or a bare filename
+/// (`composer.phar`, this module's original guess, kept as a fallback).
+fn resolve_download_url(version: &str, path: &str) -> String {
+    if path.starts_with("http://") || path.starts_with("https://") {
+        path.to_string()
+    } else if let Some(rest) = path.strip_prefix('/') {
+        format!("{SITE_ROOT}/{rest}")
+    } else {
+        format!("{SITE_ROOT}/download/{version}/{path}")
+    }
 }
 
 /// Parses `getcomposer.org/versions` into the releases Rezure offers.
@@ -76,7 +99,7 @@ fn parse(body: &str) -> Result<Vec<ComposerRelease>, AppError> {
 
         releases.push(ComposerRelease {
             version: version.to_string(),
-            download_url: format!("{DOWNLOAD_BASE}/{version}/{path}"),
+            download_url: resolve_download_url(version, path),
             sha256: entry
                 .get("sha256")
                 .and_then(Value::as_str)
@@ -184,13 +207,16 @@ pub async fn checksum_for(release: &ComposerRelease) -> Result<String, AppError>
 mod tests {
     use super::*;
 
-    /// Shape reconstructed from what `getcomposer.org/versions` is known to
-    /// publish — **not** verified against a live response, since this
-    /// environment has no network access.
+    /// Mixed on purpose: `2.10.3`'s root-relative `path` is the shape
+    /// confirmed against a live response (see the module doc); the
+    /// `2.8.x`/`2.9.x`/`1.10.27` entries keep the bare-filename shape this
+    /// module originally guessed, so both branches of
+    /// [`resolve_download_url`] stay covered.
     const SAMPLE: &str = r#"{
       "stable": [
         { "path": "composer.phar", "version": "2.8.1", "sha256": "aaaa000000000000000000000000000000000000000000000000000000000a", "min-php": 70205 },
-        { "path": "composer.phar", "version": "2.8.0", "min-php": 70205 }
+        { "path": "composer.phar", "version": "2.8.0", "min-php": 70205 },
+        { "path": "/download/2.10.3/composer.phar", "version": "2.10.3", "min-php": 70205 }
       ],
       "preview": [
         { "path": "composer.phar", "version": "2.9.0-RC1", "min-php": 70205 }
@@ -204,7 +230,17 @@ mod tests {
     fn only_stable_releases_are_offered() {
         let releases = parse(SAMPLE).unwrap();
         let versions: Vec<&str> = releases.iter().map(|r| r.version.as_str()).collect();
-        assert_eq!(versions, ["2.8.1", "2.8.0"]);
+        assert_eq!(versions, ["2.10.3", "2.8.1", "2.8.0"]);
+    }
+
+    #[test]
+    fn a_root_relative_path_resolves_without_duplicating_the_version_segment() {
+        let releases = parse(SAMPLE).unwrap();
+        let newest = releases.iter().find(|r| r.version == "2.10.3").unwrap();
+        assert_eq!(
+            newest.download_url,
+            "https://getcomposer.org/download/2.10.3/composer.phar"
+        );
     }
 
     #[test]

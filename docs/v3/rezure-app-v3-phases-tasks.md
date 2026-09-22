@@ -1,6 +1,12 @@
 # Rezure (Desktop App) — v3: Advanced Features
 
-Roadmap fitur lanjutan Rezure. Beberapa fitur yang sebelumnya direncanakan di v3 (Quick App Installer, Auto HTTPS/mkcert, Integrated Terminal, Embedded Database GUI) **sudah tersedia** di rilis sebelumnya — tidak dimasukkan lagi di sini.
+Roadmap fitur lanjutan Rezure. Beberapa fitur yang sebelumnya direncanakan di v3 (Quick App Installer, Integrated Terminal, Embedded Database GUI) **sudah tersedia** di rilis sebelumnya — tidak dimasukkan lagi di sini.
+
+> **Koreksi:** dokumen ini dulu juga menyebut **Auto HTTPS/mkcert** sudah tersedia. Itu keliru —
+> tidak ada kode HTTPS lokal sama sekali (vhost hanya `listen 80`, tidak ada `ssl_certificate`
+> maupun integrasi mkcert). Fitur ini **belum dijadwalkan** ke fase mana pun; kalau diinginkan,
+> perlu diputuskan maintainer dan dibuatkan fase sendiri. Jangan tertukar dengan CA bundle di
+> bagian hotfix bawah — itu soal PHP memverifikasi HTTPS *keluar*, bukan melayani HTTPS lokal.
 
 ---
 
@@ -62,24 +68,6 @@ sudah dipakai di `PhpConfigCard.vue` dan `RuntimeSwitchRow.vue`.
 
 ---
 
-## Fase 3.3 — Project Health Dashboard
-
-**Tujuan:** Ringkasan kondisi tiap project dalam satu pandangan.
-
-**Prasyarat sekarang sudah ada:** dulu gap terbesar fase ini adalah project belum punya konsep
-"pakai service/port yang mana" — PHP versi cuma satu secara global, semua vhost proxy ke port yang
-sama. [Fase 3.11](#fase-311--per-project-php-version-concurrent) menutup gap itu: `ProjectInfo`
-sekarang punya `php_version` sendiri per-project, dan `services::php_pool` mapping versi ke port.
-Konsolidasi status di bawah ini bisa langsung baca dari situ, bukan mulai dari nol.
-
-### Tasks
-- [ ] Konsolidasi status semua service terkait per-project dalam satu view
-- [ ] Port conflict detector yang lebih menyeluruh (across semua project, bukan cuma saat start service)
-- [ ] Tampilkan ukuran log per service, dengan opsi clear log
-- [ ] Indikator visual sederhana (misal: sehat/perlu perhatian) berdasarkan status gabungan
-
----
-
 ## Fase 3.4 — Auto-Update Mechanism
 
 **Tujuan:** Distribusi update tidak lagi manual — user diberi tahu dan bisa update langsung dari dalam app.
@@ -138,11 +126,11 @@ Modal harus digeneralisasi **lebih dulu**, baru dropdown dibersihkan. Kalau diba
 - [x] Katalog MariaDB dari REST API `downloads.mariadb.org/rest-api/mariadb/<branch>/` — `services::mariadb_catalog`, daftar branch di-hardcode (`10.6`/`10.11`/`11.4`/`11.8`, perlu di-bump manual kalau MariaDB rilis branch baru) karena API-nya tidak punya endpoint "list semua branch" yang layak diandalkan; checksum SHA-256 tetap dari response live, bukan pinned manual
 - [x] Katalog Composer dari `getcomposer.org/versions` — `services::composer_catalog` + `services::composer` (baru, install/active-version tracking, `composer.phar` sekarang per-versi di `bin/composer/<versi>/` bukan satu file flat tanpa checksum seperti sebelumnya). Checksum dicoba dari field JSON dulu, fallback ke sidecar `.sha256sum` kalau field-nya kosong — dua-duanya di-support sekaligus karena skema asli `getcomposer.org/versions` tidak bisa dipastikan tanpa akses live
 - [x] Katalog Node.js dari `nodejs.org/dist/index.json` + `SHASUMS256.txt` per versi — `services::node_catalog`, cuma tampilkan versi terbaru tiap LTS line + 1 Current terbaru (bukan semua ratusan rilis). **Instalasi doang** (`bin/node/<versi>/node.exe` muncul di disk, checksum-verified) — belum ada PATH/per-project switching, itu memang fondasi buat Fase 3.5.1 sesuai rencana awal, bukan bagian dari task ini
-- [ ] Nginx: masih sesuai open question di bawah, **belum diputuskan/diikutkan** — tapi modalnya sudah siap kalau nanti ada katalog: step Nginx di `InstallVersionModal.vue` sekarang menampilkan satu entry pinned dari `binaries::MANIFEST` (jalur yang sudah ada), tinggal diganti ke katalog beneran begitu opsi (b)/(c) diputuskan
+- [ ] Nginx: **dipindah ke v4** ([Fase 4.7](../v4/rezure-app-v4-phases-tasks.md#fase-47--nginx-multi-version-catalog)) — belum diputuskan/diikutkan di sini, tapi modalnya sudah siap kalau nanti ada katalog: step Nginx di `InstallVersionModal.vue` sekarang menampilkan satu entry pinned dari `binaries::MANIFEST` (jalur yang sudah ada), tinggal diganti ke katalog beneran begitu keputusan di Fase 4.7 diambil
 
 **Belum diuji lawan API sungguhan** — `mariadb_catalog.rs`/`composer_catalog.rs`/`node_catalog.rs` ditulis tanpa akses jaringan dari sesi kerja ini, jadi parsing-nya berdasarkan dokumentasi/pengetahuan bentuk API masing-masing, bukan response nyata yang sudah dicek. Test unit-nya pakai sample JSON hasil rekonstruksi (didokumentasikan begitu di tiap file), dan tiap modul punya test `#[ignore]` (`fetches_the_real_index`) yang harus dijalankan manual lawan API sungguhan sebelum rilis — kalau bentuk field-nya meleset, gejalanya "katalog kosong/error" (aman, bukan install tanpa verifikasi), tapi tetap perlu dikonfirmasi.
 
-**Python sengaja tidak diikutkan** — python.org tidak menerbitkan index rilis dengan SHA-256 yang bisa diambil otomatis (API publiknya cuma expose MD5), persis masalah yang sama dengan Nginx di bawah. Ditunda sampai ada keputusan serupa opsi (a)/(b)/(c) untuk Python, bukan diselesaikan diam-diam dengan checksum yang lebih lemah.
+**Python sengaja tidak diikutkan** — python.org tidak menerbitkan index rilis dengan SHA-256 yang bisa diambil otomatis (API publiknya cuma expose MD5), persis masalah yang sama dengan Nginx (lihat [Fase 4.7](../v4/rezure-app-v4-phases-tasks.md#fase-47--nginx-multi-version-catalog) di v4). Ditunda sampai ada keputusan serupa opsi (a)/(b)/(c) untuk Python, bukan diselesaikan diam-diam dengan checksum yang lebih lemah.
 
 ### Catatan: MariaDB itu stateful
 
@@ -150,15 +138,9 @@ PHP/Nginx/Composer stateless — ganti versi cuma soal ganti binary. MariaDB pun
 
 Ini justru nyambung ke [`mysql-profile-switcher-spec.md`](../v1/mysql-profile-switcher-spec.md), yang sudah menyebut field `mysql_version` untuk "pick a compatible bundled binary" dan meminta form berisi "dropdown of bundled versions". Artinya multi-versi MariaDB adalah **prasyarat yang spec itu sudah asumsikan ada** — user yang mau mengadopsi datadir Laragon buatan MySQL 8.0.30 tidak akan terlayani oleh MariaDB 11.2.2 yang sekarang jadi satu-satunya.
 
-### Open question: Nginx tidak punya checksum sama sekali
-
-Aturan codebase ini tegas — tidak ada download tanpa SHA-256 terverifikasi (lihat alasannya di `php_catalog.rs` dan `php_ext.rs`). Nginx tidak menerbitkan index rilis yang bisa dibaca mesin **maupun** file checksum apapun: di `nginx.org/download/` tiap `.zip` cuma ditemani `.zip.asc` (signature PGP). Tiga opsi:
-
-- **(a)** Tetap satu versi pinned, tapi rutin di-bump — status quo, tapi 1.25.3 sudah ketinggalan jauh
-- **(b)** Tabel pinned berisi beberapa versi — trade-off yang persis sama dengan katalog PECL di `php_ext.rs`, jadi presedennya sudah ada di codebase ini
-- **(c)** Implementasi verifikasi PGP — menambah dependency dan urusan manajemen key
-
-Rekomendasi: **(b)**, karena jumlah versi nginx yang relevan untuk local dev sedikit dan polanya sudah dikenal di codebase.
+Pertanyaan terbuka soal Nginx tidak punya checksum sama sekali (dan tiga opsi penyelesaiannya)
+sudah dipindah ke [Fase 4.7](../v4/rezure-app-v4-phases-tasks.md#fase-47--nginx-multi-version-catalog)
+di v4.
 
 ---
 
@@ -172,8 +154,8 @@ yang sama, jadi dua project butuh dua versi berbeda tidak mungkin dijalankan ber
 
 Bukan item dari roadmap awal — ditambahkan setelah pertanyaan langsung dari maintainer soal
 kelayakan isolated-mode ala Laragon Pro. Dikerjakan lebih dulu dari 3.6/3.10 karena ternyata
-jadi fondasi yang juga dibutuhkan [Fase 3.3](#fase-33--project-health-dashboard) (project ↔
-service/port mapping yang tadinya belum ada sama sekali).
+jadi fondasi yang juga dibutuhkan [Fase 4.5 — Project Health Dashboard](../v4/rezure-app-v4-phases-tasks.md#fase-45--project-health-dashboard)
+di v4 (project ↔ service/port mapping yang tadinya belum ada sama sekali).
 
 ### Cara kerja (ringkas)
 
@@ -291,9 +273,64 @@ murni soal port allocation + service lifecycle, bukan batasan PHP itu sendiri.
 
 ---
 
+## Hotfix — Stabilitas PHP & Batas Request (feedback client)
+
+**Latar belakang:** log nginx client menunjukkan ~4,6% request berakhir 502 (`connect() failed
+(10061) ... fastcgi://127.0.0.1:9000`), plus 413 untuk upload >1 MB dan `upstream timed out`.
+
+### Tasks
+- [x] **T1** — `PHP_FCGI_MAX_REQUESTS=0` di setiap spawn `php-cgi` (default maupun pooled).
+      Tanpa ini `php-cgi` keluar sendiri setelah 500 request. `services/process.rs`
+- [x] **T2** — `client_max_body_size`, `fastcgi_read_timeout` dan `fastcgi_send_timeout` di blok
+      `http {}` config utama nginx, diambil dari konstanta yang sama dengan php.ini
+      (`php_ini::BODY_SIZE_LIMIT_MB` = 64, `php_ini::MAX_EXECUTION_TIME_SECS` = 300).
+      Override user lewat `conf.d` **tidak** ikut dibaca, jadi user yang menaikkan
+      `post_max_size` di sana tetap dibatasi 64 MB oleh nginx
+- [x] **T3** — Watchdog `services::supervisor`: cek tiap 2 detik tanpa bergantung pada UI, restart
+      service yang crash dengan backoff 1/2/5/10/30 detik. Kalau crash 5 kali dalam 5 menit, restart
+      otomatis berhenti sampai user start/stop manual. Opt-in lewat
+      `Service::restarts_on_crash` (sekarang khusus PHP, bukan nginx/database). Stop manual
+      selalu menang karena flag `Service::crashed` direset oleh stop. Frontend refetch lewat event
+      `service://changed`
+- [ ] Belum diuji manual di app sungguhan (kill `php-cgi.exe` lewat Task Manager → harus balik
+      sendiri dalam ~1–3 detik; upload >1 MB → tidak 413 lagi)
+- [ ] **T4** — Worker pool per versi (N `php-cgi` dalam satu service, nginx `upstream`). Butuh
+      desain ulang alokasi port dulu karena `php_pool::BASE_PORT = 9001` sudah dipakai versi pinned
+
+### CA bundle & OpenSSL
+
+**Latar belakang:** `php_ini.rs` sudah menulis `curl.cainfo`/`openssl.cafile` kalau
+`etc/cacert.pem` ada, tapi tidak ada satu pun kode yang menaruh file itu di disk — instalasi baru
+kena `cURL error 60` untuk setiap HTTPS keluar dari PHP. Ditambah lagi, `php.ini` di folder versi
+(yang dibaca terminal) ditulis sekali dan tidak pernah dapat baris CA.
+
+- [x] **C1** — `services::ca_bundle`: `seed_bundled` menyalin bundle dari resource installer
+      (`bundled-bin/ca/`, di-stage `scripts/stage-bundled-binaries.ps1` dari URL curl.se bertanggal
+      dengan SHA-256 di-pin) ke `etc/cacert.pem` — kalau belum ada, atau kalau bundle installer lebih
+      baru (tanggal Mozilla di header). Bundle tanpa header curl.se dianggap milik user dan tidak
+      disentuh. Tombol **Download/Update** di halaman Switch (`PhpCaBundleCard.vue`) mengunduh
+      `cacert.pem` terbaru dari curl.se, diverifikasi lewat sidecar `.sha256`
+- [x] **C2** — `php_ini::repair_ca_directives`: menambahkan/memperbaiki `curl.cainfo` dan
+      `openssl.cafile` di `php.ini` folder versi, hanya dua baris itu. Directive yang sudah menunjuk
+      file yang ada (bundle korporat pilihan user) dibiarkan. Dijalankan saat startup untuk semua
+      versi, di `ensure_cli_php_ini`, dan setelah update bundle
+- [x] **C3** — Requirements check (`ProjectDoctorModal.vue`) sekarang juga menguji HTTPS dari PHP
+      yang melayani (`doctor::check_active_tls`, command `check_php_tls`, terpisah dari cek ekstensi
+      karena menunggu jaringan). Membedakan `untrusted` (error 60/77 → tawarkan download bundle)
+      dari `unreachable` (offline — bukan salah bundle)
+- [x] **C4** — `OPENSSL_CONF` → `extras/ssl/openssl.cnf` versi terkait, lewat helper baru
+      `php_ini::apply_process_env` yang sekarang dipakai ketiga tempat spawn PHP (FastCGI,
+      doctor, scaffold Composer). Terbukti di mesin nyata: `openssl_pkey_new()` `false` tanpa, `true`
+      dengan. **Sengaja tidak di-set machine-wide** untuk terminal user — Git dan tool OpenSSL lain
+      membaca variabel yang sama
+- [ ] Belum diuji manual di app sungguhan: installer hasil `npm run stage:binaries` + build di mesin
+      bersih (bundle ter-seed, `php artisan tinker` → `Http::get('https://…')` tidak error 60)
+
+---
+
 ## Dependency ke Proyek Lain
 
-Fase 3.4: `GET /api/v1/version/latest` di `laravel-api` **sudah** mengembalikan manifest bertanda tangan sesuai [`docs/version-contract.md`](../version-contract.md) (`VersionController`, kolom `signature`/`download_url` di `releases`). Yang masih tersisa cuma verifikasi end-to-end lawan rilis nyata — repo ini belum punya pipeline yang build+sign installer, jadi belum ada rilis sungguhan buat diuji; sementara kode sisi app sudah bisa diuji lokal lawan manifest tiruan (prosedur ada di doc kontrak itu). Fase 3.1, 3.3, 3.5, 3.6, 3.10, dan 3.11 sepenuhnya independen, tidak bergantung pada backend.
+Fase 3.4: `GET /api/v1/version/latest` di `laravel-api` **sudah** mengembalikan manifest bertanda tangan sesuai [`docs/version-contract.md`](../version-contract.md) (`VersionController`, kolom `signature`/`download_url` di `releases`). Yang masih tersisa cuma verifikasi end-to-end lawan rilis nyata — repo ini belum punya pipeline yang build+sign installer, jadi belum ada rilis sungguhan buat diuji; sementara kode sisi app sudah bisa diuji lokal lawan manifest tiruan (prosedur ada di doc kontrak itu). Fase 3.1, 3.5, 3.6, 3.10, dan 3.11 sepenuhnya independen, tidak bergantung pada backend.
 
 **Catatan soal analytics lanjutan (v3 `rezure-dashboard`):** fitur traffic by hour, breakdown negara, cohort retention, dll di dashboard **tidak membutuhkan perubahan apapun di app ini** — semua data granular yang dibutuhkan (timestamp, OS version, metadata service) sudah terkirim sejak fondasi telemetry v2. Geolocation negara diproses di sisi server dari IP request yang masuk, bukan dikirim dari client.
 
@@ -301,9 +338,11 @@ Fase 3.4: `GET /api/v1/version/latest` di `laravel-api` **sudah** mengembalikan 
 
 1. Fase 3.1 (One-click Tunneling) — independen, langsung menambah nilai bagi user
 2. **Fase 3.11 (Per-Project PHP Version) — selesai duluan**, di luar urutan aslinya, karena jadi
-   fondasi yang dibutuhkan Fase 3.3 (project ↔ service/port mapping) dan nempel ke infrastruktur
-   yang sama dengan 3.6 (`php_ini.rs`/`php_ext.rs`/`vhosts.rs`)
+   fondasi yang dibutuhkan Fase 4.5 di v4 (Project Health Dashboard — project ↔ service/port
+   mapping) dan nempel ke infrastruktur yang sama dengan 3.6 (`php_ini.rs`/`php_ext.rs`/`vhosts.rs`)
 3. Fase 3.6 (Bundled PHP Extension Toggle) — nempel langsung ke infrastruktur `php_ini.rs`/`php_ext.rs` yang sudah ada, scope kecil dan kontributor-friendly
 4. Fase 3.10 (Multi-Version Installer) — nyentuh halaman Switch dan `php_catalog.rs`, sebaiknya sebelum Fase 3.5.1 (Node.js switcher) yang bakal butuh katalognya
-5. Fase 3.3 (Project Health Dashboard) — sekarang bisa langsung mulai dari mapping project↔PHP yang sudah ada dari Fase 3.11
-6. Fase 3.4 (Auto-Update) — sisa cuma verifikasi E2E, butuh pipeline rilis nyata dulu
+5. Fase 3.4 (Auto-Update) — sisa cuma verifikasi E2E, butuh pipeline rilis nyata dulu
+
+**Fase 3.3 (Project Health Dashboard) dipindah ke v4** (jadi Fase 4.5) atas permintaan maintainer
+— lihat `docs/v4/rezure-app-v4-phases-tasks.md`.

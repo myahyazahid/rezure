@@ -144,6 +144,7 @@ mod tests {
             missing: false,
             domain_invalid: false,
             php_version: php_version.map(|v| v.to_string()),
+            node_version: None,
         }
     }
 

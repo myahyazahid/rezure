@@ -1,7 +1,11 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import type { PortHolder, ServiceInfo } from '@/types/service'
+
+// Keep in sync with `CHANGED_EVENT` in src-tauri/src/services/supervisor.rs
+const CHANGED_EVENT = 'service://changed'
 
 export const useServicesStore = defineStore('services', () => {
   const services = ref<ServiceInfo[]>([])
@@ -25,6 +29,13 @@ export const useServicesStore = defineStore('services', () => {
       loading.value = false
     }
   }
+
+  // The backend noticed a crash, restarted a service or gave up on one
+  // without the UI asking — refetch so a dead PHP doesn't still read as
+  // Running.
+  listen(CHANGED_EVENT, () => {
+    fetchAll()
+  })
 
   async function withPending(id: string, action: () => Promise<ServiceInfo>) {
     pendingIds.value.add(id)

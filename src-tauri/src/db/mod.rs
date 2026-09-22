@@ -49,6 +49,11 @@ fn migrations() -> &'static Migrations<'static> {
             // `services::php_pool` for how this lets projects on different
             // PHP versions run concurrently.
             M::up("ALTER TABLE projects ADD COLUMN php_version TEXT"),
+            // Same idea as `php_version`, for Node.js — `NULL` follows the
+            // global active version (`services::node`). No pool/port behind
+            // this one: it only decides what `services::launcher::open_terminal`
+            // puts first on `PATH` when opening this project's terminal.
+            M::up("ALTER TABLE projects ADD COLUMN node_version TEXT"),
         ])
     })
 }

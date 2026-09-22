@@ -131,6 +131,7 @@ fn linked_projects(scanned: &[ProjectInfo]) -> Vec<ProjectInfo> {
             // same as `last_opened_at`/`open_count` — a scan has no opinion
             // on PHP version.
             php_version: None,
+            node_version: None,
         });
     }
     projects
@@ -185,6 +186,7 @@ fn scan_www() -> Result<Vec<ProjectInfo>, AppError> {
             // Filled in by `commands::projects::list_projects` from SQLite —
             // a bare scan has no way to know this either.
             php_version: None,
+            node_version: None,
         });
     }
 

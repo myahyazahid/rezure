@@ -4,11 +4,13 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type {
   BundledExtension,
+  CaBundleStatus,
   ExtensionStatus,
   PhpPathStatus,
   PhpRelease,
   PhpSwitchResult,
   PhpVersion,
+  TlsCheck,
 } from '@/types/php'
 import type { InstallProgress } from '@/types/binary'
 
@@ -46,6 +48,14 @@ export const usePhpStore = defineStore('php', () => {
   const bundledExtensions = ref<BundledExtension[]>([])
   /** The extension id currently being toggled, or null. */
   const togglingExtension = ref<string | null>(null)
+
+  /** The CA bundle PHP verifies HTTPS against. Null until first read. */
+  const caBundle = ref<CaBundleStatus | null>(null)
+  const updatingCaBundle = ref(false)
+
+  /** The last HTTPS probe of the active PHP, from the requirements check. */
+  const tls = ref<TlsCheck | null>(null)
+  const checkingTls = ref(false)
 
   /** The optional system-wide PATH link. Null until first read. */
   const pathStatus = ref<PhpPathStatus | null>(null)
@@ -230,6 +240,59 @@ export const usePhpStore = defineStore('php', () => {
     }
   }
 
+  async function fetchCaBundle() {
+    try {
+      caBundle.value = await invoke<CaBundleStatus>('ca_bundle_status')
+    } catch {
+      // Only drives a status line — without it the card just doesn't show.
+      caBundle.value = null
+    }
+  }
+
+  /**
+   * Downloads curl.se's current CA bundle (checksum-verified) and points
+   * every installed version's terminal ini at it.
+   *
+   * Resolves to whether this *created* the bundle, or null on failure. A
+   * created one only reaches running sites after a PHP restart — the
+   * running `php-cgi` read its ini before the bundle existed — while an
+   * updated one is read afresh per connection. The caller says so rather
+   * than restarting a service the user didn't ask to have restarted.
+   */
+  async function updateCaBundle(): Promise<boolean | null> {
+    if (!caBundle.value) await fetchCaBundle()
+    const wasInstalled = caBundle.value?.installed ?? false
+    updatingCaBundle.value = true
+    error.value = null
+    try {
+      caBundle.value = await invoke<CaBundleStatus>('update_ca_bundle')
+      return !wasInstalled
+    } catch (e) {
+      error.value = errorMessage(e)
+      return null
+    } finally {
+      updatingCaBundle.value = false
+    }
+  }
+
+  /** Asks the active PHP to make one HTTPS request. Waits on the network
+   *  (a few seconds at most), so only run when the user asked. */
+  async function checkTls() {
+    checkingTls.value = true
+    tls.value = null
+    try {
+      tls.value = await invoke<TlsCheck>('check_php_tls')
+    } catch (e) {
+      tls.value = {
+        bundleInstalled: caBundle.value?.installed ?? false,
+        outcome: 'unavailable',
+        detail: errorMessage(e),
+      }
+    } finally {
+      checkingTls.value = false
+    }
+  }
+
   async function fetchExtensions(phpVersion: string) {
     try {
       extensions.value = await invoke<ExtensionStatus[]>('php_extensions', { phpVersion })
@@ -323,6 +386,10 @@ export const usePhpStore = defineStore('php', () => {
     dropInDir,
     adding,
     configDir,
+    caBundle,
+    updatingCaBundle,
+    tls,
+    checkingTls,
     extensions,
     installingExtension,
     bundledExtensions,
@@ -334,6 +401,9 @@ export const usePhpStore = defineStore('php', () => {
     fetchAll,
     fetchDropInDir,
     fetchConfigDir,
+    fetchCaBundle,
+    updateCaBundle,
+    checkTls,
     fetchExtensions,
     installExtension,
     fetchBundledExtensions,

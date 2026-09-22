@@ -7,6 +7,7 @@ use std::io::{BufRead, BufReader, Read};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -29,6 +30,10 @@ use crate::utils::paths;
 /// Event name the frontend subscribes to via `listen()` for a service's
 /// stdout/stderr, line by line, as it's produced.
 pub const LOG_EVENT: &str = "service://log";
+
+/// How many requests `php-cgi` serves before exiting on its own (default
+/// 500). Set to `0` on every PHP spawn — see `ProcessService::command`.
+const PHP_FCGI_MAX_REQUESTS_ENV: &str = "PHP_FCGI_MAX_REQUESTS";
 
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -106,6 +111,9 @@ pub struct ProcessService {
     launch: Launch,
     log_sink: LogSink,
     crash_sink: CrashSink,
+    /// Set when [`Self::poll_pid`] finds the child gone on its own; cleared
+    /// by a successful start or any stop. See [`Service::crashed`].
+    crashed: AtomicBool,
     child: Mutex<Option<Child>>,
     sys: Mutex<System>,
     cpu_history: Mutex<Vec<u8>>,
@@ -142,6 +150,7 @@ impl ProcessService {
             launch: Launch::Nginx,
             log_sink,
             crash_sink: no_op_crash_sink(),
+            crashed: AtomicBool::new(false),
             child: Mutex::new(None),
             sys: Mutex::new(System::new()),
             cpu_history: Mutex::new(Vec::new()),
@@ -164,6 +173,7 @@ impl ProcessService {
             launch: Launch::Php { version: None },
             log_sink,
             crash_sink: no_op_crash_sink(),
+            crashed: AtomicBool::new(false),
             child: Mutex::new(None),
             sys: Mutex::new(System::new()),
             cpu_history: Mutex::new(Vec::new()),
@@ -187,6 +197,7 @@ impl ProcessService {
             },
             log_sink,
             crash_sink: no_op_crash_sink(),
+            crashed: AtomicBool::new(false),
             child: Mutex::new(None),
             sys: Mutex::new(System::new()),
             cpu_history: Mutex::new(Vec::new()),
@@ -208,6 +219,7 @@ impl ProcessService {
             launch: Launch::Database,
             log_sink,
             crash_sink: no_op_crash_sink(),
+            crashed: AtomicBool::new(false),
             child: Mutex::new(None),
             sys: Mutex::new(System::new()),
             cpu_history: Mutex::new(Vec::new()),
@@ -326,7 +338,14 @@ impl ProcessService {
                 // no place for a user's own settings. The scan directory is
                 // the one PHP reads *after* it and Rezure never writes into,
                 // which is what makes configuring the web PHP possible at all.
-                cmd.env(php_ini::SCAN_DIR_ENV, php_ini::ensure_conf_d()?);
+                // Same environment as every other PHP Rezure spawns.
+                php_ini::apply_process_env(&mut cmd, &exe)?;
+                // php-cgi exits on its own after 500 requests unless told
+                // otherwise — it expects a supervisor like PHP-FPM to replace
+                // it, which Windows doesn't have. A busy project (webhooks,
+                // Livewire polling) crosses that in minutes, and every
+                // request after is a 502. 0 means "never recycle".
+                cmd.env(PHP_FCGI_MAX_REQUESTS_ENV, "0");
                 cmd
             }
             Launch::Database => {
@@ -428,6 +447,7 @@ impl ProcessService {
             Some(Ok(Some(_status))) => {
                 *child_guard = None;
                 drop(child_guard);
+                self.crashed.store(true, Ordering::SeqCst);
                 (self.crash_sink)(&self.id);
                 None
             }
@@ -704,6 +724,7 @@ impl Service for ProcessService {
         }
 
         *self.child.lock().unwrap() = Some(child);
+        self.crashed.store(false, Ordering::SeqCst);
         Ok(self.info())
     }
 
@@ -731,12 +752,29 @@ impl Service for ProcessService {
     fn force_stop(&self) -> Result<ServiceInfo, AppError> {
         self.shut_down(false)
     }
+
+    fn crashed(&self) -> bool {
+        // Polling here is what lets a crash be noticed with no window open:
+        // otherwise only `info()` looks, and only when the UI asks.
+        self.poll_pid();
+        self.crashed.load(Ordering::SeqCst)
+    }
+
+    /// PHP only. nginx is left to the user for now, and a database never:
+    /// restarting one that just died can loop it through crash recovery
+    /// against somebody's real datadir.
+    fn restarts_on_crash(&self) -> bool {
+        matches!(self.launch, Launch::Php { .. })
+    }
 }
 
 impl ProcessService {
     /// The one stop path. `graceful` decides whether the process is asked to
     /// close itself first or simply killed.
     fn shut_down(&self, graceful: bool) -> Result<ServiceInfo, AppError> {
+        // A deliberate stop settles whatever crash came before it — the user
+        // has made a call, and the supervisor must not overrule it.
+        self.crashed.store(false, Ordering::SeqCst);
         let mut child_guard = self.child.lock().unwrap();
         if let Some(mut child) = child_guard.take() {
             let stopped_cleanly = graceful

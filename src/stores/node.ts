@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type { NodeRelease, NodeVersion } from '@/types/runtime'
@@ -15,12 +15,18 @@ function errorMessage(e: unknown): string {
 }
 
 /**
- * Catalog and install only — there's no "active version"/switch concept
- * here yet. Installing a version makes `bin/node/<version>/node.exe` exist
- * on disk; wiring it onto PATH or a project is a separate, later feature.
+ * Catalog, install, and the globally active version. Installing makes
+ * `bin/node/<version>/node.exe` exist on disk; switching `active` changes
+ * what `services::launcher::open_terminal` puts first on a new terminal's
+ * PATH for a project that hasn't pinned its own version (see
+ * `Project.nodeVersion` / `useProjectsStore().setNodeVersion`). There's no
+ * system-wide "Node Everywhere" PATH link yet (unlike PHP's) — the active
+ * version only reaches terminals Rezure itself opens.
  */
 export const useNodeStore = defineStore('node', () => {
   const versions = ref<NodeVersion[]>([])
+  const switching = ref<string | null>(null)
+  const error = ref<string | null>(null)
 
   const catalog = ref<NodeRelease[]>([])
   const catalogLoading = ref(false)
@@ -32,8 +38,25 @@ export const useNodeStore = defineStore('node', () => {
     progress.value[event.payload.id] = event.payload
   })
 
+  const active = computed(() => versions.value.find((v) => v.active) ?? null)
+
   async function fetchVersions() {
     versions.value = await invoke<NodeVersion[]>('list_node_versions')
+  }
+
+  /** Switches the global active version. */
+  async function setActive(id: string) {
+    error.value = null
+    switching.value = id
+    try {
+      versions.value = await invoke<NodeVersion[]>('set_active_node_version', { id })
+      return true
+    } catch (e) {
+      error.value = errorMessage(e)
+      return false
+    } finally {
+      switching.value = null
+    }
   }
 
   async function fetchCatalog(refresh = false) {
@@ -73,11 +96,15 @@ export const useNodeStore = defineStore('node', () => {
 
   return {
     versions,
+    active,
+    switching,
+    error,
     catalog,
     catalogLoading,
     catalogError,
     installingVersion,
     fetchVersions,
+    setActive,
     fetchCatalog,
     installVersion,
     progressFor,

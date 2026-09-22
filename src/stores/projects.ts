@@ -226,6 +226,45 @@ export const useProjectsStore = defineStore('projects', () => {
     phpVersionError.value = null
   }
 
+  const nodeVersionError = ref<string | null>(null)
+  /** The project whose Node.js version picker is open, or null — same shape
+   *  as `phpVersionModalFor` above. */
+  const nodeVersionModalFor = ref<string | null>(null)
+  const settingNodeVersion = ref(false)
+
+  /**
+   * Pins (or, with `version: null`, clears back to the global default) the
+   * Node.js version a terminal opened for this project resolves `node`/
+   * `npm`/`npx` as. Unlike `setPhpVersion`, this never starts or restarts
+   * anything — it only takes effect the next time a terminal is opened for
+   * this project, so there's nothing else to refresh here.
+   */
+  async function setNodeVersion(id: string, version: string | null) {
+    settingNodeVersion.value = true
+    nodeVersionError.value = null
+    try {
+      await invoke('set_project_node_version', { id, version })
+      await fetchAll()
+      nodeVersionModalFor.value = null
+      return true
+    } catch (e) {
+      nodeVersionError.value = errorMessage(e)
+      return false
+    } finally {
+      settingNodeVersion.value = false
+    }
+  }
+
+  function openNodeVersionModal(id: string) {
+    nodeVersionError.value = null
+    nodeVersionModalFor.value = id
+  }
+
+  function closeNodeVersionModal() {
+    nodeVersionModalFor.value = null
+    nodeVersionError.value = null
+  }
+
   /**
    * Starts sharing a project publicly via a Cloudflare Quick Tunnel, or
    * reuses one already running for it. The first call for a fresh install
@@ -299,6 +338,12 @@ export const useProjectsStore = defineStore('projects', () => {
     setPhpVersion,
     openPhpVersionModal,
     closePhpVersionModal,
+    nodeVersionError,
+    nodeVersionModalFor,
+    settingNodeVersion,
+    setNodeVersion,
+    openNodeVersionModal,
+    closeNodeVersionModal,
     syncingHosts,
     hostsError,
     openError,

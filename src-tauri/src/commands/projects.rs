@@ -1,9 +1,13 @@
+use std::path::PathBuf;
+
 use tauri::State;
 
 use crate::db::projects::ProjectInfo;
 use crate::db::{self, DbState};
 use crate::services::scaffold::ProjectTemplate;
-use crate::services::{hosts, launcher, projects, scaffold, vhosts, ServiceManager, ServiceStatus};
+use crate::services::{
+    hosts, launcher, node, projects, scaffold, vhosts, ServiceManager, ServiceStatus,
+};
 use crate::utils::error::AppError;
 
 /// Makes a project just created, linked or unlinked live immediately
@@ -111,6 +115,16 @@ pub fn list_projects(
         }
         Err(err) => log::warn!("failed to load project PHP version overrides: {err}"),
     }
+    match db::projects::fetch_node_versions(&conn) {
+        Ok(versions) => {
+            for project in &mut detected {
+                if let Some(version) = versions.get(&project.id) {
+                    project.node_version = version.clone();
+                }
+            }
+        }
+        Err(err) => log::warn!("failed to load project Node.js version overrides: {err}"),
+    }
 
     Ok(detected)
 }
@@ -132,6 +146,46 @@ pub fn set_project_php_version(
     drop(conn);
     sync_vhosts_and_reload(&manager, &db_state, "after setting a project's PHP version");
     Ok(())
+}
+
+/// Pins (or, with `version: null`, clears back to the global default) the
+/// Node.js version `open_project_terminal` resolves for this one project.
+///
+/// No vhost/nginx resync here, unlike [`set_project_php_version`] — Node
+/// isn't proxied through nginx in this app, so a plain SQLite write is the
+/// whole change; the next "Open terminal" click reads it fresh.
+#[tauri::command]
+pub fn set_project_node_version(
+    id: String,
+    version: Option<String>,
+    db_state: State<'_, DbState>,
+) -> Result<(), AppError> {
+    let conn = db_state.0.lock().unwrap();
+    db::projects::set_node_version(&conn, &id, version.as_deref())?;
+    Ok(())
+}
+
+/// The folder that should go first on a terminal's `PATH` for this project —
+/// its own pinned Node.js version if it has one, otherwise the global active
+/// version. `None` when there's a pin/active version but the corresponding
+/// build isn't actually on disk any more, or when nothing is installed at
+/// all: either way, opening a plain terminal with the ambient `PATH` is the
+/// right fallback, not a failed command.
+fn resolve_node_bin_dir(db_state: &State<'_, DbState>, id: &str) -> Option<PathBuf> {
+    let pinned = {
+        let conn = db_state.0.lock().unwrap();
+        db::projects::node_version_for(&conn, id).unwrap_or_else(|err| {
+            log::warn!("failed to load {id}'s Node.js version override: {err}");
+            None
+        })
+    };
+
+    let version = pinned.or_else(|| {
+        let active = node::active_id();
+        (!active.is_empty()).then_some(active)
+    })?;
+
+    node::bin_dir_for(&version).ok()
 }
 
 /// Writes every detected project's domain into the OS hosts file, prompting
@@ -215,10 +269,14 @@ pub fn open_project_folder(id: String, db_state: State<'_, DbState>) -> Result<(
     Ok(())
 }
 
-/// Opens a terminal in the project folder.
+/// Opens a terminal in the project folder, with this project's effective
+/// Node.js version (its own pin, or the global active one) put first on the
+/// new terminal's `PATH` — see `resolve_node_bin_dir` and
+/// `services::launcher::open_terminal`.
 #[tauri::command]
 pub fn open_project_terminal(id: String, db_state: State<'_, DbState>) -> Result<(), AppError> {
-    launcher::open_terminal(&id)?;
+    let node_bin_dir = resolve_node_bin_dir(&db_state, &id);
+    launcher::open_terminal(&id, node_bin_dir.as_deref())?;
     mark_opened(&db_state, &id);
     Ok(())
 }

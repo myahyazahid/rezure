@@ -62,6 +62,12 @@ pub struct ProjectInfo {
     /// this project on a concurrently-running `php-cgi` distinct from every
     /// other project's.
     pub php_version: Option<String>,
+    /// This project's own pinned Node.js version, if any — `None` means
+    /// "follow the global active version" (`services::node`), same as a
+    /// project that's never set one. Unlike `php_version`, this never touches
+    /// a running service or nginx: it only changes what a terminal opened
+    /// for this project resolves `node`/`npm` as. See `services::launcher`.
+    pub node_version: Option<String>,
 }
 
 fn now() -> i64 {
@@ -190,6 +196,58 @@ pub fn set_php_version(conn: &Connection, id: &str, version: Option<&str>) -> Re
     Ok(())
 }
 
+/// Every project's Node.js version override, keyed by id — same shape and
+/// purpose as [`fetch_php_versions`].
+pub fn fetch_node_versions(conn: &Connection) -> Result<HashMap<String, Option<String>>, AppError> {
+    let mut stmt = conn
+        .prepare("SELECT id, node_version FROM projects")
+        .map_err(db_err)?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })
+        .map_err(db_err)?;
+
+    let mut versions = HashMap::new();
+    for row in rows {
+        let (id, version) = row.map_err(db_err)?;
+        versions.insert(id, version);
+    }
+    Ok(versions)
+}
+
+/// One project's Node.js version override — a single-row lookup rather than
+/// [`fetch_node_versions`]'s full map, for `services::launcher::open_terminal`,
+/// which only ever needs one project's answer and runs on every "Open
+/// terminal" click rather than once per page load.
+pub fn node_version_for(conn: &Connection, id: &str) -> Result<Option<String>, AppError> {
+    conn.query_row(
+        "SELECT node_version FROM projects WHERE id = ?1",
+        [id],
+        |row| row.get::<_, Option<String>>(0),
+    )
+    .optional()
+    .map_err(db_err)
+    .map(|row| row.flatten())
+}
+
+/// Sets (or clears, with `None`) a project's Node.js version override. Same
+/// shape as [`set_php_version`].
+pub fn set_node_version(
+    conn: &Connection,
+    id: &str,
+    version: Option<&str>,
+) -> Result<(), AppError> {
+    conn.execute(
+        "INSERT INTO projects (id, name, path, domain, stack, first_seen_at, last_opened_at, open_count, node_version)
+         VALUES (?1, '', '', '', '', ?2, NULL, 0, ?3)
+         ON CONFLICT(id) DO UPDATE SET node_version = excluded.node_version",
+        (id, now(), version),
+    )
+    .map_err(db_err)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -209,6 +267,7 @@ mod tests {
             missing: false,
             domain_invalid: false,
             php_version: None,
+            node_version: None,
         }
     }
 
@@ -297,6 +356,60 @@ mod tests {
         assert_eq!(
             versions.get("not-yet-scanned"),
             Some(&Some("7.4.33".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_project_with_no_node_override_has_no_entry_in_the_map() {
+        let conn = init_migrations_for_test();
+        upsert_seen(&conn, &sample("blog")).unwrap();
+
+        let versions = fetch_node_versions(&conn).unwrap();
+        assert_eq!(versions.get("blog"), Some(&None));
+    }
+
+    #[test]
+    fn setting_a_node_version_survives_a_rescan() {
+        let conn = init_migrations_for_test();
+        upsert_seen(&conn, &sample("blog")).unwrap();
+        set_node_version(&conn, "blog", Some("22.11.0")).unwrap();
+
+        upsert_seen(&conn, &sample("blog")).unwrap();
+
+        let versions = fetch_node_versions(&conn).unwrap();
+        assert_eq!(versions.get("blog"), Some(&Some("22.11.0".to_string())));
+        assert_eq!(
+            node_version_for(&conn, "blog").unwrap(),
+            Some("22.11.0".to_string())
+        );
+    }
+
+    #[test]
+    fn clearing_a_node_version_sets_it_back_to_none() {
+        let conn = init_migrations_for_test();
+        upsert_seen(&conn, &sample("blog")).unwrap();
+        set_node_version(&conn, "blog", Some("22.11.0")).unwrap();
+        set_node_version(&conn, "blog", None).unwrap();
+
+        assert_eq!(node_version_for(&conn, "blog").unwrap(), None);
+    }
+
+    #[test]
+    fn node_version_for_a_project_never_seen_is_none_not_an_error() {
+        let conn = init_migrations_for_test();
+        assert_eq!(node_version_for(&conn, "ghost").unwrap(), None);
+    }
+
+    #[test]
+    fn setting_a_php_version_does_not_disturb_a_nodes_own_override() {
+        let conn = init_migrations_for_test();
+        upsert_seen(&conn, &sample("blog")).unwrap();
+        set_node_version(&conn, "blog", Some("22.11.0")).unwrap();
+        set_php_version(&conn, "blog", Some("8.3.33")).unwrap();
+
+        assert_eq!(
+            node_version_for(&conn, "blog").unwrap(),
+            Some("22.11.0".to_string())
         );
     }
 }

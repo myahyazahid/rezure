@@ -7,6 +7,7 @@ const props = defineProps<{
   domain: string
   path: string
   phpVersion: string | null
+  nodeVersion: string | null
 }>()
 
 const store = useProjectsStore()
@@ -51,17 +52,16 @@ function onShareClick() {
       Open
     </button>
 
-    <!-- Same shape and weight as the other icon buttons — a red-tinted
-         outline rather than Open's solid fill, so it reads as "on-brand
-         but secondary" and stays distinct from both Open and the neutral
-         icons next to it. Emerald once a share is actually live. -->
+    <!-- Neutral like the other icon buttons while idle, filled red once a
+         share is live — the same on/off language as the PHP/Node pin
+         buttons, so an active tunnel is visible without opening the modal. -->
     <button
       type="button"
-      class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border bg-white transition disabled:cursor-wait dark:bg-neutral-800/60"
       :class="[
+        'flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition disabled:cursor-wait disabled:opacity-70',
         isActive
-          ? 'border-emerald-300 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-500/10'
-          : 'border-red-300 text-red-600 hover:bg-red-50 disabled:opacity-70 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-500/10',
+          ? 'border-red-300 bg-red-50 text-red-600 hover:bg-red-100 dark:border-red-800 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20'
+          : 'border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300 hover:text-neutral-800 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400 dark:hover:text-neutral-100',
       ]"
       :disabled="isStarting"
       :title="
@@ -151,6 +151,36 @@ function onShareClick() {
           stroke-linejoin="round"
           d="M8 4 4 12l4 8M16 4l4 8-4 8M14 4l-4 16"
         />
+      </svg>
+    </button>
+
+    <!-- Pins this project to its own Node.js version, same shape and
+         behavior as the PHP pin button above — filled once pinned. Unlike
+         the PHP pin, this doesn't start anything of its own; it only
+         changes what a terminal opened from this card resolves node/npm/npx
+         as (see ProjectNodeVersionModal.vue). -->
+    <button
+      type="button"
+      :class="[
+        'flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition',
+        props.nodeVersion
+          ? 'border-red-300 bg-red-50 text-red-600 hover:bg-red-100 dark:border-red-800 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20'
+          : 'border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300 hover:text-neutral-800 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400 dark:hover:text-neutral-100',
+      ]"
+      :title="
+        props.nodeVersion
+          ? `Pinned to Node.js ${props.nodeVersion} — click to change`
+          : 'Pin this project to its own Node.js version'
+      "
+      @click="store.openNodeVersionModal(props.projectId)"
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="M12 2.5 20.5 7.5V16.5L12 21.5 3.5 16.5V7.5Z"
+        />
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v8M12 8 8 10.3M12 8l4 2.3" />
       </svg>
     </button>
 

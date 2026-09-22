@@ -39,7 +39,8 @@
     ],
     "resources": {
       "bundled-bin/nginx": "bundled-bin/nginx",
-      "bundled-bin/php": "bundled-bin/php"
+      "bundled-bin/php": "bundled-bin/php",
+      "bundled-bin/ca": "bundled-bin/ca"
     },
     "android": {
       "debugApplicationIdSuffix": ".debug"

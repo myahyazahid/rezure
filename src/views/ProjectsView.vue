@@ -9,6 +9,7 @@ import LinkProjectModal from '@/components/projects/LinkProjectModal.vue'
 import ProjectDoctorModal from '@/components/projects/ProjectDoctorModal.vue'
 import ProjectShareModal from '@/components/projects/ProjectShareModal.vue'
 import ProjectPhpVersionModal from '@/components/projects/ProjectPhpVersionModal.vue'
+import ProjectNodeVersionModal from '@/components/projects/ProjectNodeVersionModal.vue'
 import BusyOverlay from '@/components/common/BusyOverlay.vue'
 
 const store = useProjectsStore()
@@ -193,6 +194,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
     <ProjectDoctorModal />
     <ProjectShareModal />
     <ProjectPhpVersionModal />
+    <ProjectNodeVersionModal />
 
     <BusyOverlay :show="busy !== null" :label="busy?.label ?? ''" :detail="busy?.detail ?? ''" />
 
@@ -361,6 +363,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
             :domain="project.domain"
             :path="project.path"
             :php-version="project.phpVersion"
+            :node-version="project.nodeVersion"
           />
           <button
             v-if="project.kind === 'linked'"
@@ -457,6 +460,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
               :domain="project.domain"
               :path="project.path"
               :php-version="project.phpVersion"
+              :node-version="project.nodeVersion"
             />
             <!-- Unlink only exists for linked projects: a scanned one is
                removed by moving its folder out of www, not from here. The

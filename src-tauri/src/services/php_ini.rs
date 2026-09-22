@@ -29,13 +29,23 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
-use super::{php, php_ext_toggle};
+use super::{ca_bundle, php, php_ext_toggle};
 use crate::utils::error::AppError;
 use crate::utils::paths;
 
-/// The CA bundle's name inside [`paths::etc`].
-const CA_BUNDLE_FILE: &str = "cacert.pem";
+/// The two directives that name the CA bundle — one per TLS stack PHP has.
+/// `curl.cainfo` covers ext/curl (Guzzle, Laravel's Http client);
+/// `openssl.cafile` covers the stream wrappers (`file_get_contents("https://…")`).
+const CA_DIRECTIVES: [&str; 2] = ["curl.cainfo", "openssl.cafile"];
+
+/// The environment variable OpenSSL reads its config file's path from.
+///
+/// Set only on processes Rezure spawns, never machine-wide the way
+/// [`SCAN_DIR_ENV`] is: every other OpenSSL-linked tool on the machine (Git,
+/// for one) reads the same variable, and would be handed PHP's config.
+pub const OPENSSL_CONF_ENV: &str = "OPENSSL_CONF";
 
 /// The environment variable PHP reads to find *extra* ini files, on top of
 /// whichever one it was told to load.
@@ -44,6 +54,19 @@ const CA_BUNDLE_FILE: &str = "cacert.pem";
 /// sets it machine-wide when the PATH switch is on, so the user's own
 /// terminal reads the same folder.
 pub const SCAN_DIR_ENV: &str = "PHP_INI_SCAN_DIR";
+
+/// Upload/POST size limit, in megabytes, written into the generated php.ini
+/// as both `upload_max_filesize` and `post_max_size`. Shared with
+/// [`super::vhosts`], which sets nginx's `client_max_body_size` to the same
+/// value — nginx otherwise defaults to 1 MB and rejects anything larger
+/// with a 413 before PHP ever sees the request.
+pub const BODY_SIZE_LIMIT_MB: u32 = 64;
+
+/// `max_execution_time` written into the generated php.ini. Shared with
+/// [`super::vhosts`], which uses it for nginx's FastCGI timeouts — nginx
+/// otherwise gives up on a slow script after 60s, well before PHP itself
+/// would have stopped it.
+pub const MAX_EXECUTION_TIME_SECS: u32 = 300;
 
 /// Dropped into [`conf_d`] the first time it's created. Not an `.ini`, so
 /// PHP never tries to parse it.
@@ -86,14 +109,32 @@ fn ensure_tmp_dir() -> Result<PathBuf, AppError> {
     Ok(tmp)
 }
 
-/// The CA bundle both TLS stacks get pointed at, when one is installed.
-///
-/// It lives in `etc/` rather than beside a PHP build because it is not a
-/// property of any one version: a bundle installed once has to keep working
-/// across a version switch, and both copies of the ini name the same file.
+/// The CA bundle both TLS stacks get pointed at, when one is installed —
+/// see [`super::ca_bundle`] for how it gets there.
 fn ca_bundle() -> Option<PathBuf> {
-    let path = paths::etc().ok()?.join(CA_BUNDLE_FILE);
-    path.is_file().then_some(path)
+    ca_bundle::installed()
+}
+
+/// `extras/ssl/openssl.cnf` inside a PHP install, which the official zip
+/// ships for exactly this purpose. Without it, OpenSSL on Windows looks for
+/// a config under `C:\Program Files\Common Files\SSL` that is never there,
+/// and `openssl_pkey_new()`/`openssl_csr_new()` fail — key generation in
+/// packages like web-push or some JWT libraries.
+fn openssl_conf(php_dir: &Path) -> Option<PathBuf> {
+    let conf = php_dir.join("extras").join("ssl").join("openssl.cnf");
+    conf.is_file().then_some(conf)
+}
+
+/// The environment every PHP process Rezure spawns runs with, so the
+/// FastCGI service, Composer and the requirements check can never disagree
+/// about their configuration: the user's [`conf_d`], and the OpenSSL config
+/// of the install `php_exe` belongs to (see [`OPENSSL_CONF_ENV`]).
+pub fn apply_process_env(cmd: &mut Command, php_exe: &Path) -> Result<(), AppError> {
+    cmd.env(SCAN_DIR_ENV, ensure_conf_d()?);
+    if let Some(conf) = php_exe.parent().and_then(openssl_conf) {
+        cmd.env(OPENSSL_CONF_ENV, conf);
+    }
+    Ok(())
 }
 
 /// The one folder a user's own PHP settings live in.
@@ -288,9 +329,9 @@ fn render(
         ini.push_str(&format!("{directive}={extension}\n"));
     }
     ini.push_str("memory_limit = 256M\n");
-    ini.push_str("upload_max_filesize = 64M\n");
-    ini.push_str("post_max_size = 64M\n");
-    ini.push_str("max_execution_time = 300\n");
+    ini.push_str(&format!("upload_max_filesize = {BODY_SIZE_LIMIT_MB}M\n"));
+    ini.push_str(&format!("post_max_size = {BODY_SIZE_LIMIT_MB}M\n"));
+    ini.push_str(&format!("max_execution_time = {MAX_EXECUTION_TIME_SECS}\n"));
     // Without buffering, any stray byte a project emits before its
     // response — a space after a `?>`, a BOM, a warning — flushes PHP's
     // header block early, and every `header()`/`setcookie()` after that is
@@ -310,18 +351,23 @@ fn render(
     // cannot verify any certificate at all: every outbound HTTPS call dies
     // with "cURL error 60: unable to get local issuer certificate". That is
     // not a niche path, it is Composer, Laravel's Http client and every API
-    // a project talks to. Both stacks are named because they are separate:
-    // curl.cainfo covers ext/curl, openssl.cafile covers the stream
-    // wrappers, so file_get_contents("https://...") verifies too.
+    // a project talks to. Both stacks are named because they are separate —
+    // see `CA_DIRECTIVES`.
     //
     // Written only when the bundle is really on disk: a cainfo naming a
     // file that is not there is a failure of its own, and a worse one to
     // read than the default.
     if let Some(bundle) = ca_bundle {
-        ini.push_str(&format!("curl.cainfo = \"{}\"\n", ini_value(bundle)));
-        ini.push_str(&format!("openssl.cafile = \"{}\"\n", ini_value(bundle)));
+        for directive in CA_DIRECTIVES {
+            ini.push_str(&ca_line(directive, bundle));
+            ini.push('\n');
+        }
     }
     ini
+}
+
+fn ca_line(directive: &str, bundle: &Path) -> String {
+    format!("{directive} = \"{}\"", ini_value(bundle))
 }
 
 /// Writes Rezure's `php.ini` for the PHP install at `php_exe`, pointing
@@ -403,7 +449,8 @@ fn generated_ini_dir(php_dir: &Path) -> Result<PathBuf, AppError> {
 /// Never overwritten wholesale: this file sits in a folder the user can open,
 /// and a hand-tuned ini (a raised `memory_limit`, an extra extension, Xdebug)
 /// is theirs to keep. Only `extension_dir` is corrected, by
-/// [`repair_extension_dir`].
+/// [`repair_extension_dir`], and the CA bundle lines by
+/// [`repair_ca_directives`].
 ///
 /// That correction exists because the obvious assumption turned out to be
 /// wrong. This ini sits beside the very `php.exe` it configures, so its
@@ -414,8 +461,11 @@ fn generated_ini_dir(php_dir: &Path) -> Result<PathBuf, AppError> {
 pub fn ensure_cli_php_ini(php_dir: &Path) -> Result<Option<PathBuf>, AppError> {
     let ini_path = php_dir.join("php.ini");
     if ini_path.exists() {
-        // Present, but not necessarily still correct — see below.
-        return repair_extension_dir(php_dir).map(|repaired| repaired.then_some(ini_path));
+        // Present, but not necessarily still correct — see below. Both
+        // repairs run; neither result short-circuits the other.
+        let extension_dir_repaired = repair_extension_dir(php_dir)?;
+        let ca_repaired = repair_ca_directives(php_dir)?;
+        return Ok((extension_dir_repaired || ca_repaired).then_some(ini_path));
     }
 
     let tmp = ensure_tmp_dir()?;
@@ -542,6 +592,78 @@ pub fn repair_extension_dir(php_dir: &Path) -> Result<bool, AppError> {
         ini_value(&correct)
     );
     Ok(true)
+}
+
+/// Points an install's own `php.ini` at the CA bundle, so `php artisan` in a
+/// terminal verifies HTTPS the same way a web request does. Reports whether
+/// the file changed.
+///
+/// Needed because [`ensure_cli_php_ini`] writes this file once and then
+/// leaves it alone: every version installed before a bundle existed was
+/// written without these lines and would never get them — a queue worker or
+/// `tinker` session calling an API hits cURL error 60 while the same code
+/// served over the web works.
+///
+/// Only the two [`CA_DIRECTIVES`] are touched, the rest of the file may be
+/// the user's own. A directive already naming a file that exists is left
+/// as it is, whether that's Rezure's bundle or a corporate one the user
+/// chose; one naming a missing file (a moved Rezure home, a deleted bundle)
+/// is repointed, and a missing directive is appended.
+pub fn repair_ca_directives(php_dir: &Path) -> Result<bool, AppError> {
+    match ca_bundle() {
+        Some(bundle) => repair_ca_directives_to(php_dir, &bundle),
+        // Nothing to point at — a line naming a missing file is worse than
+        // none (see `render`).
+        None => Ok(false),
+    }
+}
+
+fn repair_ca_directives_to(php_dir: &Path, bundle: &Path) -> Result<bool, AppError> {
+    let ini_path = php_dir.join("php.ini");
+    let Ok(existing) = fs::read_to_string(&ini_path) else {
+        return Ok(false);
+    };
+
+    let mut lines: Vec<String> = existing.lines().map(str::to_string).collect();
+    let mut changed = false;
+    for directive in CA_DIRECTIVES {
+        let declared = lines
+            .iter()
+            .enumerate()
+            .find_map(|(i, line)| directive_value(line, directive).map(|value| (i, value)));
+        match declared {
+            Some((_, value)) if Path::new(value).is_file() => {}
+            Some((i, _)) => {
+                lines[i] = ca_line(directive, bundle);
+                changed = true;
+            }
+            None => {
+                lines.push(ca_line(directive, bundle));
+                changed = true;
+            }
+        }
+    }
+    if !changed {
+        return Ok(false);
+    }
+
+    fs::write(&ini_path, format!("{}\n", lines.join("\n")))
+        .map_err(|e| AppError::Io(format!("could not write {}: {e}", ini_path.display())))?;
+    log::info!("pointed {} at the CA bundle", ini_path.display());
+    Ok(true)
+}
+
+/// The value an active (not commented-out) `directive = value` line sets,
+/// unquoted. `None` for any other line, including a longer directive that
+/// merely starts with the same name.
+fn directive_value<'a>(line: &'a str, directive: &str) -> Option<&'a str> {
+    let line = line.trim();
+    if line.starts_with(';') {
+        return None;
+    }
+    let value = line.strip_prefix(directive)?.trim_start();
+    let value = value.strip_prefix('=')?.trim();
+    Some(value.trim_matches('"').trim())
 }
 
 #[cfg(test)]
@@ -778,7 +900,7 @@ mod tests {
     #[test]
     fn render_points_both_tls_stacks_at_the_ca_bundle() {
         let dir = std::env::temp_dir().join("rezure-test-ini-ca");
-        let bundle = dir.join(CA_BUNDLE_FILE);
+        let bundle = dir.join(ca_bundle::FILE_NAME);
 
         let content = render(
             &dir.join("ext"),
@@ -812,8 +934,113 @@ mod tests {
         assert!(!content.contains("openssl.cafile"));
     }
 
+    /// A version whose ini was written before any bundle existed gets both
+    /// lines appended, and nothing else in the file moves.
+    #[test]
+    fn missing_ca_directives_are_appended_to_a_cli_ini() {
+        let dir = fake_php_dir("ca-missing", "; hand-tuned\nmemory_limit = 2G\n");
+        let bundle = dir.join(ca_bundle::FILE_NAME);
+        fs::write(&bundle, "pem").unwrap();
+
+        assert!(repair_ca_directives_to(&dir, &bundle).unwrap());
+        let content = fs::read_to_string(dir.join("php.ini")).unwrap();
+        let expected = ini_value(&bundle);
+        assert!(content.starts_with("; hand-tuned\nmemory_limit = 2G\n"));
+        assert!(content.contains(&format!("curl.cainfo = \"{expected}\"")));
+        assert!(content.contains(&format!("openssl.cafile = \"{expected}\"")));
+
+        assert!(
+            !repair_ca_directives_to(&dir, &bundle).unwrap(),
+            "a second pass has nothing left to do"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A directive naming a file that's gone — a moved Rezure home — is
+    /// repointed in place; a commented-out one doesn't count as set.
+    #[test]
+    fn a_ca_directive_naming_a_missing_file_is_repointed() {
+        let dir = fake_php_dir(
+            "ca-stale",
+            ";curl.cainfo =\ncurl.cainfo = \"C:/gone/cacert.pem\"\nopenssl.cafile=\n",
+        );
+        let bundle = dir.join(ca_bundle::FILE_NAME);
+        fs::write(&bundle, "pem").unwrap();
+
+        assert!(repair_ca_directives_to(&dir, &bundle).unwrap());
+        let content = fs::read_to_string(dir.join("php.ini")).unwrap();
+        let expected = ini_value(&bundle);
+        assert_eq!(
+            content,
+            format!(
+                ";curl.cainfo =\ncurl.cainfo = \"{expected}\"\nopenssl.cafile = \"{expected}\"\n"
+            )
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A bundle the user chose themselves — one that exists — is theirs.
+    #[test]
+    fn a_ca_directive_naming_a_real_file_is_left_alone() {
+        let dir = fake_php_dir("ca-custom", "");
+        let custom = dir.join("corporate.pem");
+        fs::write(&custom, "pem").unwrap();
+        let ini = format!(
+            "curl.cainfo = \"{0}\"\nopenssl.cafile = \"{0}\"\n",
+            ini_value(&custom)
+        );
+        fs::write(dir.join("php.ini"), &ini).unwrap();
+        let bundle = dir.join(ca_bundle::FILE_NAME);
+        fs::write(&bundle, "pem").unwrap();
+
+        assert!(!repair_ca_directives_to(&dir, &bundle).unwrap());
+        assert_eq!(fs::read_to_string(dir.join("php.ini")).unwrap(), ini);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_longer_directive_sharing_the_prefix_is_not_mistaken_for_it() {
+        assert_eq!(
+            directive_value("curl.cainfo_extra = x", "curl.cainfo"),
+            None
+        );
+        assert_eq!(directive_value("; curl.cainfo = x", "curl.cainfo"), None);
+        assert_eq!(
+            directive_value("  curl.cainfo=\"C:/a.pem\" ", "curl.cainfo"),
+            Some("C:/a.pem")
+        );
+    }
+
+    /// Every spawned PHP gets its own install's `openssl.cnf`, when the zip
+    /// shipped one.
+    #[test]
+    fn process_env_names_the_installs_openssl_config() {
+        let dir = fake_php_dir("openssl-conf", "");
+        let conf = dir.join("extras").join("ssl").join("openssl.cnf");
+        fs::create_dir_all(conf.parent().unwrap()).unwrap();
+        fs::write(&conf, "").unwrap();
+
+        let mut cmd = Command::new(dir.join("php.exe"));
+        apply_process_env(&mut cmd, &dir.join("php.exe")).unwrap();
+        let openssl_conf = cmd
+            .get_envs()
+            .find(|(key, _)| *key == OPENSSL_CONF_ENV)
+            .and_then(|(_, value)| value);
+        assert_eq!(openssl_conf, Some(conf.as_os_str()));
+
+        let bare = fake_php_dir("openssl-conf-none", "");
+        let mut cmd = Command::new(bare.join("php.exe"));
+        apply_process_env(&mut cmd, &bare.join("php.exe")).unwrap();
+        assert!(!cmd.get_envs().any(|(key, _)| key == OPENSSL_CONF_ENV));
+
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&bare);
+    }
+
     /// A user's own edits live in this file, so a switch or a re-install
-    /// must never rewrite it.
+    /// must never rewrite it. The one thing ever added is the CA bundle
+    /// pair — and only on a machine that has a bundle, which this test
+    /// can't control, so it accepts either.
     #[test]
     fn ensure_cli_php_ini_leaves_an_existing_ini_alone() {
         let php_dir =
@@ -822,13 +1049,20 @@ mod tests {
         fs::create_dir_all(&php_dir).unwrap();
 
         let ini_path = php_dir.join("php.ini");
-        fs::write(&ini_path, "; hand-tuned\nmemory_limit = 2G\n").unwrap();
+        let hand_tuned = "; hand-tuned\nmemory_limit = 2G\n";
+        fs::write(&ini_path, hand_tuned).unwrap();
 
-        assert!(ensure_cli_php_ini(&php_dir).unwrap().is_none());
-        assert_eq!(
-            fs::read_to_string(&ini_path).unwrap(),
-            "; hand-tuned\nmemory_limit = 2G\n"
+        let reported = ensure_cli_php_ini(&php_dir).unwrap();
+        let content = fs::read_to_string(&ini_path).unwrap();
+        assert!(content.starts_with(hand_tuned), "got: {content}");
+        let added: Vec<&str> = content[hand_tuned.len()..].lines().collect();
+        assert!(
+            added
+                .iter()
+                .all(|line| CA_DIRECTIVES.iter().any(|d| line.starts_with(d))),
+            "only CA directives may be added, got: {added:?}"
         );
+        assert_eq!(reported.is_some(), !added.is_empty());
 
         let _ = fs::remove_dir_all(&php_dir);
     }

@@ -18,6 +18,7 @@ use std::process::{Command, Stdio};
 
 use super::binaries;
 use super::php;
+use super::php_ini;
 use super::php_pool;
 use super::projects::{docroot, scan_projects};
 use crate::utils::command::HiddenWindow;
@@ -99,6 +100,12 @@ http {{
     # (e.g. "my-awesome-app.test" already overflows it) — nginx refuses to
     # start at all rather than truncate, so this has to be raised up front.
     server_names_hash_bucket_size 64;
+    # Kept in step with the generated php.ini (`services::php_ini`): nginx's
+    # own defaults (1 MB body, 60s FastCGI timeouts) sit far below PHP's, so
+    # uploads 413 and slow requests time out before PHP gets a say.
+    client_max_body_size {body_size_limit_mb}m;
+    fastcgi_read_timeout {fastcgi_timeout}s;
+    fastcgi_send_timeout {fastcgi_timeout}s;
 
     # Catches any request whose Host header doesn't match a vhost below.
     server {{
@@ -117,6 +124,8 @@ http {{
         proxy_temp = conf_path(&runtime.join("temp").join("proxy")),
         fastcgi_temp = conf_path(&runtime.join("temp").join("fastcgi")),
         vhosts_glob = conf_path(&vhosts.join("*.conf")),
+        body_size_limit_mb = php_ini::BODY_SIZE_LIMIT_MB,
+        fastcgi_timeout = php_ini::MAX_EXECUTION_TIME_SECS,
     );
 
     let config_path = runtime.join("nginx.conf");

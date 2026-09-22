@@ -67,6 +67,29 @@ export interface ProjectDiagnosis {
   missing: string[]
 }
 
+/** What an HTTPS request from the active PHP ran into. `untrusted` is the
+ *  cURL error 60 case; `unreachable` never got as far as a certificate, so
+ *  it says nothing about the bundle. */
+export type TlsOutcome = 'verified' | 'untrusted' | 'unreachable' | 'unavailable'
+
+/** The requirements check's HTTPS half — about the PHP, not the project. */
+export interface TlsCheck {
+  /** Whether Rezure's CA bundle is on disk — the fix, when one is needed. */
+  bundleInstalled: boolean
+  outcome: TlsOutcome
+  /** cURL's own message, for anything but `verified`. */
+  detail: string | null
+}
+
+/** The CA bundle PHP verifies HTTPS against. */
+export interface CaBundleStatus {
+  installed: boolean
+  path: string
+  /** `YYYY-MM-DD` of the Mozilla data inside; null for a bundle that isn't
+   *  from curl.se. */
+  mozillaDate: string | null
+}
+
 /** A PECL extension Rezure can install into a PHP version. */
 export interface ExtensionStatus {
   id: string

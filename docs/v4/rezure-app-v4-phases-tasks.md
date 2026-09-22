@@ -256,6 +256,102 @@ Tidak ada — sepenuhnya perubahan internal `rezureapp`.
 
 ---
 
+## Fase 4.5 — Project Health Dashboard
+
+**Sama seperti Fase 4.3/4.4** — bukan riset arsitektur, task-nya sudah siap kerja langsung.
+Dipindah ke v4 dari v3 (bekas Fase 3.3) atas permintaan maintainer.
+
+**Tujuan:** Ringkasan kondisi tiap project dalam satu pandangan. Sekarang halaman Services cuma
+nunjukin status per-service (PHP jalan/mati, Nginx jalan/mati, dst) secara global — fase ini
+nambahin pandangan per-project: "project ini sehat apa nggak", bukan cuma "service X jalan apa
+nggak".
+
+**Prasyaratnya sudah ada:** dulu gap terbesar fase ini adalah project belum punya konsep "pakai
+service/port yang mana" — PHP versi cuma satu secara global, semua vhost proxy ke port yang sama.
+[Fase 3.11](../v3/rezure-app-v3-phases-tasks.md#fase-311--per-project-php-version-concurrent) (v3)
+menutup gap itu: `ProjectInfo` sekarang punya `php_version` sendiri per-project, dan
+`services::php_pool` mapping versi ke port. Konsolidasi status di bawah ini bisa langsung baca
+dari situ, bukan mulai dari nol.
+
+### Tasks
+- [ ] Konsolidasi status semua service terkait per-project dalam satu view — tiap project card
+      nunjukin PHP versi/port yang dipakai (dari `services::php_pool`), status vhost nginx-nya, dan
+      status database yang dia butuhin, sekali liat tanpa harus cek satu-satu ke halaman Services
+- [ ] Port conflict detector yang lebih menyeluruh (across semua project, bukan cuma saat start
+      service) — deteksi proaktif, bukan cuma pas tombol Start diklik
+- [ ] Tampilkan ukuran log per service, dengan opsi clear log
+- [ ] Indikator visual sederhana (misal: sehat/perlu perhatian) berdasarkan status gabungan
+
+### Dependency ke Proyek Lain
+
+Tidak ada — sepenuhnya perubahan internal `rezureapp`, sama seperti Fase 4.1/4.3/4.4.
+
+---
+
+## Fase 4.6 — Redis Support
+
+**Sama seperti Fase 4.3/4.4/4.5** — bukan riset arsitektur, task-nya sudah siap kerja langsung.
+Dipindah ke v4 dari v3.5 (bekas Fase 3.5.2) atas permintaan maintainer.
+
+**Tujuan:** Redis tersedia sebagai service baru di Rezure, konsisten dengan service lain yang
+sudah ada — lewat `Service` trait yang sama, tanpa sistem baru.
+
+### Tasks
+- [ ] Implementasikan Redis dengan `Service` trait yang sudah ada (`start()`, `stop()`, `status()`,
+      `restart()`) — tidak perlu sistem baru
+- [ ] Bundle Redis portable binary untuk Windows — Redis resmi sudah tidak menerbitkan binary
+      Windows lagi (deprecated dari Redis Inc sendiri), jadi perlu diputuskan dulu fork mana yang
+      masih maintained (mis. `tporadowski/redis`, atau Memurai) sebelum jalur download+checksum-verify
+      bisa ditulis — mirip masalah checksum Nginx/Python di v3, tapi opsinya lebih jelas di sini
+- [ ] Tambahkan Redis ke list service di Dashboard/Services (port default `6379`)
+- [ ] Deteksi port conflict untuk Redis, konsisten dengan service lain
+- [ ] Log viewer Redis mengikuti pola log viewer service lain yang sudah ada
+- [ ] (Opsional, bisa nyusul) Mini Redis viewer — quick-view keys yang tersimpan, tanpa perlu tool
+      eksternal (RedisInsight, dll)
+
+### Dependency ke Proyek Lain
+
+Tidak ada — sepenuhnya perubahan internal `rezureapp`, sama seperti Fase 4.1/4.3/4.4/4.5.
+
+---
+
+## Fase 4.7 — Nginx Multi-Version Catalog
+
+Dipindah ke v4 dari v3 (bekas open question di Fase 3.10, Multi-Version Installer) atas permintaan
+maintainer. Beda dari Fase 4.5/4.6: ini **belum siap kerja langsung** — butuh keputusan dulu
+sebelum ditulis jadi task, sama seperti Fase 4.1/4.2.
+
+**Tujuan:** Halaman Switch bisa install lebih dari satu versi Nginx, sama seperti PHP/MariaDB/
+Composer/Node.js sejak Fase 3.10 (v3). Sekarang Nginx satu-satunya runtime yang masih dipin ke
+**satu** versi (1.25.3, rilis 2023) lewat `binaries::MANIFEST` — sudah lumayan ketinggalan, tapi
+modal `InstallVersionModal.vue` di Switch page sudah siap nampung katalog beneran begitu ada.
+
+### Kenapa belum bisa langsung ditulis jadi katalog
+
+Aturan codebase ini tegas — **tidak ada download tanpa SHA-256 terverifikasi** (lihat alasannya di
+`php_catalog.rs` dan `php_ext.rs`). Nginx tidak menerbitkan index rilis yang bisa dibaca mesin
+**maupun** file checksum apapun: di `nginx.org/download/` tiap `.zip` cuma ditemani `.zip.asc`
+(signature PGP), bukan hash. [Python](../v3/rezure-app-v3-phases-tasks.md#fase-310--multi-version-installer-untuk-semua-runtime)
+punya masalah yang sama persis (API-nya cuma expose MD5).
+
+### Pertanyaan yang perlu diputuskan sebelum ditulis jadi task
+
+Tiga opsi:
+
+- **(a)** Tetap satu versi pinned, tapi rutin di-bump — status quo, tapi 1.25.3 sudah ketinggalan jauh
+- **(b)** Tabel pinned berisi beberapa versi, checksum di-hardcode manual — trade-off yang persis sama dengan katalog PECL di `php_ext.rs`, jadi presedennya sudah ada di codebase ini
+- **(c)** Implementasi verifikasi PGP — menambah dependency dan urusan manajemen key
+
+**Rekomendasi: (b)**, karena jumlah versi Nginx yang relevan untuk local dev sedikit dan polanya
+sudah dikenal di codebase (`nginx_catalog.rs` bisa langsung mencontek bentuk `php_ext.rs`'s
+`PeclExtension`/checksum-per-entry).
+
+### Dependency ke Proyek Lain
+
+Tidak ada — sepenuhnya perubahan internal `rezureapp`.
+
+---
+
 ## Status
 
 - **Fase 4.1** — belum ada task checklist resmi. Langkah berikutnya: tulis proposal desain
@@ -281,3 +377,12 @@ Tidak ada — sepenuhnya perubahan internal `rezureapp`.
   Pola registrasi/unregistrasi service secara dinamis saat runtime sudah ada duluan lewat
   `ServiceManager::sync_php_pool` (v3 Fase 3.11, dibuat untuk instance PHP pooled per-project) —
   worker per-project bisa ikut pola yang sama, bukan dibangun dari nol.
+- **Fase 4.5** — belum dikerjakan, task-nya sudah siap (dipindah apa adanya dari v3 Fase 3.3).
+  Prasyaratnya (mapping project↔PHP lewat `services::php_pool`) sudah ada duluan lewat v3 Fase 3.11
+  — tinggal dikonsolidasi jadi satu view, bukan dibangun dari nol.
+- **Fase 4.6** — belum dikerjakan, task-nya sudah siap (dipindah apa adanya dari v3.5 Fase 3.5.2).
+  Satu open question belum diputuskan sebelum implementasi bisa mulai: binary Redis Windows mana
+  yang mau dipakai, karena Redis resmi sudah tidak menerbitkan build Windows sendiri.
+- **Fase 4.7** — belum ada task checklist resmi, sama seperti Fase 4.1 (dipindah dari open question
+  di v3 Fase 3.10). Rekomendasi sudah ada (opsi b: tabel pinned beberapa versi, pola `php_ext.rs`)
+  — tinggal dikonfirmasi maintainer, baru ditulis jadi task list.

@@ -10,7 +10,8 @@ use tauri::State;
 
 use crate::config::settings::{self, SettingsState};
 use crate::services::binaries;
-use crate::services::doctor::{self, ProjectDiagnosis};
+use crate::services::ca_bundle::{self, CaBundleStatus};
+use crate::services::doctor::{self, ProjectDiagnosis, TlsCheck};
 use crate::services::php::{self, PhpVersionStatus};
 use crate::services::php_catalog::{self, PhpRelease};
 use crate::services::php_ext::{self, ExtensionStatus};
@@ -224,6 +225,29 @@ pub async fn diagnose_project(id: String) -> Result<ProjectDiagnosis, AppError> 
     tokio::task::spawn_blocking(move || doctor::diagnose_project(&id))
         .await
         .map_err(joined)?
+}
+
+/// Whether the active PHP can verify an HTTPS certificate — the
+/// requirements check's second half, kept separate because it waits on the
+/// network. See `services::doctor::TlsCheck`.
+#[tauri::command]
+pub async fn check_php_tls() -> Result<TlsCheck, AppError> {
+    tokio::task::spawn_blocking(doctor::check_active_tls)
+        .await
+        .map_err(joined)?
+}
+
+/// The CA bundle PHP verifies HTTPS against, for the Switch page.
+#[tauri::command]
+pub fn ca_bundle_status() -> Result<CaBundleStatus, AppError> {
+    ca_bundle::status()
+}
+
+/// Replaces the CA bundle with curl.se's current one (checksum-verified)
+/// and points every installed version's terminal ini at it.
+#[tauri::command]
+pub async fn update_ca_bundle() -> Result<CaBundleStatus, AppError> {
+    ca_bundle::update().await
 }
 
 /// The folder a user's own PHP settings go in, shown on the Switch page.

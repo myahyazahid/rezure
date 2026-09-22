@@ -11,6 +11,7 @@ import RuntimeSwitchRow, {
 import InstallVersionModal from '@/components/services/InstallVersionModal.vue'
 import PhpPathLinkCard from '@/components/services/PhpPathLinkCard.vue'
 import PhpConfigCard from '@/components/services/PhpConfigCard.vue'
+import PhpCaBundleCard from '@/components/services/PhpCaBundleCard.vue'
 import BusyOverlay from '@/components/common/BusyOverlay.vue'
 
 const phpStore = usePhpStore()
@@ -90,13 +91,12 @@ const composerProgress = computed(() =>
     : null,
 )
 
-// Catalog-and-install only for now — see `services::node_catalog`'s module
-// doc for why there's no real "active version" to switch to yet. The
-// newest installed build is shown the same way MariaDB's is, as a label.
+// Node versions are discovered on disk, same as PHP — everything listed is
+// installed by definition, and switching (unlike PHP) never restarts a
+// service since Node isn't proxied through nginx here. See `services::node`.
 const nodeVersions = computed<RuntimeVersionEntry[]>(() =>
-  nodeStore.versions.map((v) => ({ id: v.version, version: v.version, installed: true })),
+  nodeStore.versions.map((v) => ({ id: v.id, version: v.version, installed: v.installed })),
 )
-const nodeActiveVersion = computed(() => nodeStore.versions[0]?.version ?? null)
 const nodeProgress = computed(() =>
   nodeStore.installingVersion ? nodeStore.progressFor(nodeStore.installingVersion) : null,
 )
@@ -159,6 +159,9 @@ const hasPhpConfig = computed(
     <p v-if="nodeStore.catalogError" class="mt-3 text-sm text-red-600 dark:text-red-400">
       {{ nodeStore.catalogError }}
     </p>
+    <p v-if="nodeStore.error" class="mt-3 text-sm text-red-600 dark:text-red-400">
+      {{ nodeStore.error }}
+    </p>
 
     <h2 class="mt-6 mb-2 text-xs font-semibold tracking-wide text-neutral-400 uppercase">
       Runtimes
@@ -208,11 +211,13 @@ const hasPhpConfig = computed(
       <RuntimeSwitchRow
         icon="node"
         name="Node.js"
-        :active-version="nodeActiveVersion"
+        :active-version="nodeStore.active?.version ?? null"
         :installed-count="nodeStore.versions.length"
         :versions="nodeVersions"
         :installing-id="nodeStore.installingVersion"
         :progress="nodeProgress"
+        :busy="nodeStore.switching !== null"
+        @select="nodeStore.setActive"
       />
       <RuntimeSwitchRow
         icon="python"
@@ -228,8 +233,8 @@ const hasPhpConfig = computed(
       hand — Rezure didn't checksum those.
     </p>
     <p class="mt-2 text-xs text-neutral-400">
-      Node.js installs go straight to disk — using one from a project (PATH, per-project switching)
-      is a separate feature that isn't built yet. Python isn't available yet — it publishes no
+      The Node.js version picked here is what a project's terminal uses unless that project pins its
+      own (see the Node icon on a project's card). Python isn't available yet — it publishes no
       checksum Rezure can verify a download against.
     </p>
 
@@ -245,6 +250,7 @@ const hasPhpConfig = computed(
     >
       <PhpPathLinkCard />
       <PhpConfigCard />
+      <PhpCaBundleCard />
 
       <div v-if="phpStore.dropInDir" class="p-4">
         <div class="flex items-start justify-between gap-4">

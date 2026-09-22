@@ -23,6 +23,11 @@ export interface ProjectInfo {
    *  global default gives this project its own concurrently-running
    *  `php-cgi`, so projects on different versions can run at the same time. */
   phpVersion: string | null
+  /** This project's own pinned Node.js version, or `null` to follow the
+   *  global active version. Unlike `phpVersion`, this never spawns anything
+   *  of its own — it only changes what a terminal opened for this project
+   *  resolves `node`/`npm`/`npx` as. */
+  nodeVersion: string | null
 }
 
 /** What linking a folder would produce, shown before anything is saved. */

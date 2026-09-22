@@ -52,3 +52,5 @@ src-tauri/bundled-bin/**
 !src-tauri/bundled-bin/nginx/.gitkeep
 !src-tauri/bundled-bin/php/
 !src-tauri/bundled-bin/php/.gitkeep
+!src-tauri/bundled-bin/ca/
+!src-tauri/bundled-bin/ca/.gitkeep

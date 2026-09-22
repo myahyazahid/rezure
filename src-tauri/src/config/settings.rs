@@ -29,6 +29,10 @@ pub struct Settings {
     /// Mirrors `services::php`'s in-memory active version so it survives a
     /// restart. `None` until the user has switched at least once.
     pub active_php_version: Option<String>,
+    /// Same idea, for `services::node`. `#[serde(default)]` so a
+    /// `settings.json` written before this field existed still loads.
+    #[serde(default)]
+    pub active_node_version: Option<String>,
     /// Registers Rezure with Windows to launch at sign-in, via
     /// `tauri-plugin-autostart`. Kept here (rather than only asking the OS)
     /// so the Settings toggle reflects intent even if `lib.rs`'s startup
@@ -67,6 +71,7 @@ impl Default for Settings {
             default_port: 80,
             share_usage_data: default_share_usage_data(),
             active_php_version: None,
+            active_node_version: None,
             start_with_windows: false,
             keep_in_tray_on_close: false,
             notify_on_crash: false,
@@ -177,6 +182,7 @@ mod tests {
         // On unless a file says otherwise - there is no UI switch any more.
         assert!(settings.share_usage_data);
         assert_eq!(settings.active_php_version, None);
+        assert_eq!(settings.active_node_version, None);
         assert!(!settings.start_with_windows);
         assert!(!settings.keep_in_tray_on_close);
         assert!(!settings.notify_on_crash);
@@ -215,6 +221,7 @@ mod tests {
             default_port: 8080,
             share_usage_data: true,
             active_php_version: Some("8.3.33".to_string()),
+            active_node_version: Some("22.11.0".to_string()),
             start_with_windows: true,
             keep_in_tray_on_close: true,
             notify_on_crash: true,
@@ -225,6 +232,7 @@ mod tests {
         assert_eq!(loaded.default_port, 8080);
         assert!(loaded.share_usage_data);
         assert_eq!(loaded.active_php_version.as_deref(), Some("8.3.33"));
+        assert_eq!(loaded.active_node_version.as_deref(), Some("22.11.0"));
         assert!(loaded.start_with_windows);
         assert!(loaded.keep_in_tray_on_close);
         assert!(loaded.notify_on_crash);

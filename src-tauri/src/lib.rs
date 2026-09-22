@@ -52,6 +52,9 @@ pub fn run() {
                 commands::php::php_config_dir,
                 commands::php::open_php_config_dir,
                 commands::php::diagnose_project,
+                commands::php::check_php_tls,
+                commands::php::ca_bundle_status,
+                commands::php::update_ca_bundle,
                 commands::php::php_extensions,
                 commands::php::install_php_extension,
                 commands::php::list_bundled_php_extensions,
@@ -71,6 +74,7 @@ pub fn run() {
                 commands::projects::link_project,
                 commands::projects::unlink_project,
                 commands::projects::set_project_php_version,
+                commands::projects::set_project_node_version,
                 commands::binaries::list_binaries,
                 commands::binaries::install_binary,
                 commands::binaries::list_mariadb_catalog,
@@ -83,6 +87,7 @@ pub fn run() {
                 commands::composer::list_composer_catalog,
                 commands::composer::install_composer_version,
                 commands::node::list_node_versions,
+                commands::node::set_active_node_version,
                 commands::node::list_node_catalog,
                 commands::node::install_node_version,
                 commands::database::list_databases,
@@ -206,6 +211,12 @@ pub fn run() {
                 // Ungated because this reads a handful of small files and shells
                 // out to nothing, and because an install that already ran the gated
                 // repairs on an earlier build would otherwise never be fixed.
+                //
+                // The CA bundle is seeded first, from the installer's copy, so
+                // the same pass can point every version's ini at it — a
+                // version installed before any bundle existed was written
+                // without `curl.cainfo`, and nothing else would ever add it.
+                services::ca_bundle::seed_bundled(app.handle());
                 {
                     let mut repaired = 0;
                     for runtime in services::php::installed() {
@@ -216,6 +227,12 @@ pub fn run() {
                                 "could not repair php.ini in {}: {err}",
                                 runtime.dir.display()
                             ),
+                        }
+                        if let Err(err) = services::php_ini::repair_ca_directives(&runtime.dir) {
+                            log::warn!(
+                                "could not point {} at the CA bundle: {err}",
+                                runtime.dir.display()
+                            );
                         }
                     }
                     if repaired > 0 {
@@ -233,6 +250,9 @@ pub fn run() {
                 // Needs a live `AppHandle` (to emit `service://log` events),
                 // which only exists once the app is actually starting up.
                 app.manage(services::real_services(app.handle().clone()));
+                // Brings PHP back after a crash without waiting on the UI —
+                // see `services::supervisor`.
+                services::supervisor::spawn(app.handle().clone());
 
                 let settings = config::settings::load();
                 // Best-effort: the version may no longer be installed, in which
@@ -240,6 +260,13 @@ pub fn run() {
                 // nothing here needs to treat that as an error.
                 if let Some(version) = &settings.active_php_version {
                     let _ = services::php::set_active(version);
+                }
+                // Same restore, for Node.js — best-effort for the same
+                // reason: `services::node::set_active` rejects a version
+                // that's no longer on disk, and `services::node`'s own
+                // fallback picks the newest installed one instead.
+                if let Some(version) = &settings.active_node_version {
+                    let _ = services::node::set_active(version);
                 }
                 // Restoring the choice is only half of it: `services::php`'s
                 // `set_active` moves in-memory state, while the junction on the

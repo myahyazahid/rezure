@@ -6,6 +6,7 @@
 //! frontend, so the only strings that reach the OS here are ones Rezure
 //! produced itself from its own `www_root()` scan.
 
+use std::ffi::OsString;
 use std::path::Path;
 use std::process::Command;
 
@@ -43,9 +44,26 @@ pub fn open_folder(id: &str) -> Result<(), AppError> {
 }
 
 /// Opens a terminal already sitting in the project directory.
-pub fn open_terminal(id: &str) -> Result<(), AppError> {
+///
+/// `node_bin_dir`, when given, is put first on the new terminal's `PATH` —
+/// see `commands::projects::resolve_node_bin_dir` for how it's picked.
+/// `None` means "leave `PATH` exactly as Rezure's own process has it",
+/// same as before this parameter existed.
+pub fn open_terminal(id: &str, node_bin_dir: Option<&Path>) -> Result<(), AppError> {
     let project = resolve(id)?;
-    spawn_terminal(Path::new(&project.path))
+    spawn_terminal(Path::new(&project.path), node_bin_dir)
+}
+
+/// Prepends `dir` to the current process's own `PATH`, for handing to a
+/// spawned child — never the other way around, and never written back to
+/// this process's own environment. `None` only when the current `PATH`
+/// can't be read *and* rejoined, which practically never happens on
+/// Windows; the caller falls back to leaving `PATH` untouched either way.
+fn path_with_first(dir: &Path) -> Option<OsString> {
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    let mut entries = vec![dir.to_path_buf()];
+    entries.extend(std::env::split_paths(&current));
+    std::env::join_paths(entries).ok()
 }
 
 /// Windows Terminal is the default on Windows 11 but isn't guaranteed to
@@ -56,13 +74,42 @@ pub fn open_terminal(id: &str) -> Result<(), AppError> {
 /// it as its own argv entry, and `start` inherits it as the working
 /// directory — so spaces or quotes in a project path can't turn into extra
 /// arguments.
-fn spawn_terminal(dir: &Path) -> Result<(), AppError> {
-    if Command::new("wt.exe").arg("-d").arg(dir).spawn().is_ok() {
+///
+/// # Why a PATH override skips `wt.exe` entirely
+///
+/// Windows Terminal keeps one long-lived "monarch" process that owns every
+/// window; once one is already running (the ordinary case — a user rarely
+/// has zero Terminal windows open), every later `wt.exe` invocation is a
+/// throwaway "peasant" that just asks the monarch to open a new tab and
+/// exits. The monarch creates that tab's shell from **its own** process
+/// environment — the one it had when it first started — not from whatever
+/// `Command::env` set on the peasant we just spawned and which is already
+/// gone. Confirmed against a real machine: a pinned/active Node version
+/// silently had no effect whenever a Terminal window was already open,
+/// `node -v` resolving to whatever else was on the system's own PATH
+/// instead. `-w -1` and similar flags only pick which *window* the new tab
+/// lands in; they don't change whose environment it's spawned from, so
+/// they don't fix this.
+///
+/// There's no reliable way to tell from here whether a monarch already
+/// exists, so a PATH override always takes the `cmd` fallback below
+/// instead — a plain console window instead of a Terminal tab, but one this
+/// function spawns start to finish itself, so the environment it sets
+/// can't be swallowed by another process's. No override (the ordinary
+/// terminal, no project Node version in play) keeps using `wt.exe` as
+/// before.
+fn spawn_terminal(dir: &Path, node_bin_dir: Option<&Path>) -> Result<(), AppError> {
+    let path_override = node_bin_dir.and_then(path_with_first);
+
+    if path_override.is_none() && Command::new("wt.exe").arg("-d").arg(dir).spawn().is_ok() {
         return Ok(());
     }
 
     let mut fallback = Command::new("cmd");
     fallback.args(["/C", "start", "cmd"]).current_dir(dir);
+    if let Some(path) = &path_override {
+        fallback.env("PATH", path);
+    }
     // The `cmd /C` that runs `start` is pure plumbing — without this it
     // flashes its own console window for the moment it lives. `start`
     // itself asks for a new console explicitly, so the terminal the user
@@ -98,6 +145,17 @@ mod tests {
     #[test]
     #[ignore]
     fn opens_a_real_terminal() {
-        spawn_terminal(&std::env::temp_dir()).unwrap();
+        spawn_terminal(&std::env::temp_dir(), None).unwrap();
+    }
+
+    #[test]
+    fn path_with_first_puts_the_given_dir_ahead_of_the_existing_path() {
+        let dir = Path::new(r"C:\rezure\bin\node\22.11.0\node-v22.11.0-win-x64");
+        let joined = path_with_first(dir).unwrap();
+        let joined = joined.to_string_lossy();
+        assert!(
+            joined.starts_with(&*dir.to_string_lossy()),
+            "the given dir must be first, got: {joined}"
+        );
     }
 }

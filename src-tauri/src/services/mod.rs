@@ -4,6 +4,7 @@
 //! trait so adding a new one never requires special-casing elsewhere.
 
 pub mod binaries;
+pub mod ca_bundle;
 pub mod changelog;
 pub mod composer;
 pub mod composer_catalog;
@@ -17,6 +18,7 @@ pub mod donate;
 pub mod hosts;
 pub mod launcher;
 pub mod mariadb_catalog;
+pub mod node;
 pub mod node_catalog;
 pub mod php;
 pub mod php_catalog;
@@ -32,6 +34,7 @@ pub mod scaffold;
 pub mod secrets;
 pub mod share;
 pub mod share_proxy;
+pub mod supervisor;
 pub mod support;
 pub mod telemetry;
 pub mod tunnel;
@@ -104,6 +107,23 @@ pub trait Service: Send + Sync {
     fn force_stop(&self) -> Result<ServiceInfo, AppError> {
         self.stop()
     }
+
+    /// True once the service has exited on its own — neither `stop()` nor
+    /// `force_stop()` took it down — and stays true until the next
+    /// successful `start()` or any `stop()`. Checking it may itself be what
+    /// notices the exit, so implementations should poll their process here
+    /// rather than wait for `info()` to be called. Defaults to never.
+    fn crashed(&self) -> bool {
+        false
+    }
+
+    /// Whether [`supervisor`] may start this service again by itself after a
+    /// crash. Opt-in, and off by default: only right for a service that
+    /// holds no state a blind restart could make worse — `php-cgi`, not a
+    /// database mid-crash-recovery.
+    fn restarts_on_crash(&self) -> bool {
+        false
+    }
 }
 
 pub type ServiceHandle = Arc<dyn Service>;
@@ -152,6 +172,13 @@ impl ServiceManager {
             .iter()
             .map(|s| s.info())
             .collect()
+    }
+
+    /// A snapshot of every registered service, for callers that act on each
+    /// one without holding the list's lock for the duration (a start can
+    /// take real time — see [`supervisor`]).
+    pub fn handles(&self) -> Vec<ServiceHandle> {
+        self.services.lock().unwrap().clone()
     }
 
     pub fn find(&self, id: &str) -> Result<ServiceHandle, AppError> {
