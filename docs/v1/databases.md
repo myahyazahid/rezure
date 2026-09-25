@@ -62,7 +62,7 @@ Detected clients (see [`services/db_clients.rs`](../src-tauri/src/services/db_cl
 |---|---|---|
 | TablePlus | yes | `mysql://` connection URL |
 | DBeaver | yes | `-con driver=mariadb\|host=…\|database=…\|save=false\|connect=true` |
-| HeidiSQL | server only | `-h= -P= -u=` |
+| HeidiSQL | yes — the tree shows only that database | `-h= -P= -u= -db=` |
 | MySQL Workbench | server only | `-query root@127.0.0.1:3306` |
 | Navicat | server only | opens the app (no documented connection flags) |
 | MariaDB console | yes | the bundled `mariadb.exe`, in a new console window |
@@ -190,7 +190,7 @@ a raw client error. Start MariaDB there and retry.
 **Port 3306 already in use** — Laragon or XAMPP is running. Stop it; the two can't share the
 port.
 
-**A client opens but connects to nothing** — for HeidiSQL, Workbench and Navicat this is
+**A client opens but connects to nothing** — for Workbench and Navicat this is
 expected on first launch; they open on the server (or just open), and you pick the database
 inside. Use **Copy DSN** if the client wants a connection string.
 

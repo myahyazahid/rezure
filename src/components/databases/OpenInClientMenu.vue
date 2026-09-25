@@ -145,7 +145,7 @@ onUnmounted(() => {
           <span class="truncate font-medium text-neutral-800 dark:text-neutral-100">
             {{ client.name }}
           </span>
-          <!-- Workbench and HeidiSQL can only be pointed at a server, so the
+          <!-- Workbench and Navicat can only be pointed at a server, so the
                menu says so rather than letting the click look like it failed. -->
           <span v-if="!client.opensDatabase" class="shrink-0 text-[11px] text-neutral-400">
             server only

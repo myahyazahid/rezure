@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<section name="Workbench">
+	<section name="ConfirmationDialog.exit">
+		<item key="DIALOG_X_ORIGIN" value="312"/>
+		<item key="DIALOG_Y_ORIGIN" value="218"/>
+		<item key="DIALOG_WIDTH" value="529"/>
+		<item key="DIALOG_HEIGHT" value="159"/>
+		<item key="DIALOG_FONT_NAME" value="1|Segoe UI|9.0|0|WINDOWS|1|-15|0|0|0|400|0|0|0|1|0|0|0|0|Segoe UI"/>
+	</section>
+	<section name="DBeaver.ShowTipOfTheDayDialog">
+		<item key="DIALOG_X_ORIGIN" value="403"/>
+		<item key="DIALOG_Y_ORIGIN" value="-7"/>
+		<item key="DIALOG_WIDTH" value="347"/>
+		<item key="DIALOG_HEIGHT" value="497"/>
+		<item key="DIALOG_FONT_NAME" value="1|Segoe UI|9.0|0|WINDOWS|1|-15|0|0|0|400|0|0|0|1|0|0|0|0|Segoe UI"/>
+	</section>
+	<section name="DBeaver.QM.LogViewer">
+	</section>
+	<section name="ResultSetViewer">
+		<section name="presentations">
+			<section name="spreadsheet">
+				<item key="enabledPanelIds" value="value-view"/>
+				<item key="activePanelId" value="value-view"/>
+				<item key="panelRatio" value="300"/>
+				<item key="panelsVisible" value="true"/>
+				<item key="verticalLayout" value="false"/>
+			</section>
+		</section>
+	</section>
+</section>

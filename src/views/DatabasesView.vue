@@ -318,7 +318,7 @@ const exporting = computed(
           <path
             stroke-linecap="round"
             stroke-linejoin="round"
-            d="M12 20V9m0 0-4 4m4-4 4 4M5 5h14"
+            d="M12 4v11m0 0-4-4m4 4 4-4M5 19h14"
           />
         </svg>
         Import .sql
@@ -452,7 +452,7 @@ const exporting = computed(
                 <path
                   stroke-linecap="round"
                   stroke-linejoin="round"
-                  d="M12 4v11m0 0-4-4m4 4 4-4M5 19h14"
+                  d="M12 20V9m0 0-4 4m4-4 4 4M5 5h14"
                 />
               </svg>
               {{ store.busy === db.name ? 'Exporting…' : 'Export' }}

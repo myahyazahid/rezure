@@ -53,11 +53,22 @@ struct Candidate {
 /// `$LOCALAPPDATA`, `$PROGRAMFILES` and `$PROGRAMFILES(X86)` are expanded
 /// at lookup time — hard-coding `C:\Program Files` breaks on any machine
 /// that redirects them.
+///
+/// `C:\laragon\bin\…` is the one literal root: Laragon bundles DBeaver and
+/// HeidiSQL there, and a developer moving over from Laragon often has no
+/// other copy. Same fixed root `db_profiles::detect_laragon` looks under.
+/// Listed after the standalone installs, which the user chose deliberately
+/// and are usually the newer build.
 const CANDIDATES: &[Candidate] = &[
     Candidate {
         id: "tableplus",
         name: "TablePlus",
-        locations: &[r"$LOCALAPPDATA\Programs\TablePlus\TablePlus.exe"],
+        locations: &[
+            // The installer asks: per-user lands here, all-users in
+            // Program Files.
+            r"$LOCALAPPDATA\Programs\TablePlus\TablePlus.exe",
+            r"$PROGRAMFILES\TablePlus\TablePlus.exe",
+        ],
         opens_database: true,
     },
     Candidate {
@@ -68,6 +79,7 @@ const CANDIDATES: &[Candidate] = &[
             r"$PROGRAMFILES\DBeaverEE\dbeaver.exe",
             r"$LOCALAPPDATA\DBeaver\dbeaver.exe",
             r"$LOCALAPPDATA\Programs\DBeaver\dbeaver.exe",
+            r"C:\laragon\bin\dbeaver\dbeaver.exe",
         ],
         opens_database: true,
     },
@@ -77,8 +89,9 @@ const CANDIDATES: &[Candidate] = &[
         locations: &[
             r"$PROGRAMFILES\HeidiSQL\heidisql.exe",
             r"$PROGRAMFILESX86\HeidiSQL\heidisql.exe",
+            r"C:\laragon\bin\heidisql\heidisql.exe",
         ],
-        opens_database: false,
+        opens_database: true,
     },
     Candidate {
         id: "workbench",
@@ -194,10 +207,15 @@ fn connection_args(id: &str, database: &str) -> Vec<String> {
         // Workbench's `-query` opens a connection to a server, with no way
         // to preselect a schema.
         "workbench" => vec!["-query".to_string(), format!("{user}@{host}:{port}")],
+        // `-db` (long form `--databases`) is HeidiSQL's session "Databases"
+        // field — it limits the tree to the schemas named, `;`-separated.
+        // Undocumented in `--help`; read out of the option table in
+        // heidisql.exe itself (`db | databases`, beside `h | host`).
         "heidisql" => vec![
             format!("-h={host}"),
             format!("-P={port}"),
             format!("-u={user}"),
+            format!("-db={database}"),
         ],
         // Navicat has no documented connection flags — it just opens.
         _ => Vec::new(),
@@ -295,12 +313,18 @@ mod tests {
         assert!(args[1].contains("save=false"), "{}", args[1]);
     }
 
-    /// Workbench and HeidiSQL can't be pointed at a schema, and say so —
+    #[test]
+    fn heidisql_is_handed_the_database_as_its_own_argument() {
+        let args = connection_args("heidisql", "shop_api");
+        assert_eq!(args.last().map(String::as_str), Some("-db=shop_api"));
+    }
+
+    /// Workbench and Navicat can't be pointed at a schema, and say so —
     /// the UI relies on this flag to set expectations rather than opening
     /// something other than what was clicked.
     #[test]
     fn clients_that_cannot_preselect_a_schema_are_marked_as_such() {
-        for id in ["workbench", "heidisql", "navicat"] {
+        for id in ["workbench", "navicat"] {
             let candidate = CANDIDATES.iter().find(|c| c.id == id).unwrap();
             assert!(!candidate.opens_database, "{id}");
             assert!(
@@ -310,6 +334,14 @@ mod tests {
                 "{id} must not claim to open a schema it can't"
             );
         }
+    }
+
+    /// The Laragon entries carry no `$VAR` prefix — they must come through
+    /// `expand` untouched, not be dropped or re-rooted.
+    #[test]
+    fn a_literal_location_expands_to_itself() {
+        let literal = r"C:\laragon\bin\heidisql\heidisql.exe";
+        assert_eq!(expand(literal), Some(PathBuf::from(literal)));
     }
 
     #[test]

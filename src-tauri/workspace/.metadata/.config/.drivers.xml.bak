@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<drivers>
+	<provider id="mysql">
+		<driver id="mariaDB" categories="sql" name="MariaDB" class="org.mariadb.jdbc.Driver" url="jdbc:mariadb://{host}[:{port}]/[{database}]" port="3306" defaultUser="root" description="MariaDB JDBC driver" custom="false">
+			<library type="jar" path="maven:/org.mariadb.jdbc:mariadb-java-client:RELEASE" custom="false" version="3.5.2">
+				<file id="org.mariadb.jdbc:mariadb-java-client:RELEASE" version="3.5.2" path="${drivers_home}\maven\maven-central\org.mariadb.jdbc\mariadb-java-client-3.5.2.jar" crc="df444d64"/>
+			</library>
+			<library type="license" path="licenses/external/lgpl-2.1.txt" custom="false"/>
+		</driver>
+	</provider>
+</drivers>
