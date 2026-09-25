@@ -18,7 +18,7 @@
 //! means resolving the right `node.exe`/`npm` at the moment something is
 //! spawned, by putting that version's folder first on the *child process's*
 //! `PATH`. No port, no long-running service, no `ServiceManager` entry.
-//! See `services::launcher::open_terminal`.
+//! See [`terminal_bin_dir`] and `services::launcher::open_terminal`.
 //!
 //! # Global active vs. per-project pin
 //!
@@ -125,6 +125,20 @@ pub fn bin_dir_for(version: &str) -> Result<PathBuf, AppError> {
         .find(|runtime| runtime.version == version)
         .and_then(|runtime| runtime.exe.parent().map(Path::to_path_buf))
         .ok_or_else(|| AppError::NodeVersionNotFound(version.to_string()))
+}
+
+/// The folder that should go first on a project terminal's `PATH` — the
+/// project's own pinned version if it has one, otherwise the global active
+/// version. `None` when that version's build isn't actually on disk any
+/// more, or when nothing is installed at all: either way, opening a plain
+/// terminal with the ambient `PATH` is the right fallback, not a failed
+/// command.
+pub fn terminal_bin_dir(pinned: Option<&str>) -> Option<PathBuf> {
+    let version = match pinned {
+        Some(version) => version.to_string(),
+        None => Some(active_id()).filter(|active| !active.is_empty())?,
+    };
+    bin_dir_for(&version).ok()
 }
 
 #[cfg(test)]

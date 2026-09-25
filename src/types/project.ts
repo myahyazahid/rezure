@@ -21,7 +21,8 @@ export interface ProjectInfo {
   /** This project's own pinned PHP version, or `null` to follow the global
    *  active version (Switch page). Pinning a version distinct from the
    *  global default gives this project its own concurrently-running
-   *  `php-cgi`, so projects on different versions can run at the same time. */
+   *  `php-cgi`, so projects on different versions can run at the same time.
+   *  A terminal opened for this project resolves `php` as the same version. */
   phpVersion: string | null
   /** This project's own pinned Node.js version, or `null` to follow the
    *  global active version. Unlike `phpVersion`, this never spawns anything

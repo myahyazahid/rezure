@@ -16,7 +16,7 @@ Beda dari PHP: Node **tidak** dijalankan Rezure sebagai service yang terus nyala
 
 - **Versi aktif global** (`services::node`, `OnceLock<Mutex<String>>` — pola identik `services::php`) dipakai project yang tidak pin apa-apa.
 - **`ProjectInfo.node_version`** (kolom SQLite baru, `NULL` = ikut default) — project bisa pin versi sendiri, tidak menyentuh proses/service apapun.
-- Begitu terminal dibuka dari project card: `commands::projects::resolve_node_bin_dir` resolve versi efektifnya (pin project → fallback versi aktif global), ketemu folder isi `node.exe`/`npm`/`npx`-nya lewat `services::node::bin_dir_for`, lalu folder itu di-*prepend* ke `PATH` **hanya untuk proses terminal yang baru di-spawn** — tidak pernah menulis ke PATH sistem atau PATH proses Rezure sendiri.
+- Begitu terminal dibuka dari project card: `services::node::terminal_bin_dir` resolve versi efektifnya (pin project → fallback versi aktif global), ketemu folder isi `node.exe`/`npm`/`npx`-nya lewat `services::node::bin_dir_for`, lalu folder itu di-*prepend* ke `PATH` **hanya untuk proses terminal yang baru di-spawn** — tidak pernah menulis ke PATH sistem atau PATH proses Rezure sendiri. Sejak itu PHP ikut pola yang sama (lihat v3 Fase 3.11, task "Terminal dari project card ikut versi PHP yang dipin").
 
 ### Tasks
 - [x] Deteksi versi Node.js yang sudah terinstall/terbundle di sistem — `services::node::list()`/`installed()`, delegasi ke `binaries::discover("node", "node.exe")` yang sudah ada dari Fase 3.10

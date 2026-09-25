@@ -233,9 +233,9 @@ const hasPhpConfig = computed(
       hand — Rezure didn't checksum those.
     </p>
     <p class="mt-2 text-xs text-neutral-400">
-      The Node.js version picked here is what a project's terminal uses unless that project pins its
-      own (see the Node icon on a project's card). Python isn't available yet — it publishes no
-      checksum Rezure can verify a download against.
+      The PHP and Node.js versions picked here are what a project's terminal uses unless that project
+      pins its own (see the PHP and Node icons on a project's card). Python isn't available yet — it
+      publishes no checksum Rezure can verify a download against.
     </p>
 
     <h2

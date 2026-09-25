@@ -262,6 +262,23 @@ murni soal port allocation + service lifecycle, bukan batasan PHP itu sendiri.
       project dipin, tanpa nyentuh `stores/logs.ts` sendiri. Diuji manual oleh maintainer, jalan baik
 - [ ] Nama tampilan `"PHP 8.3.0"` di kartu service belum dicek langsung di app sungguhan (cuma
       diverifikasi lewat unit test `ServiceInfo`, bukan browser/UI manual)
+- [x] **Terminal dari project card ikut versi PHP yang dipin**, sama seperti Node (v3.5 Fase
+      3.5.1). Diminta maintainer: sebelumnya pin cuma berlaku untuk web, jadi `php artisan` di
+      terminal project tetap jalan di PHP lain (versi di "PHP Everywhere", Laragon, atau tidak ada
+      sama sekali). `services::php::terminal_bin_dir` resolve pin project, lalu fallback ke versi
+      aktif kalau pin kosong **atau versinya sudah tidak terinstall**. Fallback ini sama dengan
+      `php_pool::port_for_project` di sisi web, jadi terminal dan site tidak mungkin beda versi.
+      Beda dengan Node, yang pin basinya jadi `None`. Folder itu di-prepend ke `PATH` terminal
+      (`composer` global ikut, karena memanggil `php` dari `PATH`), `PHP_INI_SCAN_DIR` diberi
+      `conf.d` (append, bukan replace), dan `php.ini` CLI di folder versi itu di-heal dulu.
+      `OPENSSL_CONF` **sengaja tidak** di-set, karena Git di terminal yang sama membaca variabel
+      itu juga. `launcher::open_terminal` sekarang menerima `TerminalEnv` (daftar folder + env var)
+      pengganti satu `node_bin_dir`, dan resolusi Node dipindah dari `commands::projects` ke
+      `services::node::terminal_bin_dir` supaya kedua runtime di-resolve di satu tempat.
+      Diverifikasi di mesin nyata: dengan env hasil pin 7.4.33, `where php` menaruh
+      `bin\php\7.4.33` di atas junction `current\php` dan Laragon, `php --ini` membaca `php.ini`
+      versi itu + `conf.d`, dan `openssl`/`pdo_mysql` ter-load. **Belum** diklik lewat tombol
+      terminal di app sungguhan
 - [x] **Tambahan UI di luar rencana awal, diminta maintainer selama sesi debugging ini**: tombol
       "Restart all" di halaman Services, di antara "Start all" dan "Stop all" — merestart tiap
       service yang lagi Running (yang Stopped tetap dibiarkan, itu tugas "Start all"), overlay dan

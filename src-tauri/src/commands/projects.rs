@@ -1,13 +1,9 @@
-use std::path::PathBuf;
-
 use tauri::State;
 
 use crate::db::projects::ProjectInfo;
 use crate::db::{self, DbState};
 use crate::services::scaffold::ProjectTemplate;
-use crate::services::{
-    hosts, launcher, node, projects, scaffold, vhosts, ServiceManager, ServiceStatus,
-};
+use crate::services::{hosts, launcher, projects, scaffold, vhosts, ServiceManager, ServiceStatus};
 use crate::utils::error::AppError;
 
 /// Makes a project just created, linked or unlinked live immediately
@@ -165,27 +161,20 @@ pub fn set_project_node_version(
     Ok(())
 }
 
-/// The folder that should go first on a terminal's `PATH` for this project —
-/// its own pinned Node.js version if it has one, otherwise the global active
-/// version. `None` when there's a pin/active version but the corresponding
-/// build isn't actually on disk any more, or when nothing is installed at
-/// all: either way, opening a plain terminal with the ambient `PATH` is the
-/// right fallback, not a failed command.
-fn resolve_node_bin_dir(db_state: &State<'_, DbState>, id: &str) -> Option<PathBuf> {
-    let pinned = {
-        let conn = db_state.0.lock().unwrap();
-        db::projects::node_version_for(&conn, id).unwrap_or_else(|err| {
-            log::warn!("failed to load {id}'s Node.js version override: {err}");
-            None
-        })
-    };
-
-    let version = pinned.or_else(|| {
-        let active = node::active_id();
-        (!active.is_empty()).then_some(active)
-    })?;
-
-    node::bin_dir_for(&version).ok()
+/// This project's PHP and Node.js version overrides, for
+/// `launcher::open_terminal`. Best-effort: a SQLite hiccup degrades to "no
+/// pin" (the global active version), not a terminal that fails to open.
+fn terminal_pins(db_state: &State<'_, DbState>, id: &str) -> (Option<String>, Option<String>) {
+    let conn = db_state.0.lock().unwrap();
+    let php = db::projects::php_version_for(&conn, id).unwrap_or_else(|err| {
+        log::warn!("failed to load {id}'s PHP version override: {err}");
+        None
+    });
+    let node = db::projects::node_version_for(&conn, id).unwrap_or_else(|err| {
+        log::warn!("failed to load {id}'s Node.js version override: {err}");
+        None
+    });
+    (php, node)
 }
 
 /// Writes every detected project's domain into the OS hosts file, prompting
@@ -269,14 +258,13 @@ pub fn open_project_folder(id: String, db_state: State<'_, DbState>) -> Result<(
     Ok(())
 }
 
-/// Opens a terminal in the project folder, with this project's effective
-/// Node.js version (its own pin, or the global active one) put first on the
-/// new terminal's `PATH` — see `resolve_node_bin_dir` and
-/// `services::launcher::open_terminal`.
+/// Opens a terminal in the project folder, with this project's effective PHP
+/// and Node.js versions (its own pins, or the global active ones) put first
+/// on the new terminal's `PATH` — see `services::launcher::open_terminal`.
 #[tauri::command]
 pub fn open_project_terminal(id: String, db_state: State<'_, DbState>) -> Result<(), AppError> {
-    let node_bin_dir = resolve_node_bin_dir(&db_state, &id);
-    launcher::open_terminal(&id, node_bin_dir.as_deref())?;
+    let (php_pin, node_pin) = terminal_pins(&db_state, &id);
+    launcher::open_terminal(&id, php_pin.as_deref(), node_pin.as_deref())?;
     mark_opened(&db_state, &id);
     Ok(())
 }

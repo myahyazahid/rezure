@@ -125,6 +125,29 @@ pub fn exe_for(version: &str) -> Result<PathBuf, AppError> {
         .ok_or_else(|| AppError::PhpVersionNotFound(version.to_string()))
 }
 
+/// The `php.exe` a project with this pin is served by: the pinned version
+/// while it's still installed, the active one otherwise — the same fallback
+/// `php_pool::port_for_project` gives the web side.
+fn exe_for_project(pinned: Option<&str>) -> Option<PathBuf> {
+    pinned
+        .and_then(|version| exe_for(version).ok())
+        .or_else(|| active_exe().ok())
+}
+
+/// The folder that goes first on a project terminal's `PATH`, so `php` (and
+/// a global `composer`, which calls whatever `php` is on `PATH`) runs on the
+/// same version the project's site is served by — see [`exe_for_project`].
+/// `None` only when no PHP is installed at all.
+///
+/// Heals that folder's `php.ini` on the way, as `php_path::sync` does for the
+/// version it exposes: a build dropped into the user's `bin` folder by hand
+/// never got one, and without it `php` loads no extensions at all.
+pub fn terminal_bin_dir(pinned: Option<&str>) -> Option<PathBuf> {
+    let dir = exe_for_project(pinned)?.parent()?.to_path_buf();
+    write_cli_php_ini(&dir);
+    Some(dir)
+}
+
 /// Switches the active version. Rejects anything not on disk — installing
 /// is a separate, explicit step.
 pub fn set_active(version: &str) -> Result<Vec<PhpVersionStatus>, AppError> {
@@ -356,6 +379,28 @@ mod tests {
     fn set_active_rejects_a_version_that_isnt_on_disk() {
         let err = set_active("1.0.0-not-installed").unwrap_err();
         assert!(matches!(err, AppError::PhpVersionNotFound(_)));
+    }
+
+    /// A pin to a version that's since been removed must behave like no pin,
+    /// not like "no PHP" — otherwise the terminal would drop to whatever
+    /// `php` is on the system PATH while the site keeps running on Rezure's.
+    #[test]
+    fn a_stale_pin_falls_back_to_the_active_version() {
+        assert_eq!(
+            exe_for_project(Some("1.0.0-not-installed")),
+            active_exe().ok()
+        );
+        assert_eq!(exe_for_project(None), active_exe().ok());
+    }
+
+    #[test]
+    fn a_pin_to_an_installed_version_wins_over_the_active_one() {
+        for runtime in installed() {
+            assert_eq!(
+                exe_for_project(Some(&runtime.version)),
+                exe_for(&runtime.version).ok()
+            );
+        }
     }
 
     #[test]

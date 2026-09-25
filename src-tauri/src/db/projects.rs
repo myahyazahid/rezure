@@ -196,6 +196,20 @@ pub fn set_php_version(conn: &Connection, id: &str, version: Option<&str>) -> Re
     Ok(())
 }
 
+/// One project's PHP version override — the single-row counterpart of
+/// [`fetch_php_versions`], for `commands::projects::open_project_terminal`,
+/// same reasoning as [`node_version_for`].
+pub fn php_version_for(conn: &Connection, id: &str) -> Result<Option<String>, AppError> {
+    conn.query_row(
+        "SELECT php_version FROM projects WHERE id = ?1",
+        [id],
+        |row| row.get::<_, Option<String>>(0),
+    )
+    .optional()
+    .map_err(db_err)
+    .map(|row| row.flatten())
+}
+
 /// Every project's Node.js version override, keyed by id — same shape and
 /// purpose as [`fetch_php_versions`].
 pub fn fetch_node_versions(conn: &Connection) -> Result<HashMap<String, Option<String>>, AppError> {
@@ -357,6 +371,26 @@ mod tests {
             versions.get("not-yet-scanned"),
             Some(&Some("7.4.33".to_string()))
         );
+    }
+
+    #[test]
+    fn php_version_for_reads_one_projects_pin() {
+        let conn = init_migrations_for_test();
+        upsert_seen(&conn, &sample("blog")).unwrap();
+        upsert_seen(&conn, &sample("shop")).unwrap();
+        set_php_version(&conn, "blog", Some("7.4.33")).unwrap();
+
+        assert_eq!(
+            php_version_for(&conn, "blog").unwrap(),
+            Some("7.4.33".to_string())
+        );
+        assert_eq!(php_version_for(&conn, "shop").unwrap(), None);
+    }
+
+    #[test]
+    fn php_version_for_a_project_never_seen_is_none_not_an_error() {
+        let conn = init_migrations_for_test();
+        assert_eq!(php_version_for(&conn, "ghost").unwrap(), None);
     }
 
     #[test]

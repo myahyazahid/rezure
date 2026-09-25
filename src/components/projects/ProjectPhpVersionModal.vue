@@ -42,7 +42,9 @@ function choose(version: string | null) {
         Pin this project to a specific PHP version so it keeps running on it even if you switch the
         global default on the Switch page. Pinning a version other projects aren't on gives this
         project its own PHP process, so different projects can run on different versions at the same
-        time.
+        time. A terminal opened from this project's card uses the same version for
+        <span class="font-mono">php</span>/<span class="font-mono">composer</span> — a terminal
+        already open keeps whatever it started with.
       </p>
 
       <div class="mt-5 space-y-1.5">

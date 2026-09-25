@@ -27,11 +27,12 @@
 //! existed there was no edit a user could make that both survived a start
 //! and reached a web request. `PHP_INI_SCAN_DIR` gives them one.
 
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::{ca_bundle, php, php_ext_toggle};
+use super::{ca_bundle, php, php_ext_toggle, php_path};
 use crate::utils::error::AppError;
 use crate::utils::paths;
 
@@ -175,6 +176,43 @@ pub fn ensure_conf_d() -> Result<PathBuf, AppError> {
     }
 
     Ok(dir)
+}
+
+/// [`SCAN_DIR_ENV`] for a terminal Rezure opens for a project: the value
+/// Rezure itself inherited, with [`conf_d`] appended when it isn't already
+/// in it.
+///
+/// Without it, `php` in that terminal reads only the ini beside `php.exe`,
+/// which leaves out whatever the user enabled in `conf.d` (see [`render`]),
+/// so the terminal and the site would disagree about which extensions are
+/// loaded — unless the PATH switch happens to be on, which sets the same
+/// variable machine-wide. Appended rather than replaced for the reason
+/// [`super::php_path`] gives: another tool may already be using it.
+pub fn terminal_scan_dir() -> Result<OsString, AppError> {
+    let conf_d = ensure_conf_d()?;
+    Ok(scan_dir_with(
+        std::env::var_os(SCAN_DIR_ENV).as_deref(),
+        &conf_d,
+    ))
+}
+
+fn scan_dir_with(current: Option<&OsStr>, conf_d: &Path) -> OsString {
+    let mut dirs: Vec<PathBuf> = current
+        .map(|value| {
+            std::env::split_paths(value)
+                .filter(|dir| !dir.as_os_str().is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let wanted = conf_d.display().to_string();
+    if !dirs
+        .iter()
+        .any(|dir| php_path::same_dir(&dir.display().to_string(), &wanted))
+    {
+        dirs.push(conf_d.to_path_buf());
+    }
+    std::env::join_paths(dirs).unwrap_or_else(|_| conf_d.as_os_str().to_owned())
 }
 
 /// `<php dir>/ext`, the folder the extension DLLs actually live in.
@@ -1289,6 +1327,41 @@ extension=curl
 
         // Idempotent, since every spawn calls it.
         assert_eq!(ensure_conf_d().unwrap(), dir);
+    }
+
+    #[test]
+    fn a_terminal_with_no_scan_dir_gets_just_conf_d() {
+        let conf_d = PathBuf::from("rezure").join("etc").join("conf.d");
+        assert_eq!(scan_dir_with(None, &conf_d), conf_d.as_os_str());
+        assert_eq!(
+            scan_dir_with(Some(OsStr::new("")), &conf_d),
+            conf_d.as_os_str()
+        );
+    }
+
+    /// Another tool's scan dir stays, ahead of ours — the same order
+    /// `php_path` writes machine-wide, so Rezure's fragments win a conflict.
+    #[test]
+    fn an_existing_scan_dir_is_kept_and_conf_d_appended() {
+        let theirs = PathBuf::from("laragon").join("conf.d");
+        let conf_d = PathBuf::from("rezure").join("etc").join("conf.d");
+        let current = std::env::join_paths([&theirs]).unwrap();
+
+        assert_eq!(
+            scan_dir_with(Some(&current), &conf_d),
+            std::env::join_paths([&theirs, &conf_d]).unwrap()
+        );
+    }
+
+    /// The case once the PATH switch is on and Rezure was started after it:
+    /// the inherited value already names `conf.d`, maybe spelled differently.
+    #[test]
+    fn conf_d_already_in_the_scan_dir_is_not_added_twice() {
+        let conf_d = PathBuf::from("rezure").join("etc").join("conf.d");
+        let spelled_differently = format!("{}/", conf_d.display().to_string().to_uppercase());
+        let current = OsString::from(&spelled_differently);
+
+        assert_eq!(scan_dir_with(Some(&current), &conf_d), current);
     }
 
     /// A user's own fragment must never be overwritten by a start, which is
