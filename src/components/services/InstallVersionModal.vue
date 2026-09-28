@@ -305,8 +305,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
             @retry="nodeStore.fetchCatalog(true)"
           />
           <p class="mt-4 text-xs text-neutral-500">
-            Installing puts Node.js on disk — using it from a project (PATH, per-project switching)
-            is a separate feature that isn't built yet.
+            Each build ships with its own npm. Pick the active version on the Switch page, or pin
+            one per project from its card.
           </p>
         </template>
       </div>

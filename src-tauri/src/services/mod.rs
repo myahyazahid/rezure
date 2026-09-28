@@ -73,11 +73,25 @@ pub struct ServiceInfo {
     pub category: String,
     pub status: ServiceStatus,
     pub version: String,
+    /// The port the service binds — for a service with several workers, the
+    /// first of them (see [`ServiceInfo::workers`]).
     pub port: u16,
     /// Current CPU usage, only reported while the service is running.
     pub cpu_percent: Option<u8>,
     /// Recent CPU samples driving the UI sparkline; empty while stopped.
     pub cpu_history: Vec<u8>,
+    /// Set for a service that runs as several identical processes on
+    /// consecutive ports starting at `port` (PHP — see `php_pool`), `None`
+    /// for a single-process one.
+    pub workers: Option<WorkerCount>,
+}
+
+/// How many of a multi-process service's workers are up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerCount {
+    pub running: u16,
+    pub total: u16,
 }
 
 /// Shared abstraction every service implements. Adding a new service type
@@ -108,9 +122,11 @@ pub trait Service: Send + Sync {
         self.stop()
     }
 
-    /// True once the service has exited on its own — neither `stop()` nor
-    /// `force_stop()` took it down — and stays true until the next
-    /// successful `start()` or any `stop()`. Checking it may itself be what
+    /// True once the service — or, for one with several workers, any one of
+    /// them — has exited on its own — neither `stop()` nor `force_stop()`
+    /// took it down — and stays true until the next successful `start()` or
+    /// any `stop()`. A `start()` on a service with only some workers down
+    /// brings back just those, leaving the rest serving. Checking it may itself be what
     /// notices the exit, so implementations should poll their process here
     /// rather than wait for `info()` to be called. Defaults to never.
     fn crashed(&self) -> bool {
@@ -129,7 +145,7 @@ pub trait Service: Send + Sync {
 pub type ServiceHandle = Arc<dyn Service>;
 
 /// Builds a pooled PHP service handle for a specific version, listening on a
-/// specific port — see [`ServiceManager::sync_php_pool`]. A closure rather
+/// specific port block (its first port) — see [`ServiceManager::sync_php_pool`]. A closure rather
 /// than a direct dependency on `services::process::ProcessService` so this
 /// module doesn't need to know about any concrete `Service` implementation;
 /// `process::real_services` is the only place that supplies one.
@@ -207,7 +223,8 @@ impl ServiceManager {
     /// Reconciles the pooled PHP services against `wanted` (the versions at
     /// least one project currently pins, from
     /// [`php_pool::wanted_versions`](php_pool::wanted_versions)) and returns
-    /// the version -> port assignment that resulted.
+    /// the version -> port-block assignment that resulted (each block's
+    /// first port, see [`php_pool::worker_ports`]).
     ///
     /// This is the **one place** a pooled version's port is decided — not
     /// `services::vhosts`, even though it's the one writing `fastcgi_pass`

@@ -46,6 +46,11 @@ pub struct NodeRelease {
     pub lts: Option<String>,
     /// `YYYY-MM-DD`.
     pub released: String,
+    /// The npm version bundled in this release's Windows zip, as the index
+    /// reports it. `None` when the field is missing — nodejs.org has always
+    /// published it for any release new enough to be listed here, but a
+    /// missing detail shouldn't drop an otherwise installable version.
+    pub npm: Option<String>,
     pub latest: bool,
     pub installed: bool,
 }
@@ -126,6 +131,7 @@ fn parse(body: &str) -> Result<Vec<NodeRelease>, AppError> {
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string(),
+            npm: entry.get("npm").and_then(Value::as_str).map(str::to_string),
             latest: false,
             installed: false,
         });
@@ -264,13 +270,13 @@ mod tests {
     /// A trimmed copy of `nodejs.org/dist/index.json`'s real shape.
     const SAMPLE: &str = r#"[
       { "version": "v23.1.0", "date": "2024-10-18", "lts": false,
-        "files": ["win-x64-zip", "linux-x64"] },
+        "npm": "10.9.0", "files": ["win-x64-zip", "linux-x64"] },
       { "version": "v22.11.0", "date": "2024-10-29", "lts": "Krypton",
-        "files": ["win-x64-zip", "linux-x64"] },
+        "npm": "10.9.0", "files": ["win-x64-zip", "linux-x64"] },
       { "version": "v22.10.0", "date": "2024-10-16", "lts": false,
         "files": ["win-x64-zip"] },
       { "version": "v20.18.1", "date": "2024-11-20", "lts": "Iron",
-        "files": ["win-x64-zip"] },
+        "npm": "10.8.2", "files": ["win-x64-zip"] },
       { "version": "v20.18.0", "date": "2024-10-24", "lts": "Iron",
         "files": ["win-x64-zip"] },
       { "version": "v18.20.5", "date": "2024-11-12", "lts": "Hydrogen",
@@ -305,6 +311,18 @@ mod tests {
 
         let current = releases.iter().find(|r| r.version == "v23.1.0").unwrap();
         assert_eq!(current.lts, None);
+    }
+
+    #[test]
+    fn the_bundled_npm_version_is_carried_through_when_listed() {
+        let releases = parse(SAMPLE).unwrap();
+        let node20 = releases.iter().find(|r| r.version == "v20.18.1").unwrap();
+        assert_eq!(node20.npm.as_deref(), Some("10.8.2"));
+
+        // v18.20.5's sample entry has no `npm` field: still listed, just
+        // without the detail.
+        let node18 = releases.iter().find(|r| r.version == "v18.20.5").unwrap();
+        assert_eq!(node18.npm, None);
     }
 
     #[test]
@@ -346,8 +364,8 @@ mod tests {
             let file_name = format!("node-{}-win-x64.zip", release.version);
             let sha256 = checksum_for(&release.version, &file_name).await.unwrap();
             println!(
-                "{} lts={:?} installed={} latest={} sha256={sha256}",
-                release.version, release.lts, release.installed, release.latest
+                "{} lts={:?} npm={:?} installed={} latest={} sha256={sha256}",
+                release.version, release.lts, release.npm, release.installed, release.latest
             );
             assert_eq!(sha256.len(), 64);
         }

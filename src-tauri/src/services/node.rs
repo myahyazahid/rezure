@@ -51,6 +51,10 @@ pub struct NodeVersionStatus {
     /// False for versions dropped into the user's own `bin` folder.
     pub managed: bool,
     pub path: String,
+    /// The npm version shipped alongside this `node.exe`, read from disk by
+    /// [`npm_version_in`]. `None` when it can't be read — a hand-dropped
+    /// build without npm, or a damaged install.
+    pub npm: Option<String>,
 }
 
 /// Every Node.js version currently on disk, newest first.
@@ -104,6 +108,7 @@ pub fn list() -> Vec<NodeVersionStatus> {
     present
         .into_iter()
         .map(|runtime| NodeVersionStatus {
+            npm: runtime.exe.parent().and_then(npm_version_in),
             active: runtime.version == active,
             id: runtime.version.clone(),
             version: runtime.version,
@@ -112,6 +117,26 @@ pub fn list() -> Vec<NodeVersionStatus> {
             path: runtime.dir.display().to_string(),
         })
         .collect()
+}
+
+/// The npm version bundled next to a `node.exe` in `bin_dir` — the Windows
+/// zip ships npm as `node_modules/npm/`, so its own `package.json` is the
+/// same answer `npm -v` would give, without spawning a process per version
+/// every time the Switch page lists them.
+///
+/// `None` for anything unreadable: this is a display detail, so a missing
+/// or malformed file just hides it rather than failing the whole listing.
+pub fn npm_version_in(bin_dir: &Path) -> Option<String> {
+    let manifest = bin_dir
+        .join("node_modules")
+        .join("npm")
+        .join("package.json");
+    let body = std::fs::read_to_string(manifest).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&body).ok()?;
+    parsed
+        .get("version")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
 }
 
 /// The folder holding a specific version's `node.exe` — and, alongside it in
@@ -178,6 +203,41 @@ mod tests {
         ));
     }
 
+    fn scratch_bin_dir(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("rezure-test-node-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("node_modules").join("npm")).unwrap();
+        dir
+    }
+
+    #[test]
+    fn npm_version_is_read_from_the_bundled_package_json() {
+        let dir = scratch_bin_dir("npm-ok");
+        std::fs::write(
+            dir.join("node_modules").join("npm").join("package.json"),
+            r#"{ "name": "npm", "version": "10.9.0" }"#,
+        )
+        .unwrap();
+
+        assert_eq!(npm_version_in(&dir).as_deref(), Some("10.9.0"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_missing_or_malformed_npm_manifest_hides_the_detail_instead_of_failing() {
+        let dir = scratch_bin_dir("npm-bad");
+        assert_eq!(npm_version_in(&dir), None);
+
+        std::fs::write(
+            dir.join("node_modules").join("npm").join("package.json"),
+            "not json",
+        )
+        .unwrap();
+        assert_eq!(npm_version_in(&dir), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// What the Switch page will actually show, against real disk state, and
     /// where a terminal's `PATH` would point for each version. Run with:
     /// `cargo test --lib services::node::tests::print_installed -- --ignored --nocapture`
@@ -187,8 +247,9 @@ mod tests {
         for version in list() {
             let bin_dir = bin_dir_for(&version.version).unwrap();
             println!(
-                "{:10} active={:5} managed={:5} bin_dir={}",
+                "{:10} npm={:?} active={:5} managed={:5} bin_dir={}",
                 version.version,
+                version.npm,
                 version.active,
                 version.managed,
                 bin_dir.display()

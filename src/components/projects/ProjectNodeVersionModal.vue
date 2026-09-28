@@ -87,6 +87,9 @@ function choose(version: string | null) {
             <span class="font-semibold text-neutral-900 dark:text-neutral-100"
               >Node.js {{ version.version }}</span
             >
+            <span v-if="version.npm" class="ml-1.5 font-mono text-xs text-neutral-400"
+              >npm {{ version.npm }}</span
+            >
             <span v-if="version.active" class="ml-1.5 text-neutral-400"
               >· currently the global default</span
             >

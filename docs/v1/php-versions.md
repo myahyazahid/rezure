@@ -101,9 +101,10 @@ the new binary, so there's no manual restart step. `services::process` resolves 
 binary at spawn time rather than caching a path, which is what makes the restart land on the
 new version at all.
 
-Only PHP is restarted. nginx reaches it over `127.0.0.1:9000` per request and reconnects on
-its own once the new process has rebound the port, so bouncing nginx too would drop live
-requests for nothing.
+Only PHP is restarted. nginx reaches its workers over `127.0.0.1:9100–9103` per request (an
+`upstream` of four `php-cgi` processes; see `services::php_pool`) and reconnects on its own once
+the new processes have rebound those ports, so bouncing nginx too would drop live requests for
+nothing.
 
 If PHP wasn't running, nothing is restarted — the choice simply applies the next time it
 starts, and the page says so.

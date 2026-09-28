@@ -289,9 +289,10 @@ mod tests {
                 category: "Runtime".to_string(),
                 status: ServiceStatus::Stopped,
                 version: String::new(),
-                port: 9000,
+                port: 9100,
                 cpu_percent: None,
                 cpu_history: Vec::new(),
+                workers: None,
             }
         }
         fn start(&self) -> Result<ServiceInfo, AppError> {

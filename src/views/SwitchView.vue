@@ -95,7 +95,12 @@ const composerProgress = computed(() =>
 // installed by definition, and switching (unlike PHP) never restarts a
 // service since Node isn't proxied through nginx here. See `services::node`.
 const nodeVersions = computed<RuntimeVersionEntry[]>(() =>
-  nodeStore.versions.map((v) => ({ id: v.id, version: v.version, installed: v.installed })),
+  nodeStore.versions.map((v) => ({
+    id: v.id,
+    version: v.version,
+    installed: v.installed,
+    detail: v.npm ? `npm ${v.npm}` : null,
+  })),
 )
 const nodeProgress = computed(() =>
   nodeStore.installingVersion ? nodeStore.progressFor(nodeStore.installingVersion) : null,

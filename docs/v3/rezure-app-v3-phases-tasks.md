@@ -164,11 +164,13 @@ responder FastCGI stateless per versi (lihat `services/vhosts.rs`). Itu artinya 
 bisa satu versi, tapi tidak ada yang menghalangi banyak proses jalan bersamaan — jadi solusinya
 murni soal port allocation + service lifecycle, bukan batasan PHP itu sendiri.
 
-- **Service "php" default** (id `"php"`, port 9000 tetap) terus ikutin versi aktif global persis
-  seperti sebelumnya — project yang tidak pin apa-apa tidak berubah perilakunya sama sekali.
+- **Service "php" default** (id `"php"`, blok port tetap `9100–9103` sejak Hotfix T4 — dulu satu
+  port 9000) terus ikutin versi aktif global persis seperti sebelumnya — project yang tidak pin
+  apa-apa tidak berubah perilakunya sama sekali.
 - **Project yang pin versi berbeda dari default** dapat instance `php-cgi` pooled sendiri
-  (`services/php_pool.rs`), id `php-<versi>`, port dialokasikan mulai 9001 — dihitung deterministik
-  dari sorted set versi yang lagi dipin, bukan dari urutan scan, supaya alokasi port stabil.
+  (`services/php_pool.rs`), id `php-<versi>`, blok port dialokasikan mulai 9110 (per 10 port; dulu
+  satu port mulai 9001) — sticky: versi yang sudah jalan tidak pernah pindah port saat versi lain
+  dipin/di-unpin (lihat `php_pool::assign_ports`).
 - **`ServiceManager`** yang tadinya list service tetap (`Vec<ServiceHandle>` dikunci sejak start)
   sekarang bisa registrasi/unregister instance pooled saat runtime (`sync_php_pool`), dipanggil
   setiap vhost sync — jadi versi yang baru dipin langsung muncul sebagai service yang bisa
@@ -311,8 +313,54 @@ murni soal port allocation + service lifecycle, bukan batasan PHP itu sendiri.
       `service://changed`
 - [ ] Belum diuji manual di app sungguhan (kill `php-cgi.exe` lewat Task Manager → harus balik
       sendiri dalam ~1–3 detik; upload >1 MB → tidak 413 lagi)
-- [ ] **T4** — Worker pool per versi (N `php-cgi` dalam satu service, nginx `upstream`). Butuh
-      desain ulang alokasi port dulu karena `php_pool::BASE_PORT = 9001` sudah dipakai versi pinned
+- [x] **T4** — Worker pool per versi (N `php-cgi` dalam satu service, nginx `upstream`).
+      Alasannya: `php-cgi` di Windows cuma bisa melayani satu request sekaligus
+      (`PHP_FCGI_CHILDREN` butuh `fork()`), jadi satu request lambat bikin request lain ke versi
+      yang sama antre sampai `upstream timed out`.
+      - **Alokasi port baru, blok 10 port per versi** (`php_pool::PORT_BLOCK`), worker pakai
+        4 port pertama (`WORKERS_PER_VERSION`): default `9100–9103`, versi pin pertama
+        `9110–9113`, berikutnya `9120…`. Sisa 6 port per blok = ruang buat menaikkan jumlah worker
+        nanti tanpa renumber. Sengaja **tidak** mulai dari 9000: blok 9000 akan menaruh worker di
+        **9003**, port tempat IDE listen untuk Xdebug 3 (v4 Fase 4.3), dan 9000 sendiri biasa
+        dipegang php-cgi/FPM Laragon/XAMPP. Port pool tidak pernah disimpan ke disk (hidup di
+        `ServiceManager`), jadi tidak ada migrasi — vhost ditulis ulang saat sync pertama begitu
+        app start. Tetap sticky seperti sebelumnya, cuma satuannya blok, bukan port
+      - **`ProcessService`**: satu `child` → slot per worker (`children: Vec<Option<Child>>`),
+        PID file per worker (worker 0 tetap `service.pid` supaya orphan dari build lama masih
+        dikenali). `start()` cuma spawn slot yang kosong — worker yang masih hidup tidak disentuh,
+        jadi supervisor (T3) menyembuhkan satu worker mati tanpa memutus request yang sedang
+        jalan di worker lain. Semua port dicek dulu sebelum ada yang di-spawn; kalau spawn gagal di
+        tengah, worker yang baru di-spawn di panggilan itu dibunuh lagi. Notifikasi crash cuma
+        muncul kalau **semua** worker mati; worker mati sebagian cukup ditulis ke log (service
+        masih melayani)
+      - **nginx**: `php-upstreams.conf` (di luar folder `vhosts/`, karena folder itu dipangkas ke
+        satu file per project) berisi satu `upstream rezure_php_<port>` per versi dengan
+        `least_conn` — bukan round-robin, karena `php-cgi` yang sibuk tetap *menerima* koneksi
+        (antre di listen backlog OS) sehingga round-robin tetap mengirim request ke worker yang
+        sedang sibuk. `fastcgi_next_upstream error` (tanpa `timeout`): worker yang mati dilewati,
+        tapi request yang kena timeout 300 detik tidak diulang ke worker lain (itu akan mengikat
+        semua worker). Vhost sekarang `fastcgi_pass rezure_php_<port>;`
+      - **UI**: `ServiceInfo.workers` (`{ running, total }`, `null` untuk nginx/database) — kartu
+        service menampilkan `:9100–9103` dan `4/4 workers` (kuning kalau ada yang mati);
+        penanganan "port in use" mencari pemegang port di semua port worker, bukan cuma yang
+        pertama
+      - **Diverifikasi di mesin nyata**: bench terpisah (nginx + php-cgi 8.3 di port sendiri,
+        config sama dengan yang digenerate) — request cepat saat 2 request `sleep(6)` jalan:
+        **11,55 detik** dengan 1 worker vs **0,003 detik** dengan 4 worker; satu worker dibunuh →
+        8/8 request tetap 200. Test `#[ignore]`
+        `a_dead_php_worker_is_healed_without_touching_the_rest` lawan `php-cgi` asli: worker yang
+        dibunuh diganti, 3 lainnya tetap PID yang sama. App dev (`tauri dev`) yang ikut rebuild
+        menjalankan 4 versi × 4 worker di blok yang benar, dan `nginx -t` lawan config hasil
+        generate-nya lolos. `ServiceRow.vue` asli dirender di Edge headless dengan `invoke` di-mock:
+        `:9100–9103`, `4/4 workers`, `3/4 workers` (kuning), nginx tanpa label worker; alur "port
+        in use" dengan port ke-3 (9112) yang dipegang proses lain → pencarian berhenti di 9112,
+        `free_port` dipanggil dengan **9112** (kode lama akan membebaskan 9110), lalu start
+        diulang. Project Laravel 13 sungguhan (`laravel-api`, PHP 8.5.10 + `php.ini` hasil
+        generate Rezure) dilayani lewat upstream 4 worker: 12 request `/up` paralel semuanya 200
+        (0,68 detik dengan 1 worker vs 0,25 detik dengan 4). **Belum**: diklik langsung di
+        jendela app Tauri, dan halaman Laravel yang butuh database/session
+      - Jumlah worker masih konstanta (4); kalau nanti perlu jadi setting, batasnya
+        `PORT_BLOCK` (10)
 
 ### CA bundle & OpenSSL
 

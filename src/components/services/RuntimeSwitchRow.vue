@@ -8,6 +8,9 @@ export interface RuntimeVersionEntry {
   id: string
   version: string
   installed: boolean
+  /** A short secondary label shown next to the version, e.g. Node's
+   *  bundled "npm 10.9.0". */
+  detail?: string | null
 }
 
 const props = withDefaults(
@@ -42,6 +45,12 @@ const installing = computed(() => props.installingId !== null)
  *  switch-only, and "Install version" (the page-level button) is the one
  *  place a new version gets added. */
 const installedVersions = computed(() => props.versions.filter((v) => v.installed))
+
+const activeDetail = computed(
+  () =>
+    props.versions.find((v) => v.id === props.activeVersion || v.version === props.activeVersion)
+      ?.detail ?? null,
+)
 
 /** Null while the download hasn't reported a total — a large binary sends
  *  its first bytes before the server's content length is known. */
@@ -107,7 +116,7 @@ function pick(entry: RuntimeVersionEntry) {
                 : disabled
                   ? 'not available yet'
                   : activeVersion
-                    ? `active ${activeVersion}`
+                    ? `active ${activeVersion}${activeDetail ? ` · ${activeDetail}` : ''}`
                     : 'not installed'
             }}
           </span>
@@ -144,7 +153,7 @@ function pick(entry: RuntimeVersionEntry) {
         <template v-if="open">
           <div class="fixed inset-0 z-10" @click="open = false"></div>
           <div
-            class="absolute top-full right-0 z-20 mt-2 w-48 rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
+            class="absolute top-full right-0 z-20 mt-2 w-56 rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
           >
             <p v-if="installedVersions.length === 0" class="px-2.5 py-1.5 text-xs text-neutral-400">
               Nothing installed yet
@@ -164,7 +173,10 @@ function pick(entry: RuntimeVersionEntry) {
                     : 'bg-transparent'
                 "
               ></span>
-              <span class="flex-1 truncate">{{ entry.version }}</span>
+              <span class="flex-1 truncate">
+                {{ entry.version }}
+                <span v-if="entry.detail" class="text-xs text-neutral-400">{{ entry.detail }}</span>
+              </span>
               <span v-if="i === 0" class="text-[10px] text-neutral-400">latest</span>
             </button>
           </div>

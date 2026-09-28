@@ -61,9 +61,10 @@ pub fn list_php_versions() -> Vec<PhpVersionStatus> {
 /// should use") is true the moment it's clicked, instead of quietly
 /// requiring a manual restart nothing in the UI asks for.
 ///
-/// Only PHP is restarted: nginx reaches it over `127.0.0.1:9000` per
-/// request and reconnects on its own once the new process has rebound the
-/// port, so bouncing nginx too would drop live requests for nothing.
+/// Only PHP is restarted: nginx reaches its workers over
+/// `127.0.0.1:9100–9103` (`php_pool::DEFAULT_BASE_PORT`) per request and
+/// reconnects on its own once the new processes have rebound those ports, so
+/// bouncing nginx too would drop live requests for nothing.
 #[tauri::command]
 pub async fn set_active_php_version(
     id: String,

@@ -20,6 +20,37 @@ const isRunning = computed(() => props.service.status === 'running')
 const isPending = computed(() => store.isPending(props.service.id))
 const error = ref<string | null>(null)
 
+/** Every port the service binds — one, or one per worker. */
+const ports = computed(() =>
+  Array.from({ length: props.service.workers?.total ?? 1 }, (_, i) => props.service.port + i),
+)
+
+const portLabel = computed(() =>
+  ports.value.length > 1
+    ? `:${ports.value[0]}–${ports.value[ports.value.length - 1]}`
+    : `:${props.service.port}`,
+)
+
+/** Running, but with some workers down. Still serving — nginx routes
+ *  around the gap and the supervisor brings them back — so this is a
+ *  warning, not an error. */
+const degraded = computed(
+  () =>
+    isRunning.value &&
+    !!props.service.workers &&
+    props.service.workers.running < props.service.workers.total,
+)
+
+/** The first of this service's ports something else is holding — with
+ *  several workers the conflict can be on any one of them. */
+async function findBlocker(): Promise<PortHolder | null> {
+  for (const port of ports.value) {
+    const holder = await store.portHolder(port).catch(() => null)
+    if (holder) return holder
+  }
+  return null
+}
+
 function toggleExpanded() {
   expanded.value = !expanded.value
 }
@@ -46,7 +77,7 @@ async function onPrimaryAction() {
     // A port conflict is the one failure with an obvious next action, so
     // find out who's responsible rather than leaving the message as advice.
     if (error.value.includes('port')) {
-      blocker.value = await store.portHolder(props.service.port).catch(() => null)
+      blocker.value = await findBlocker()
     }
   }
 }
@@ -57,7 +88,7 @@ async function freePortAndStart() {
   freeing.value = true
   error.value = null
   try {
-    await store.freePort(props.service.port)
+    await store.freePort(blocker.value?.port ?? props.service.port)
     blocker.value = null
     await store.start(props.service.id)
   } catch (e) {
@@ -133,6 +164,18 @@ function requestForceStop() {
           >
             {{ isRunning ? 'Running' : 'Stopped' }}
           </span>
+          <span
+            v-if="isRunning && service.workers"
+            class="text-xs"
+            :class="degraded ? 'text-amber-600 dark:text-amber-400' : 'text-neutral-400'"
+            :title="
+              degraded
+                ? 'Some workers stopped unexpectedly and are being restarted. The rest keep serving.'
+                : undefined
+            "
+          >
+            · {{ service.workers.running }}/{{ service.workers.total }} workers
+          </span>
         </div>
         <p v-if="error" class="mt-0.5 text-xs text-red-600 dark:text-red-400">
           {{ error }}
@@ -151,7 +194,7 @@ function requestForceStop() {
       </div>
 
       <BasePill variant="mono" class="shrink-0">{{ service.version }}</BasePill>
-      <BasePill variant="mono" class="shrink-0">:{{ service.port }}</BasePill>
+      <BasePill variant="mono" class="shrink-0">{{ portLabel }}</BasePill>
 
       <button
         type="button"

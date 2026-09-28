@@ -12,6 +12,8 @@ export interface CatalogEntry {
   size?: string
   /** LTS codename, or null for a Current release (Node only). */
   lts?: string | null
+  /** npm version bundled with the release (Node only). */
+  npm?: string | null
 }
 
 const props = defineProps<{
@@ -94,10 +96,16 @@ function progressPercent(version: string) {
             <template v-if="installingVersion === release.version">
               {{ stageLabel(release.version) }}
             </template>
-            <template v-else-if="release.released || release.size">
-              <template v-if="release.released">Released {{ release.released }}</template>
-              <template v-if="release.released && release.size"> · </template>
-              <template v-if="release.size">{{ release.size }}</template>
+            <template v-else-if="release.released || release.size || release.npm">
+              {{
+                [
+                  release.released ? `Released ${release.released}` : null,
+                  release.size,
+                  release.npm ? `npm ${release.npm}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')
+              }}
             </template>
           </p>
         </div>

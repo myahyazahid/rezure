@@ -54,6 +54,9 @@ export interface NodeVersion {
    *  checksum-verified those. */
   managed: boolean
   path: string
+  /** The npm version bundled with this build, read from its own
+   *  `node_modules/npm/package.json` — null when that can't be read. */
+  npm: string | null
 }
 
 /** A version nodejs.org currently publishes for Windows x64 — the newest
@@ -64,6 +67,9 @@ export interface NodeRelease {
   lts: string | null
   /** YYYY-MM-DD. */
   released: string
+  /** The npm version bundled in this release, as nodejs.org's index lists
+   *  it — null if the index omits it. */
+  npm: string | null
   latest: boolean
   installed: boolean
 }
