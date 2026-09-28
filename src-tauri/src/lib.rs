@@ -38,6 +38,7 @@ pub fn run() {
                 commands::services::port_holder,
                 commands::services::free_port,
                 commands::services::restart_service,
+                commands::services::open_service_ui,
                 commands::share::share_project,
                 commands::share::stop_sharing,
                 commands::share::sharing_status,

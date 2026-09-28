@@ -221,11 +221,24 @@ pub async fn set_bundled_php_extension(
 /// what it answers a question about: the project side is just the
 /// `composer.json` it reads. Spawns `php -m`, so it goes through
 /// `spawn_blocking` like every other command here that shells out.
+///
+/// When the project mails a local SMTP server, whether Mailpit is there to
+/// catch it is filled in here: `doctor` reads the project, the
+/// `ServiceManager` knows the services.
 #[tauri::command]
-pub async fn diagnose_project(id: String) -> Result<ProjectDiagnosis, AppError> {
-    tokio::task::spawn_blocking(move || doctor::diagnose_project(&id))
+pub async fn diagnose_project(
+    id: String,
+    manager: State<'_, ServiceManager>,
+) -> Result<ProjectDiagnosis, AppError> {
+    let mut diagnosis = tokio::task::spawn_blocking(move || doctor::diagnose_project(&id))
         .await
-        .map_err(joined)?
+        .map_err(joined)??;
+    if let (Some(mail), Ok(mailpit)) = (diagnosis.mail.as_mut(), manager.find("mailpit")) {
+        let info = mailpit.info();
+        mail.mailpit_installed = info.installed;
+        mail.mailpit_running = info.status == ServiceStatus::Running;
+    }
+    Ok(diagnosis)
 }
 
 /// Whether the active PHP can verify an HTTPS certificate — the

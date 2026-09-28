@@ -46,6 +46,12 @@ pub enum AppError {
     #[error("{0} isn't installed yet — download it from the Binaries panel first")]
     BinaryNotInstalled(String),
 
+    #[error("{0} isn't running — start it first")]
+    ServiceNotRunning(String),
+
+    #[error("{0} has no web interface to open")]
+    NoWebUi(String),
+
     #[error("failed to start {name}: {reason}")]
     ProcessSpawnFailed { name: String, reason: String },
 

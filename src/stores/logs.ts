@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import type { LogEntry, LogLevel, ServiceLogEvent } from '@/types/log'
 
-export const LOG_SERVICES = ['nginx', 'php', 'mariadb'] as const
+export const LOG_SERVICES = ['nginx', 'php', 'mariadb', 'mailpit'] as const
 
 // Keep in sync with `LOG_EVENT` in src-tauri/src/services/process.rs
 const LOG_EVENT = 'service://log'

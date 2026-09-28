@@ -84,6 +84,20 @@ pub struct ServiceInfo {
     /// consecutive ports starting at `port` (PHP — see `php_pool`), `None`
     /// for a single-process one.
     pub workers: Option<WorkerCount>,
+    /// Every port the service binds while running — each worker's, plus any
+    /// second listener (Mailpit's web UI). What a "port in use" failure has
+    /// to be traced against, since the conflict can be on any of them.
+    pub ports: Vec<u16>,
+    /// Whether the binary this service runs is on disk. A service that
+    /// isn't can't be started, and "Start all" skips it rather than failing.
+    pub installed: bool,
+    /// The `binaries::MANIFEST` package that installs this service when it
+    /// isn't installed yet, for services one download makes startable. `None`
+    /// where installing is a choice made elsewhere (PHP and database
+    /// versions, on the Switch and Databases pages).
+    pub install_id: Option<String>,
+    /// A web UI the service serves, to open in the browser while it runs.
+    pub web_url: Option<String>,
 }
 
 /// How many of a multi-process service's workers are up.

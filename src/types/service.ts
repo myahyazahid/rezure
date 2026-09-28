@@ -16,6 +16,16 @@ export interface ServiceInfo {
   /** Set for a service that runs as several identical processes (PHP —
    *  see `services::php_pool`), null for a single-process one. */
   workers: WorkerCount | null
+  /** Every port the service binds while running — each worker's, plus a
+   *  web UI's. A "port in use" failure can be on any of them. */
+  ports: number[]
+  /** Whether the service's binary is on disk. One that isn't can't start. */
+  installed: boolean
+  /** The binary package that installs this service from its own card, or
+   *  null where installing is chosen elsewhere (PHP, database versions). */
+  installId: string | null
+  /** A web UI to open in the browser while the service runs (Mailpit). */
+  webUrl: string | null
 }
 
 /** How many of a multi-process service's workers are up. */

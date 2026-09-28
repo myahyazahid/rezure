@@ -293,6 +293,10 @@ mod tests {
                 cpu_percent: None,
                 cpu_history: Vec::new(),
                 workers: None,
+                ports: vec![9100],
+                installed: true,
+                install_id: None,
+                web_url: None,
             }
         }
         fn start(&self) -> Result<ServiceInfo, AppError> {

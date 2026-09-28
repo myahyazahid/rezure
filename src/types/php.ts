@@ -65,6 +65,22 @@ export interface ProjectDiagnosis {
   extensions: ExtensionCheck[]
   /** The names that actually need acting on. */
   missing: string[]
+  /** The project's `.env` mails a local SMTP server — what Mailpit is for.
+   *  Null for `log`, a real provider, or no `.env`. */
+  mail: MailSetup | null
+}
+
+/** A project's local-SMTP mail settings, checked against Mailpit. */
+export interface MailSetup {
+  /** `MAIL_HOST` as written. */
+  host: string
+  port: number | null
+  /** False for `mailpit`, Laravel Sail's Docker hostname. */
+  hostReachable: boolean
+  /** Whether `MAIL_PORT` is Mailpit's SMTP port. */
+  portMatches: boolean
+  mailpitInstalled: boolean
+  mailpitRunning: boolean
 }
 
 /** What an HTTPS request from the active PHP ran into. `untrusted` is the

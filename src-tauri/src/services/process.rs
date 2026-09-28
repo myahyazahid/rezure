@@ -38,6 +38,13 @@ pub const LOG_EVENT: &str = "service://log";
 /// 500). Set to `0` on every PHP spawn — see `ProcessService::command`.
 const PHP_FCGI_MAX_REQUESTS_ENV: &str = "PHP_FCGI_MAX_REQUESTS";
 
+/// Where Mailpit accepts mail — Mailpit's own default, and the port Laravel
+/// Sail's docs and most tutorials already put in `MAIL_PORT`.
+pub const MAILPIT_SMTP_PORT: u16 = 1025;
+
+/// Mailpit's web UI and API — also its own default.
+pub const MAILPIT_WEB_PORT: u16 = 8025;
+
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LogStream {
@@ -105,6 +112,11 @@ enum Launch {
     /// which is what makes switching profiles take effect on restart. An
     /// empty datadir is bootstrapped first, per engine.
     Database,
+    /// `mailpit --smtp 127.0.0.1:1025 --listen 127.0.0.1:8025` — a local
+    /// mail catcher: projects send to it over SMTP, and every message lands
+    /// in its web UI instead of anyone's inbox. The one service with a
+    /// second listener, which is why [`ProcessService::web_port`] exists.
+    Mailpit,
 }
 
 pub struct ProcessService {
@@ -116,6 +128,10 @@ pub struct ProcessService {
     /// How many identical processes this service runs. 1 for everything but
     /// PHP — see `services::php_pool`.
     workers: u16,
+    /// A second port the (single) process binds for a web UI, beside `port`.
+    /// Checked before starting like `port` is, and what `ServiceInfo::web_url`
+    /// points at.
+    web_port: Option<u16>,
     launch: Launch,
     log_sink: LogSink,
     crash_sink: CrashSink,
@@ -170,6 +186,7 @@ impl ProcessService {
             category: "Web server",
             port: 80,
             workers: 1,
+            web_port: None,
             launch: Launch::Nginx,
             log_sink,
             crash_sink: no_op_crash_sink(),
@@ -194,6 +211,7 @@ impl ProcessService {
             category: "Runtime",
             port: php_pool::DEFAULT_BASE_PORT,
             workers: php_pool::WORKERS_PER_VERSION,
+            web_port: None,
             launch: Launch::Php { version: None },
             log_sink,
             crash_sink: no_op_crash_sink(),
@@ -217,6 +235,7 @@ impl ProcessService {
             category: "Runtime",
             port,
             workers: php_pool::WORKERS_PER_VERSION,
+            web_port: None,
             launch: Launch::Php {
                 version: Some(version.to_string()),
             },
@@ -242,7 +261,30 @@ impl ProcessService {
             // port comes from the active profile via `current_port`.
             port: 3306,
             workers: 1,
+            web_port: None,
             launch: Launch::Database,
+            log_sink,
+            crash_sink: no_op_crash_sink(),
+            crashed: AtomicBool::new(false),
+            children: empty_slots(1),
+            sys: Mutex::new(System::new()),
+            cpu_history: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// The local mail catcher. Optional — unlike nginx and PHP, nothing else
+    /// depends on it — so it's the one service that can be listed before
+    /// it's installed, with an Install action in place of Start.
+    pub fn mailpit(log_sink: LogSink) -> Result<Self, AppError> {
+        binaries::find("mailpit")?;
+        Ok(Self {
+            id: "mailpit".to_string(),
+            name: "Mailpit".to_string(),
+            category: "Mail",
+            port: MAILPIT_SMTP_PORT,
+            workers: 1,
+            web_port: Some(MAILPIT_WEB_PORT),
+            launch: Launch::Mailpit,
             log_sink,
             crash_sink: no_op_crash_sink(),
             crashed: AtomicBool::new(false),
@@ -271,6 +313,9 @@ impl ProcessService {
             Launch::Php { version: Some(v) } => v.clone(),
             Launch::Php { version: None } => super::php::active_id(),
             Launch::Nginx => binaries::find("nginx")
+                .map(|pkg| pkg.version.to_string())
+                .unwrap_or_default(),
+            Launch::Mailpit => binaries::find("mailpit")
                 .map(|pkg| pkg.version.to_string())
                 .unwrap_or_default(),
             Launch::Database => db_profiles::active()
@@ -308,6 +353,35 @@ impl ProcessService {
         self.current_port() + worker
     }
 
+    /// Every port spawning worker `worker` will bind: its own, plus the web
+    /// UI's for the (only) worker of a service that has one.
+    fn ports_for(&self, worker: u16) -> Vec<u16> {
+        let mut ports = vec![self.worker_port(worker)];
+        if worker == 0 {
+            ports.extend(self.web_port);
+        }
+        ports
+    }
+
+    fn all_ports(&self) -> Vec<u16> {
+        (0..self.workers).flat_map(|w| self.ports_for(w)).collect()
+    }
+
+    /// See `ServiceInfo::install_id`. Only services a single manifest
+    /// download makes startable — PHP versions and database engines are
+    /// chosen on their own pages, not installed from a service card.
+    fn install_id(&self) -> Option<&'static str> {
+        match self.launch {
+            Launch::Nginx => Some("nginx"),
+            Launch::Mailpit => Some("mailpit"),
+            Launch::Php { .. } | Launch::Database => None,
+        }
+    }
+
+    fn web_url(&self) -> Option<String> {
+        self.web_port.map(|port| format!("http://127.0.0.1:{port}"))
+    }
+
     /// The binary that actually ends up running.
     ///
     /// nginx and MariaDB are one pinned manifest version each. PHP is
@@ -335,6 +409,7 @@ impl ProcessService {
                     .join("php-cgi.exe"))
             }
             Launch::Nginx => binaries::exe_path(binaries::find("nginx")?),
+            Launch::Mailpit => binaries::exe_path(binaries::find("mailpit")?),
             // Resolved through the active profile, so a switch to a MySQL
             // profile spawns MySQL's own `mysqld.exe`, not MariaDB's.
             Launch::Database => {
@@ -416,6 +491,37 @@ impl ProcessService {
                     .arg("--console");
                 cmd
             }
+            Launch::Mailpit => {
+                // A file rather than Mailpit's default temporary database, so
+                // caught mail survives a restart of the service or the app —
+                // the reset link from ten minutes ago is still there.
+                let dir = runtime_dir(&self.id)?;
+                fs::create_dir_all(&dir).map_err(|e| AppError::ProcessBootstrapFailed {
+                    name: self.name.clone(),
+                    reason: format!("could not create {}: {e}", dir.display()),
+                })?;
+                let mut cmd = Command::new(&exe);
+                cmd.arg("--smtp")
+                    .arg(format!("127.0.0.1:{port}"))
+                    .arg("--listen")
+                    .arg(format!(
+                        "127.0.0.1:{}",
+                        self.web_port.unwrap_or(MAILPIT_WEB_PORT)
+                    ))
+                    .arg("--database")
+                    .arg(dir.join("mailpit.db"))
+                    // A project's `.env` often carries SMTP credentials meant
+                    // for a real provider. Accepting any (or none) is what lets
+                    // it send here unchanged apart from host and port — the
+                    // mail never leaves this machine either way.
+                    .arg("--smtp-auth-accept-any")
+                    .arg("--smtp-auth-allow-insecure")
+                    // Rezure pins and updates the binary itself; Mailpit's own
+                    // "new version available" banner would point the user at a
+                    // download Rezure doesn't manage.
+                    .arg("--disable-version-check");
+                cmd
+            }
         };
 
         // Piped, not inherited: a GUI-subsystem build has no console handles
@@ -438,7 +544,7 @@ impl ProcessService {
     fn bind_addr(&self) -> &'static str {
         match self.launch {
             Launch::Nginx => "0.0.0.0",
-            Launch::Php { .. } | Launch::Database => "127.0.0.1",
+            Launch::Php { .. } | Launch::Database | Launch::Mailpit => "127.0.0.1",
         }
     }
 
@@ -744,6 +850,10 @@ impl Service for ProcessService {
                 running: pids.len() as u16,
                 total: self.workers,
             }),
+            ports: self.all_ports(),
+            installed: self.resolved_exe().is_ok_and(|exe| exe.is_file()),
+            install_id: self.install_id().map(str::to_string),
+            web_url: self.web_url(),
         }
     }
 
@@ -772,7 +882,9 @@ impl Service for ProcessService {
             self.reap_orphan(worker)?;
         }
         for &worker in &missing {
-            ensure_port_available(self.bind_addr(), self.worker_port(worker), &self.name)?;
+            for port in self.ports_for(worker) {
+                ensure_port_available(self.bind_addr(), port, &self.name)?;
+            }
         }
 
         let mut spawned: Vec<(u16, Child)> = Vec::new();
@@ -1031,6 +1143,7 @@ pub fn real_services(app: AppHandle) -> ServiceManager {
             "nginx" => "Nginx".to_string(),
             "php" => "PHP".to_string(),
             "mariadb" => "Database".to_string(),
+            "mailpit" => "Mailpit".to_string(),
             other => match other.strip_prefix("php-") {
                 Some(version) => format!("PHP {version}"),
                 None => other.to_string(),
@@ -1065,8 +1178,13 @@ pub fn real_services(app: AppHandle) -> ServiceManager {
                 .with_crash_sink(crash_sink.clone()),
         ),
         Arc::new(
-            ProcessService::mariadb(sink)
+            ProcessService::mariadb(sink.clone())
                 .expect("mariadb must be in binaries::MANIFEST")
+                .with_crash_sink(crash_sink.clone()),
+        ),
+        Arc::new(
+            ProcessService::mailpit(sink)
+                .expect("mailpit must be in binaries::MANIFEST")
                 .with_crash_sink(crash_sink),
         ),
     ];
@@ -1090,6 +1208,53 @@ mod tests {
         assert!(ProcessService::nginx(no_op_sink()).is_ok());
         assert!(ProcessService::php(no_op_sink()).is_ok());
         assert!(ProcessService::mariadb(no_op_sink()).is_ok());
+        assert!(ProcessService::mailpit(no_op_sink()).is_ok());
+    }
+
+    /// Both listeners are reported, so a conflict on the web UI's port is
+    /// traced as readily as one on SMTP's, and the UI's address is handed
+    /// out for the Open button.
+    #[test]
+    fn mailpit_reports_both_ports_its_web_ui_and_how_to_install_it() {
+        let info = ProcessService::mailpit(no_op_sink()).unwrap().info();
+
+        assert_eq!(info.id, "mailpit");
+        assert_eq!(info.port, MAILPIT_SMTP_PORT);
+        assert_eq!(info.ports, vec![MAILPIT_SMTP_PORT, MAILPIT_WEB_PORT]);
+        assert_eq!(info.web_url.as_deref(), Some("http://127.0.0.1:8025"));
+        assert_eq!(info.install_id.as_deref(), Some("mailpit"));
+        assert_eq!(info.workers, None);
+    }
+
+    #[test]
+    fn only_services_one_download_makes_startable_offer_an_install() {
+        assert_eq!(
+            ProcessService::nginx(no_op_sink())
+                .unwrap()
+                .info()
+                .install_id
+                .as_deref(),
+            Some("nginx")
+        );
+        assert_eq!(
+            ProcessService::php(no_op_sink()).unwrap().info().install_id,
+            None
+        );
+        assert_eq!(
+            ProcessService::mariadb(no_op_sink())
+                .unwrap()
+                .info()
+                .install_id,
+            None
+        );
+    }
+
+    #[test]
+    fn a_php_services_ports_are_its_workers_ports() {
+        let info = ProcessService::php(no_op_sink()).unwrap().info();
+        let expected: Vec<u16> = php_pool::worker_ports(php_pool::DEFAULT_BASE_PORT).collect();
+        assert_eq!(info.ports, expected);
+        assert_eq!(info.web_url, None);
     }
 
     /// A pooled instance never fails to construct — the caller already
@@ -1437,6 +1602,81 @@ mod tests {
 
         service.stop().unwrap();
         php::set_active(&original_active).unwrap();
+    }
+
+    /// Real Mailpit, end to end: starts on both ports, accepts a message over
+    /// plain SMTP exactly as a Laravel app would send one (with credentials
+    /// it has no reason to know), and shows it through its own API. Runs
+    /// under its own id and spare ports, so it can't touch a Mailpit that
+    /// Rezure itself is running. Needs Mailpit installed. Run with:
+    /// `cargo test --lib services::process::tests::a_real_mailpit_catches_a_message -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn a_real_mailpit_catches_a_message() {
+        use std::io::Write as _;
+
+        let mut service = ProcessService::mailpit(no_op_sink()).unwrap();
+        service.id = "mailpit-catch-test".to_string();
+        service.port = 11025;
+        service.web_port = Some(18025);
+        let _ = fs::remove_dir_all(runtime_dir(&service.id).unwrap());
+
+        let started = service.start().expect("mailpit must be installed");
+        assert_eq!(started.status, ServiceStatus::Running);
+        std::thread::sleep(Duration::from_millis(800));
+
+        let mut smtp = std::net::TcpStream::connect(("127.0.0.1", 11025)).unwrap();
+        smtp.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut reader = BufReader::new(smtp.try_clone().unwrap());
+        let mut line = String::new();
+        let mut expect = |reader: &mut BufReader<std::net::TcpStream>, code: &str| {
+            // Multi-line replies ("250-...") end with a "250 " line.
+            loop {
+                line.clear();
+                reader.read_line(&mut line).unwrap();
+                assert!(line.starts_with(code), "expected {code}, got: {line}");
+                if line.as_bytes().get(3) == Some(&b' ') {
+                    break;
+                }
+            }
+        };
+        expect(&mut reader, "220");
+        for (command, code) in [
+            ("EHLO rezure.test\r\n", "250"),
+            // "user" / "secret" in base64 — any credentials must be accepted.
+            ("AUTH PLAIN AHVzZXIAc2VjcmV0\r\n", "235"),
+            ("MAIL FROM:<app@rezure.test>\r\n", "250"),
+            ("RCPT TO:<someone@example.com>\r\n", "250"),
+            ("DATA\r\n", "354"),
+            (
+                "Subject: Reset your password\r\n\r\nClick the link.\r\n.\r\n",
+                "250",
+            ),
+            ("QUIT\r\n", "221"),
+        ] {
+            smtp.write_all(command.as_bytes()).unwrap();
+            expect(&mut reader, code);
+        }
+
+        let body = Command::new("curl")
+            .args(["-s", "http://127.0.0.1:18025/api/v1/messages"])
+            .output()
+            .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+            .unwrap();
+        println!("{body}");
+
+        service.stop().unwrap();
+        let db_written = runtime_dir(&service.id)
+            .unwrap()
+            .join("mailpit.db")
+            .is_file();
+        let _ = fs::remove_dir_all(runtime_dir(&service.id).unwrap());
+
+        assert!(
+            body.contains("Reset your password"),
+            "the message should be listed"
+        );
+        assert!(db_written, "mail should persist in Rezure's data folder");
     }
 
     /// Every worker really binds its own port, a worker killed from outside

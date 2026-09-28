@@ -48,13 +48,56 @@ di sidebar Laragon, port `1025`/`8025` bahkan). Default `.env` Laravel selalu SM
 beneran kekirim gak" itu pertanyaan harian buat siapapun yang develop fitur auth/notifikasi.
 
 ### Tasks
-- [ ] Implementasikan Mailpit dengan `Service` trait yang sudah ada (`start()`, `stop()`, `status()`, `restart()`) — pola identik dengan Fase 3.5.2 (Redis)
-- [ ] Bundle Mailpit portable binary untuk Windows, download on-demand mengikuti pola binary lain
-- [ ] Tambahkan Mailpit ke list service di Dashboard/Services — port SMTP default `1025`, web UI default `8025`
-- [ ] Deteksi port conflict untuk kedua port itu, konsisten dengan service lain
-- [ ] Log viewer Mailpit mengikuti pola log viewer service lain yang sudah ada
-- [ ] Tombol/link "Open Mailpit" dari Dashboard yang langsung buka `http://127.0.0.1:8025` di browser
-- [ ] (Opsional) Requirements check di `doctor.rs` bisa kasih catatan: kalau project punya `MAIL_MAILER=smtp` dan `MAIL_HOST=127.0.0.1` di `.env`, sarankan aktifin Mailpit kalau belum jalan
+- [x] Implementasikan Mailpit dengan `Service` trait yang sudah ada — bukan tipe service baru,
+      tapi `ProcessService::mailpit` dengan `Launch::Mailpit` (pola yang sama dengan nginx/PHP/
+      database), terdaftar di `process::real_services`. Dijalankan dengan
+      `--smtp 127.0.0.1:1025 --listen 127.0.0.1:8025 --database data/mailpit/mailpit.db`
+      (file, bukan database sementara bawaan Mailpit — email yang tertangkap tetap ada setelah
+      restart), `--smtp-auth-accept-any --smtp-auth-allow-insecure` (`.env` yang masih berisi
+      kredensial provider asli tetap bisa kirim tanpa diubah selain host/port) dan
+      `--disable-version-check` (versi binary dikelola Rezure, bukan banner update Mailpit).
+      `restarts_on_crash` sengaja tetap `false`, sama seperti nginx
+- [x] Binary portable, download on-demand — entry `mailpit` 1.31.3 di `binaries::MANIFEST`
+      (`mailpit-windows-amd64.zip` dari GitHub Releases, SHA-256 = digest yang dipublikasikan
+      GitHub untuk asset itu, dicocokkan ulang dengan hash hasil unduhan sendiri). Satu `.exe`
+      tanpa DLL. **Tidak** ikut di-bundle ke installer — opsional, beda dengan nginx/PHP default
+- [x] Mailpit di list Services — `ServiceInfo` dapat field generik baru (bukan kasus khusus id
+      `mailpit`): `installed`, `installId` (paket manifest yang bikin service bisa di-start, untuk
+      nginx/Mailpit; `null` untuk PHP/database yang versinya dipilih di halaman lain), `ports`
+      (semua port yang di-bind) dan `webUrl`. Kartu yang belum terinstall menampilkan "Not
+      installed" + tombol **Install** (dengan progress unduhan) alih-alih Start, dan "Start all"
+      melewatinya alih-alih gagal
+- [x] Deteksi port conflict untuk kedua port — `ProcessService::ports_for` mengecek SMTP dan web UI
+      sebelum spawn; `ServiceRow.vue` mencari pemegang port di `service.ports` (daftar yang sama
+      dipakai worker PHP), jadi bentrok di 8025 ditelusuri sama baiknya dengan di 1025
+- [x] Log viewer — `mailpit` masuk `LOG_SERVICES`; stdout/stderr-nya sudah lewat `LogSink` yang
+      sama dengan service lain
+- [x] Tombol **Open** di kartu saat running → command `open_service_ui(id)`, yang mengambil URL dari
+      service itu sendiri di Rust (frontend tidak pernah mengirim URL). Error jelas kalau service
+      belum jalan (`ServiceNotRunning`) atau tidak punya web UI (`NoWebUi`)
+- [x] (Opsional) Requirements check — `doctor::mail_setup` membaca `MAIL_MAILER` (atau
+      `MAIL_DRIVER` lama), `MAIL_HOST`, `MAIL_PORT` dari `.env` dengan aturan phpdotenv (definisi
+      pertama menang, `export`, kutip, komentar ` #`). Hanya `smtp` ke host lokal yang dianggap;
+      `log`/provider asli dibiarkan. Command `diagnose_project` mengisi status Mailpit dari
+      `ServiceManager`. Modal menampilkan: tertangkap Mailpit (+ Open inbox) · Mailpit mati (Start /
+      Install and start) · port bukan 1025 (mis. `2525` bawaan `.env.example` Laravel → sarankan
+      `MAIL_PORT=1025`) · `MAIL_HOST=mailpit` hostname Docker Sail yang tidak resolve di luar
+      Docker (→ sarankan `127.0.0.1`)
+
+### Verifikasi
+
+- `cargo test` (368 lolos), `cargo clippy --all-targets -D warnings`, `cargo fmt`, `npm run lint`,
+  `npm run type-check` — semua bersih
+- Test `#[ignore]` `a_real_mailpit_catches_a_message` lawan binary asli (id dan port sendiri):
+  SMTP dengan `AUTH PLAIN` kredensial asal diterima, pesan muncul di `/api/v1/messages`, dan
+  `mailpit.db` tertulis di folder data Rezure
+- Laravel 13 sungguhan (`laravel-api`, Symfony Mailer, `MAIL_USERNAME`/`MAIL_PASSWORD` terisi)
+  mengirim `Mail::raw` ke Mailpit → pesan tertangkap
+- `ServiceRow.vue` dan `ProjectDoctorModal.vue` asli dirender di Edge headless dengan `invoke`
+  di-mock: kartu Not installed/Install, Installing…, Running + Open (memanggil
+  `open_service_ui`), dan empat keadaan bagian mail di requirements check
+- App dev (`tauri dev`) maintainer sudah menjalankan Mailpit hasil kode ini dengan argumen di atas
+- **Belum**: tombol Install diklik di jendela app sungguhan (unduhan nyata lewat `AppHandle`)
 
 ---
 
@@ -75,5 +118,5 @@ tiga fase yang tadinya ada di file ini. **Fase 3.5.1 sudah selesai duluan** atas
 maintainer, di luar urutan ini. **Fase 3.5.2 (Redis) sudah dipindah ke v4** (jadi Fase 4.6) — lihat
 `docs/v4/rezure-app-v4-phases-tasks.md`. Yang tersisa di file ini:
 
-1. Fase 3.5.3 (Mailpit) — pola implementasinya sama persis dengan Redis yang sudah dipindah ke v4; nilai tambah harian buat user paling terasa dari fase-fase yang tersisa di file ini — **belum dikerjakan**
+1. Fase 3.5.3 (Mailpit) — **selesai**; lihat catatan lengkap di Fase 3.5.3 di atas
 2. Fase 3.5.1 (Node.js switcher) — **selesai**, dikerjakan lebih dulu di luar urutan ini; lihat catatan lengkap di Fase 3.5.1 di atas

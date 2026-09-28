@@ -79,8 +79,19 @@ export const useServicesStore = defineStore('services', () => {
     return withPending(id, () => invoke<ServiceInfo>('restart_service', { id }))
   }
 
+  /** Starts every stopped service that's installed. An optional service
+   *  nobody has downloaded yet (Mailpit) is skipped rather than failing the
+   *  whole action. */
   function startAll() {
-    return Promise.all(services.value.filter((s) => s.status !== 'running').map((s) => start(s.id)))
+    return Promise.all(
+      services.value.filter((s) => s.status !== 'running' && s.installed).map((s) => start(s.id)),
+    )
+  }
+
+  /** Opens a running service's web UI. The address is looked up on the Rust
+   *  side from the service itself. */
+  function openUi(id: string) {
+    return invoke<void>('open_service_ui', { id })
   }
 
   function stopAll() {
@@ -112,6 +123,7 @@ export const useServicesStore = defineStore('services', () => {
     freePort,
     restart,
     startAll,
+    openUi,
     stopAll,
     restartAll,
     isPending,

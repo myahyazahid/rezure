@@ -5,7 +5,7 @@ use crate::config::settings::SettingsState;
 use crate::db::DbState;
 use crate::services::ports::{self, PortHolder};
 use crate::services::telemetry::TelemetryClient;
-use crate::services::{ServiceInfo, ServiceManager};
+use crate::services::{ServiceInfo, ServiceManager, ServiceStatus};
 use crate::utils::error::AppError;
 
 #[tauri::command]
@@ -132,6 +132,24 @@ pub async fn free_port(port: u16) -> Result<Option<PortHolder>, AppError> {
     })
     .await
     .map_err(|e| AppError::Io(format!("background task panicked: {e}")))?
+}
+
+/// Opens a running service's web UI (Mailpit's inbox) in the default
+/// browser. The address comes from the service itself, never from the
+/// frontend, so this can only ever open what a service reports serving.
+#[tauri::command]
+pub fn open_service_ui(id: String, manager: State<'_, ServiceManager>) -> Result<(), AppError> {
+    let info = manager.find(&id)?.info();
+    let url = info
+        .web_url
+        .ok_or_else(|| AppError::NoWebUi(info.name.clone()))?;
+    if info.status != ServiceStatus::Running {
+        return Err(AppError::ServiceNotRunning(info.name));
+    }
+    tauri_plugin_opener::open_url(&url, None::<&str>).map_err(|e| AppError::OpenFailed {
+        target: url,
+        reason: e.to_string(),
+    })
 }
 
 #[tauri::command]

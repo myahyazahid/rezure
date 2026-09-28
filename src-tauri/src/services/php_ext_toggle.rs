@@ -622,6 +622,87 @@ mod tests {
         }
     }
 
+    /// The whole toggle path against every real PHP install: a toggle writes
+    /// the override, the generated ini picks it up, and the `php-cgi` the
+    /// service would spawn — same ini, same environment — really loads the
+    /// extension, then really doesn't once it's switched off. Each version's
+    /// own override file is put back byte for byte afterwards, and its ini
+    /// regenerated from it, so this leaves no trace. Run with:
+    /// `cargo test --lib services::php_ext_toggle::tests::a_toggle_changes_what_php_cgi_really_loads -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn a_toggle_changes_what_php_cgi_really_loads() {
+        use crate::services::php_ini;
+        use crate::utils::command::HiddenWindow;
+
+        let loaded_modules = |exe: &Path| -> (Vec<String>, String) {
+            let ini = php_ini::ensure_php_ini(exe).unwrap();
+            let cgi = exe.parent().unwrap().join("php-cgi.exe");
+            let mut cmd = std::process::Command::new(&cgi);
+            cmd.arg("-c").arg(&ini).arg("-m");
+            php_ini::apply_process_env(&mut cmd, exe).unwrap();
+            let out = cmd.hidden().output().unwrap();
+            let text = String::from_utf8_lossy(&out.stdout).to_string()
+                + &String::from_utf8_lossy(&out.stderr);
+            let modules = text
+                .lines()
+                .map(|line| line.trim().to_ascii_lowercase())
+                .collect();
+            (modules, text)
+        };
+
+        let installed = php::installed();
+        assert!(!installed.is_empty(), "needs at least one PHP installed");
+        for runtime in installed {
+            let version = runtime.version.clone();
+            let exe = runtime.exe.clone();
+            let ext_dir = runtime.dir.join("ext");
+            let Some(candidate) = CATALOG.iter().find(|e| {
+                !e.default_on && !e.debug_only && !e.zend_extension && dll_present(&ext_dir, e.id)
+            }) else {
+                println!("{version}: no non-default extension in this build, skipped");
+                continue;
+            };
+
+            let state = state_path(&version).unwrap();
+            let original = std::fs::read(&state).ok();
+
+            set_enabled(&version, candidate.id, true).unwrap();
+            let (on, on_text) = loaded_modules(&exe);
+            set_enabled(&version, candidate.id, false).unwrap();
+            let (off, _) = loaded_modules(&exe);
+
+            match &original {
+                Some(bytes) => std::fs::write(&state, bytes).unwrap(),
+                None => {
+                    let _ = std::fs::remove_file(&state);
+                }
+            }
+            php_ini::ensure_php_ini(&exe).unwrap();
+
+            println!(
+                "{version}: {} on -> loaded={}  off -> loaded={}",
+                candidate.id,
+                on.contains(&candidate.id.to_string()),
+                off.contains(&candidate.id.to_string())
+            );
+            assert!(
+                on.contains(&candidate.id.to_string()),
+                "{version}: {} enabled but not loaded:\n{on_text}",
+                candidate.id
+            );
+            assert!(
+                !on_text.contains("Unable to load") && !on_text.contains("Warning"),
+                "{version}: php-cgi warned while loading:\n{on_text}"
+            );
+            assert!(
+                !off.contains(&candidate.id.to_string()),
+                "{version}: {} disabled but still loaded",
+                candidate.id
+            );
+        }
+    }
+
     #[test]
     fn every_catalog_id_is_unique() {
         let mut ids: Vec<_> = CATALOG.iter().map(|e| e.id).collect();

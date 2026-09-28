@@ -24,6 +24,7 @@ use std::process::Command;
 
 use serde::Serialize;
 
+use super::process::MAILPIT_SMTP_PORT;
 use super::{ca_bundle, php, php_ini};
 use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
@@ -57,6 +58,83 @@ pub struct ProjectDiagnosis {
     /// that what counts as "a problem" — required, not dev-only, not loaded
     /// — is defined once, next to the data it is about.
     pub missing: Vec<String>,
+    /// How the project's `.env` sends mail, when it's to an SMTP server meant
+    /// to be on this machine — the case Mailpit catches. `None` for anything
+    /// else (`log`, a real provider, no `.env`).
+    pub mail: Option<MailSetup>,
+}
+
+/// A project's local-SMTP mail settings, checked against Mailpit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MailSetup {
+    /// `MAIL_HOST` as written.
+    pub host: String,
+    /// `MAIL_PORT`, when it's set to a number.
+    pub port: Option<u16>,
+    /// False for `mailpit` — the Docker service name Laravel Sail writes,
+    /// which resolves inside Sail's network and nowhere else.
+    pub host_reachable: bool,
+    /// Whether `port` is the one Mailpit accepts mail on.
+    pub port_matches: bool,
+    /// Filled in by the command layer, which is what knows about services.
+    pub mailpit_installed: bool,
+    pub mailpit_running: bool,
+}
+
+/// The value of `key` in a `.env` file, read the way phpdotenv (Laravel's
+/// loader) reads it for the plain cases: the first definition wins, an
+/// optional `export ` prefix is ignored, surrounding quotes are dropped, and
+/// an unquoted value ends at a ` #` comment.
+fn env_value(env: &str, key: &str) -> Option<String> {
+    env.lines().find_map(|line| {
+        let line = line.trim();
+        let line = line.strip_prefix("export ").unwrap_or(line);
+        let (name, value) = line.split_once('=')?;
+        if name.trim() != key {
+            return None;
+        }
+        let value = value.trim();
+        let unquoted = value
+            .strip_prefix('"')
+            .and_then(|v| v.strip_suffix('"'))
+            .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')));
+        Some(match unquoted {
+            Some(inner) => inner.to_string(),
+            None => value
+                .split(" #")
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+        })
+    })
+}
+
+/// Reads a project's `.env` for mail sent to a local SMTP server. Only the
+/// `smtp` mailer on a local host (or Sail's `mailpit` hostname) counts —
+/// `log`, `array` and real providers are deliberate choices with nothing to
+/// fix. `MAIL_DRIVER` is what Laravel called the setting before 7.x.
+pub fn mail_setup(env: &str) -> Option<MailSetup> {
+    let mailer = env_value(env, "MAIL_MAILER").or_else(|| env_value(env, "MAIL_DRIVER"))?;
+    if !mailer.eq_ignore_ascii_case("smtp") {
+        return None;
+    }
+    let host = env_value(env, "MAIL_HOST")?;
+    let host_reachable = match host.to_ascii_lowercase().as_str() {
+        "127.0.0.1" | "localhost" | "::1" => true,
+        "mailpit" => false,
+        _ => return None,
+    };
+    let port = env_value(env, "MAIL_PORT").and_then(|port| port.parse().ok());
+    Some(MailSetup {
+        host,
+        port,
+        host_reachable,
+        port_matches: port == Some(MAILPIT_SMTP_PORT),
+        mailpit_installed: false,
+        mailpit_running: false,
+    })
 }
 
 /// What an outbound HTTPS request from the serving PHP ran into.
@@ -275,6 +353,9 @@ pub fn diagnose_project(id: &str) -> Result<ProjectDiagnosis, AppError> {
 pub fn diagnose(project_dir: &Path) -> Result<ProjectDiagnosis, AppError> {
     let php_exe = php::active_exe()?;
     let php_version = php::active_id();
+    let mail = std::fs::read_to_string(project_dir.join(".env"))
+        .ok()
+        .and_then(|env| mail_setup(&env));
 
     let Ok(composer_json) = std::fs::read_to_string(project_dir.join("composer.json")) else {
         return Ok(ProjectDiagnosis {
@@ -282,6 +363,7 @@ pub fn diagnose(project_dir: &Path) -> Result<ProjectDiagnosis, AppError> {
             has_composer_json: false,
             extensions: Vec::new(),
             missing: Vec::new(),
+            mail,
         });
     };
 
@@ -293,6 +375,7 @@ pub fn diagnose(project_dir: &Path) -> Result<ProjectDiagnosis, AppError> {
             has_composer_json: true,
             extensions: Vec::new(),
             missing: Vec::new(),
+            mail,
         });
     }
 
@@ -316,12 +399,69 @@ pub fn diagnose(project_dir: &Path) -> Result<ProjectDiagnosis, AppError> {
         has_composer_json: true,
         missing: missing_from(&extensions),
         extensions,
+        mail,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn env_values_are_read_the_way_phpdotenv_reads_them() {
+        let env = "# comment\nMAIL_HOST=first\nMAIL_HOST=second\nexport MAIL_PORT=\"1025\"\nMAIL_FROM_NAME='${APP_NAME}'\nMAIL_USERNAME=null # unused\nEMPTY=\n";
+        assert_eq!(env_value(env, "MAIL_HOST").as_deref(), Some("first"));
+        assert_eq!(env_value(env, "MAIL_PORT").as_deref(), Some("1025"));
+        assert_eq!(
+            env_value(env, "MAIL_FROM_NAME").as_deref(),
+            Some("${APP_NAME}")
+        );
+        assert_eq!(env_value(env, "MAIL_USERNAME").as_deref(), Some("null"));
+        assert_eq!(env_value(env, "EMPTY").as_deref(), Some(""));
+        assert_eq!(env_value(env, "MISSING"), None);
+        // A key that merely starts with the one asked for isn't it.
+        assert_eq!(env_value("MAIL_HOSTNAME=x", "MAIL_HOST"), None);
+    }
+
+    #[test]
+    fn smtp_to_mailpits_port_on_localhost_matches() {
+        let setup = mail_setup("MAIL_MAILER=smtp\nMAIL_HOST=127.0.0.1\nMAIL_PORT=1025\n").unwrap();
+        assert!(setup.host_reachable);
+        assert!(setup.port_matches);
+    }
+
+    /// Laravel's own `.env.example` ships `MAIL_PORT=2525`.
+    #[test]
+    fn a_local_smtp_on_another_port_is_flagged_not_ignored() {
+        let setup = mail_setup("MAIL_MAILER=smtp\nMAIL_HOST=localhost\nMAIL_PORT=2525\n").unwrap();
+        assert!(setup.host_reachable);
+        assert!(!setup.port_matches);
+        assert_eq!(setup.port, Some(2525));
+    }
+
+    #[test]
+    fn sails_mailpit_hostname_is_recognized_as_unreachable_here() {
+        let setup = mail_setup("MAIL_MAILER=smtp\nMAIL_HOST=mailpit\nMAIL_PORT=1025\n").unwrap();
+        assert!(!setup.host_reachable);
+        assert!(setup.port_matches);
+    }
+
+    #[test]
+    fn the_pre_laravel_7_driver_key_counts_too() {
+        assert!(mail_setup("MAIL_DRIVER=smtp\nMAIL_HOST=127.0.0.1\nMAIL_PORT=1025\n").is_some());
+    }
+
+    #[test]
+    fn deliberate_non_local_mail_setups_are_left_alone() {
+        for env in [
+            "MAIL_MAILER=log\nMAIL_HOST=127.0.0.1\n",
+            "MAIL_MAILER=smtp\nMAIL_HOST=smtp.mailgun.org\nMAIL_PORT=587\n",
+            "MAIL_MAILER=ses\n",
+            "APP_NAME=Laravel\n",
+        ] {
+            assert_eq!(mail_setup(env), None, "{env}");
+        }
+    }
 
     const LARAVEL_ISH: &str = r#"{
         "require": {

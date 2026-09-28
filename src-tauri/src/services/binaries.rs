@@ -1,6 +1,6 @@
 //! On-demand portable binary downloader.
 //!
-//! Per `CLAUDE.md`, portable service binaries (Nginx, PHP, MariaDB) are never
+//! Per `CLAUDE.md`, portable service binaries (Nginx, PHP, MariaDB, Mailpit) are never
 //! committed to git — they're fetched from each project's official
 //! distribution on first use, checksum-verified, and cached under the user's
 //! local app data directory. Every entry in [`MANIFEST`] is a real, currently
@@ -99,6 +99,18 @@ pub const MANIFEST: &[BinaryPackage] = &[
             "https://archive.mariadb.org/mariadb-11.2.2/winx64-packages/mariadb-11.2.2-winx64.zip",
         sha256: "7d40de0c468cf33b5e8283e6f67d315aeae6ffa8df052b8d20a9b5943598d35e",
         exe_relative_path: "mariadb-11.2.2-winx64/bin/mysqld.exe",
+    },
+    // A single self-contained Go binary — no runtime, no DLLs. The checksum
+    // is the digest GitHub publishes for the release asset.
+    BinaryPackage {
+        id: "mailpit",
+        family: "mailpit",
+        name: "Mailpit",
+        version: "1.31.3",
+        download_url:
+            "https://github.com/axllent/mailpit/releases/download/v1.31.3/mailpit-windows-amd64.zip",
+        sha256: "863e9502d4e0f14a78c0f91c5091797b1c7b7b7e3fc7e5eab62e5770ce44b76e",
+        exe_relative_path: "mailpit.exe",
     },
 ];
 

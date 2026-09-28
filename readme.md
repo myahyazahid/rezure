@@ -12,6 +12,7 @@ Rezure lets you spin up local web development environments (Apache/Nginx, PHP, M
 - Automatic virtual host & `hosts` file configuration
 - Multi-version PHP switching — install a version from php.net inside the app, or drop one you downloaded into a folder Laragon-style (see [`docs/php-versions.md`](docs/php-versions.md))
 - Database management for the bundled MariaDB — create, export, import, and open a database in whichever SQL client you already have installed (see [`docs/databases.md`](docs/databases.md))
+- Local mail catcher (Mailpit) — point a project's `.env` at `127.0.0.1:1025` and every email it sends lands in an inbox at `http://127.0.0.1:8025` instead of anyone's real mailbox
 - Portable bundled binaries — no manual installation required
 - Lightweight footprint thanks to Tauri (native webview, small binary size)
 

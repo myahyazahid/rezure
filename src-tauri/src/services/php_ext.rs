@@ -324,4 +324,47 @@ mod tests {
     fn an_unknown_extension_is_refused() {
         assert!(find("mongodb").is_err());
     }
+
+    /// Downloads every pinned build from php.net for real and checks it
+    /// against its pin, and that the DLL the installer copies out is really
+    /// in the archive — the only way to catch a mistyped hash or a moved
+    /// file before a user's Install click does. Run with:
+    /// `cargo test --lib services::php_ext::tests::every_pinned_build_matches_its_download -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn every_pinned_build_matches_its_download() {
+        use sha2::{Digest, Sha256};
+
+        for extension in CATALOG {
+            for build in extension.builds {
+                let url = download_url(extension, build);
+                let bytes = reqwest::get(&url)
+                    .await
+                    .and_then(|r| r.error_for_status())
+                    .unwrap_or_else(|e| panic!("{url}: {e}"))
+                    .bytes()
+                    .await
+                    .unwrap();
+                let actual = format!("{:x}", Sha256::digest(&bytes));
+
+                let archive = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).unwrap();
+                let has_dll = archive.file_names().any(|name| name == dll_name(extension));
+
+                println!(
+                    "{} {} {:>8} bytes  sha256 {}  dll {}",
+                    extension.id,
+                    build.branch,
+                    bytes.len(),
+                    if actual == build.sha256 {
+                        "ok"
+                    } else {
+                        "MISMATCH"
+                    },
+                    if has_dll { "ok" } else { "MISSING" },
+                );
+                assert_eq!(actual, build.sha256, "{url}");
+                assert!(has_dll, "{url} has no {}", dll_name(extension));
+            }
+        }
+    }
 }

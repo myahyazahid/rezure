@@ -40,9 +40,15 @@ langsung dari dalam app, tanpa berburu DLL.
 - [x] Ekstrak hanya DLL-nya ke `ext/` versi terkait; arsipnya juga berisi README/LICENSE/`.pdb`
 - [x] Aktifkan untuk web (ini generated) dan untuk terminal (baris aditif di ini versi)
 - [x] Tombol Install di requirements check project, lalu cek ulang otomatis
-- [ ] Uji klik pertama di app sungguhan (unduhan nyata lewat `AppHandle`, tidak bisa headless)
-- [ ] Putuskan cakupan katalog berikutnya (`imagick`? dst.) sebelum daftarnya jadi beban rawat —
-      `xdebug` sendiri sudah punya rencana sendiri, lihat [Fase 4.3](../v4/rezure-app-v4-phases-tasks.md#fase-43--xdebug-sebagai-extension-resmi) di v4
+- [x] Semua build yang di-pin diverifikasi lawan php.net sungguhan — test `#[ignore]`
+      `every_pinned_build_matches_its_download` mengunduh ketujuh build `redis` 6.3.0 (PHP
+      7.4–8.5): SHA-256 semuanya cocok dengan pin dan `php_redis.dll` ada di tiap arsip. Klik
+      Install di jendela app sungguhan (unduhan lewat `AppHandle`) **tidak** diuji; jalur unduhnya
+      `binaries::install_archive` yang sama dengan runtime lain
+- [x] Cakupan katalog **diputuskan maintainer: tidak diperluas** — tetap `redis` saja. `imagick`
+      dan lainnya tidak masuk v3; `xdebug` punya rencana sendiri di [Fase 4.3](../v4/rezure-app-v4-phases-tasks.md#fase-43--xdebug-sebagai-extension-resmi) (v4)
+
+**Status: ditutup.**
 
 ---
 
@@ -64,7 +70,7 @@ sudah dipakai di `PhpConfigCard.vue` dan `RuntimeSwitchRow.vue`.
 - [x] UI: **menu sidebar baru** "PHP Extensions" (`PhpExtensionsView.vue`, route `/php-extensions`), diletakkan tepat di bawah "Switch" di `AppSidebar.vue` — bukan digabung ke halaman Switch sebagai card, atas permintaan maintainer, supaya fitur yang isinya bisa puluhan baris toggle punya halaman sendiri. Dropdown pilih versi (beberapa bisa jalan bersamaan sejak Fase 3.11), search ringan, grouping per kategori (tiap kategori jadi kartu `divide-y` sendiri, gaya sama dengan daftar Runtimes di halaman Switch), badge "not in this build" abu-abu buat DLL yang gak ada, toggle switch bergaya sama dengan `PhpPathLinkCard.vue`
 - [x] Default off + tooltip penjelasan untuk entry debug-only/environment-dependent (`zend_test`, `phpdbg_webhelper`, `oci8`/`pdo_oci`) — badge "special" dengan native tooltip, `debug_only: true` di catalog, tidak pernah `default_on`
 - [x] Notice "restart PHP" saat toggle dilakukan sementara service sedang jalan — dicek dari `ServiceInfo.version` yang sudah real-time (service `php` default atau instance pooled manapun), bukan field baru
-- [ ] Diuji lewat unit test Rust (`cargo test`, `cargo clippy -- -D warnings` bersih) dan `npm run lint`/`type-check` bersih, tapi **belum diuji manual di app sungguhan** — perlu klik toggle beneran lawan PHP terinstall nyata dan restart service buat konfirmasi baris `extension=` yang dihasilkan benar-benar dipakai
+- [x] Diverifikasi lawan PHP terinstall nyata — test `#[ignore]` `a_toggle_changes_what_php_cgi_really_loads` menjalankan jalur backend yang sama dengan klik toggle (`set_enabled` → `php_ini::ensure_php_ini` → `php-cgi -m` dengan env service, `apply_process_env`) di keenam versi terinstall (7.4.33, 8.0.30, 8.1.34, 8.3.33, 8.4.25, 8.5.10): `bz2` dinyalakan → benar-benar termuat tanpa warning, dimatikan → hilang. `extensions.json` user dikembalikan byte-per-byte setelahnya (dicek hash-nya). Yang **tidak** diuji: klik switch di halaman PHP Extensions itu sendiri (UI → command tipis `set_bundled_php_extension`)
 
 ---
 
@@ -128,7 +134,10 @@ Modal harus digeneralisasi **lebih dulu**, baru dropdown dibersihkan. Kalau diba
 - [x] Katalog Node.js dari `nodejs.org/dist/index.json` + `SHASUMS256.txt` per versi — `services::node_catalog`, cuma tampilkan versi terbaru tiap LTS line + 1 Current terbaru (bukan semua ratusan rilis). **Instalasi doang** (`bin/node/<versi>/node.exe` muncul di disk, checksum-verified) — belum ada PATH/per-project switching, itu memang fondasi buat Fase 3.5.1 sesuai rencana awal, bukan bagian dari task ini
 - [ ] Nginx: **dipindah ke v4** ([Fase 4.7](../v4/rezure-app-v4-phases-tasks.md#fase-47--nginx-multi-version-catalog)) — belum diputuskan/diikutkan di sini, tapi modalnya sudah siap kalau nanti ada katalog: step Nginx di `InstallVersionModal.vue` sekarang menampilkan satu entry pinned dari `binaries::MANIFEST` (jalur yang sudah ada), tinggal diganti ke katalog beneran begitu keputusan di Fase 4.7 diambil
 
-**Belum diuji lawan API sungguhan** — `mariadb_catalog.rs`/`composer_catalog.rs`/`node_catalog.rs` ditulis tanpa akses jaringan dari sesi kerja ini, jadi parsing-nya berdasarkan dokumentasi/pengetahuan bentuk API masing-masing, bukan response nyata yang sudah dicek. Test unit-nya pakai sample JSON hasil rekonstruksi (didokumentasikan begitu di tiap file), dan tiap modul punya test `#[ignore]` (`fetches_the_real_index`) yang harus dijalankan manual lawan API sungguhan sebelum rilis — kalau bentuk field-nya meleset, gejalanya "katalog kosong/error" (aman, bukan install tanpa verifikasi), tapi tetap perlu dikonfirmasi.
+**Sudah diuji lawan API sungguhan** (awalnya ditulis tanpa akses jaringan, parsing dari dokumentasi) — ketiga test `#[ignore]` `fetches_the_real_index` lolos:
+- **Node** (`nodejs.org/dist/index.json`): 12 versi (newest patch tiap LTS line + 1 Current), checksum dari `SHASUMS256.txt` per versi terbaca
+- **Composer** (`getcomposer.org/versions`): 2.10.3 dan 2.2.30; checksum katalog dicocokkan dengan `composer.phar` yang benar-benar diunduh — cocok, dan sama dengan `composer.phar` 2.10.3 yang sudah terinstall
+- **MariaDB** (REST API per branch): 66 versi di 4 branch (10.6, 10.11, 11.4, 11.8), terbaru 11.8.9. Versi terbaru tiap branch: URL unduhan HTTP 200 (83–92 MB), dan checksum dari REST API sama dengan `sha256sums.txt` di `archive.mariadb.org` (sumber independen). Zip-nya sendiri tidak diunduh penuh
 
 **Python sengaja tidak diikutkan** — python.org tidak menerbitkan index rilis dengan SHA-256 yang bisa diambil otomatis (API publiknya cuma expose MD5), persis masalah yang sama dengan Nginx (lihat [Fase 4.7](../v4/rezure-app-v4-phases-tasks.md#fase-47--nginx-multi-version-catalog) di v4). Ditunda sampai ada keputusan serupa opsi (a)/(b)/(c) untuk Python, bukan diselesaikan diam-diam dengan checksum yang lebih lemah.
 
@@ -311,8 +320,15 @@ murni soal port allocation + service lifecycle, bukan batasan PHP itu sendiri.
       `Service::restarts_on_crash` (sekarang khusus PHP, bukan nginx/database). Stop manual
       selalu menang karena flag `Service::crashed` direset oleh stop. Frontend refetch lewat event
       `service://changed`
-- [ ] Belum diuji manual di app sungguhan (kill `php-cgi.exe` lewat Task Manager → harus balik
-      sendiri dalam ~1–3 detik; upload >1 MB → tidak 413 lagi)
+- [x] T2 diverifikasi: nginx + php-cgi 8.5.10 terpisah (port sendiri) dengan baris
+      `client_max_body_size`/`fastcgi_*_timeout` disalin apa adanya dari `nginx.conf` hasil
+      generate dan `php.ini` hasil generate. Upload 5 MB: **413** tanpa baris itu (default nginx,
+      kondisi sebelum fix) → **200**, PHP menerima 5.242.880 byte utuh dengan baris itu. Upload
+      70 MB tetap 413 — di atas batas 64 MB, sesuai rancangan
+- [ ] T3 belum diuji di app sungguhan (kill `php-cgi.exe` lewat Task Manager → harus balik
+      sendiri dalam ~1–3 detik). Jalur heal-nya sendiri sudah terbukti lawan `php-cgi` asli lewat
+      test `a_dead_php_worker_is_healed_without_touching_the_rest` (lihat T4); yang belum dilihat
+      cuma thread supervisor di dalam app yang memanggilnya
 - [x] **T4** — Worker pool per versi (N `php-cgi` dalam satu service, nginx `upstream`).
       Alasannya: `php-cgi` di Windows cuma bisa melayani satu request sekaligus
       (`PHP_FCGI_CHILDREN` butuh `fork()`), jadi satu request lambat bikin request lain ke versi

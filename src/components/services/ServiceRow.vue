@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import type { PortHolder, ServiceInfo } from '@/types/service'
 import { useServicesStore } from '@/stores/services'
+import { useBinariesStore } from '@/stores/binaries'
 import BasePill from '@/components/common/BasePill.vue'
 import ServiceSparkline from '@/components/services/ServiceSparkline.vue'
 import ServiceLogPanel from '@/components/services/ServiceLogPanel.vue'
@@ -20,16 +21,60 @@ const isRunning = computed(() => props.service.status === 'running')
 const isPending = computed(() => store.isPending(props.service.id))
 const error = ref<string | null>(null)
 
-/** Every port the service binds — one, or one per worker. */
-const ports = computed(() =>
-  Array.from({ length: props.service.workers?.total ?? 1 }, (_, i) => props.service.port + i),
+/** Every port the service binds — one per worker, plus a web UI's. */
+const ports = computed(() => props.service.ports)
+
+/** Workers sit on consecutive ports and read best as a range; separate
+ *  listeners (Mailpit's SMTP and web UI) are listed side by side. */
+const portLabel = computed(() => {
+  const list = ports.value
+  if (props.service.workers && list.length > 1) return `:${list[0]}–${list[list.length - 1]}`
+  return list.map((port) => `:${port}`).join(' ')
+})
+
+const binaries = useBinariesStore()
+
+/** Not installed, but one download away — the card offers Install instead
+ *  of a Start that could only fail. */
+const needsInstall = computed(() => !props.service.installed && props.service.installId !== null)
+
+const installing = computed(
+  () => props.service.installId !== null && binaries.isInstalling(props.service.installId),
 )
 
-const portLabel = computed(() =>
-  ports.value.length > 1
-    ? `:${ports.value[0]}–${ports.value[ports.value.length - 1]}`
-    : `:${props.service.port}`,
-)
+const installLabel = computed(() => {
+  const id = props.service.installId
+  const p = id ? binaries.progressFor(id) : null
+  if (!p) return 'Installing…'
+  if (p.stage === 'verifying') return 'Verifying…'
+  if (p.stage === 'extracting') return 'Extracting…'
+  return p.totalBytes
+    ? `Downloading… ${Math.min(100, Math.round((p.downloadedBytes / p.totalBytes) * 100))}%`
+    : 'Downloading…'
+})
+
+async function onInstall() {
+  const id = props.service.installId
+  if (!id) return
+  error.value = null
+  try {
+    await binaries.install(id)
+    // `installed` is part of the service's own status, so the row only
+    // flips to Start once the list is refetched.
+    await store.fetchAll()
+  } catch (e) {
+    error.value = errorMessage(e)
+  }
+}
+
+async function onOpenUi() {
+  error.value = null
+  try {
+    await store.openUi(props.service.id)
+  } catch (e) {
+    error.value = errorMessage(e)
+  }
+}
 
 /** Running, but with some workers down. Still serving — nginx routes
  *  around the gap and the supervisor brings them back — so this is a
@@ -162,7 +207,7 @@ function requestForceStop() {
               isRunning ? 'font-medium text-emerald-600 dark:text-emerald-400' : 'text-neutral-500'
             "
           >
-            {{ isRunning ? 'Running' : 'Stopped' }}
+            {{ isRunning ? 'Running' : service.installed ? 'Stopped' : 'Not installed' }}
           </span>
           <span
             v-if="isRunning && service.workers"
@@ -197,6 +242,55 @@ function requestForceStop() {
       <BasePill variant="mono" class="shrink-0">{{ portLabel }}</BasePill>
 
       <button
+        v-if="service.webUrl && isRunning"
+        type="button"
+        :title="`Open ${service.webUrl}`"
+        class="flex shrink-0 items-center gap-1.5 rounded-lg border border-neutral-200 bg-white/70 px-3 py-1.5 text-sm font-semibold text-neutral-700 transition hover:bg-white dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
+        @click="onOpenUi"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          aria-hidden="true"
+          class="h-3.5 w-3.5"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"
+          />
+        </svg>
+        Open
+      </button>
+
+      <button
+        v-if="needsInstall"
+        type="button"
+        class="flex shrink-0 items-center gap-1.5 rounded-lg bg-red-600 px-3.5 py-1.5 text-sm font-semibold text-white shadow-sm shadow-red-600/30 transition hover:bg-red-500 disabled:opacity-60"
+        :disabled="installing"
+        @click="onInstall"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.5"
+          aria-hidden="true"
+          class="h-3.5 w-3.5"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"
+          />
+        </svg>
+        {{ installing ? installLabel : 'Install' }}
+      </button>
+
+      <button
+        v-else
         type="button"
         class="flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-semibold transition disabled:opacity-50"
         :class="
@@ -226,7 +320,7 @@ function requestForceStop() {
         type="button"
         title="Restart"
         class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-neutral-200 bg-white/60 text-neutral-500 transition hover:bg-white disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400 dark:hover:bg-neutral-800"
-        :disabled="isPending"
+        :disabled="isPending || needsInstall"
         @click="onRestart"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">

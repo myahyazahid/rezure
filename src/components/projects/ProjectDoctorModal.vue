@@ -2,9 +2,13 @@
 import { computed, ref, watch } from 'vue'
 import { useProjectsStore } from '@/stores/projects'
 import { usePhpStore } from '@/stores/php'
+import { useServicesStore } from '@/stores/services'
+import { useBinariesStore } from '@/stores/binaries'
 
 const store = useProjectsStore()
 const phpStore = usePhpStore()
+const servicesStore = useServicesStore()
+const binariesStore = useBinariesStore()
 
 const project = computed(() => store.projects.find((p) => p.id === store.doctorFor) ?? null)
 const result = computed(() => store.diagnosis)
@@ -67,6 +71,41 @@ function installable(name: string) {
   return phpStore.extensions.find((e) => e.id === name && e.available && !e.installed) ?? null
 }
 
+const mail = computed(() => result.value?.mail ?? null)
+
+/** The `.env` already points where Mailpit listens — only whether it's
+ *  running is left. */
+const mailConfigured = computed(() => !!mail.value?.hostReachable && !!mail.value?.portMatches)
+
+const mailBusy = ref(false)
+const mailError = ref<string | null>(null)
+
+/** Installs Mailpit if it isn't yet, starts it, then re-checks so the
+ *  section reads from what's actually running. */
+async function startMailpit() {
+  mailBusy.value = true
+  mailError.value = null
+  try {
+    if (!mail.value?.mailpitInstalled) await binariesStore.install('mailpit')
+    await servicesStore.fetchAll()
+    await servicesStore.start('mailpit')
+    if (store.doctorFor) await store.runDoctor(store.doctorFor)
+  } catch (e) {
+    mailError.value = typeof e === 'string' ? e : 'Mailpit could not be started.'
+  } finally {
+    mailBusy.value = false
+  }
+}
+
+async function openInbox() {
+  mailError.value = null
+  try {
+    await servicesStore.openUi('mailpit')
+  } catch (e) {
+    mailError.value = typeof e === 'string' ? e : 'Mailpit could not be opened.'
+  }
+}
+
 async function install(name: string) {
   const phpVersion = result.value?.phpVersion
   if (!phpVersion) return
@@ -94,8 +133,8 @@ async function install(name: string) {
       </h2>
       <p class="mt-1 text-sm text-neutral-500">
         Every <code class="font-mono">ext-*</code> in this project's
-        <code class="font-mono">composer.json</code>, checked against the PHP that serves it — and
-        whether that PHP can make HTTPS calls.
+        <code class="font-mono">composer.json</code>, checked against the PHP that serves it —
+        whether that PHP can make HTTPS calls, and where the project's mail goes.
       </p>
 
       <p v-if="loading" class="mt-5 text-sm text-neutral-500">Asking PHP…</p>
@@ -183,6 +222,66 @@ async function install(name: string) {
           </p>
         </template>
       </template>
+
+      <!-- Mail: only when the .env sends to an SMTP server meant to be on
+           this machine. `log` or a real provider is a choice, not a gap. -->
+      <div
+        v-if="mail && !store.doctorError"
+        class="mt-5 border-t border-neutral-200 pt-4 dark:border-neutral-700"
+      >
+        <template v-if="mailConfigured && mail.mailpitRunning">
+          <p class="flex items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300">
+            <span
+              class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[11px] font-bold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400"
+              >✓</span
+            >
+            Mail this project sends is caught by Mailpit.
+            <button
+              type="button"
+              class="ml-auto shrink-0 rounded-full border border-neutral-200 px-3 py-1 text-xs font-semibold text-neutral-700 transition hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
+              @click="openInbox"
+            >
+              Open inbox
+            </button>
+          </p>
+        </template>
+
+        <div
+          v-else
+          class="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+        >
+          <p v-if="!mail.hostReachable">
+            <code class="font-mono">MAIL_HOST={{ mail.host }}</code> is Laravel Sail's Docker
+            hostname and doesn't resolve outside Docker. Set
+            <code class="font-mono">MAIL_HOST=127.0.0.1</code> in
+            <code class="font-mono">.env</code> to send to Mailpit here.
+          </p>
+          <p v-else-if="!mail.portMatches">
+            This project sends mail to
+            <code class="font-mono">{{ mail.host }}:{{ mail.port ?? 2525 }}</code
+            >, but Mailpit listens on 1025. Set <code class="font-mono">MAIL_PORT=1025</code> in
+            <code class="font-mono">.env</code> to catch it.
+          </p>
+          <p v-else>
+            This project sends mail to
+            <code class="font-mono">{{ mail.host }}:{{ mail.port }}</code
+            >, but Mailpit isn't running, so sending fails.
+          </p>
+          <button
+            v-if="!mail.mailpitRunning"
+            type="button"
+            class="mt-2 rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-semibold text-amber-900 transition hover:bg-amber-100 disabled:opacity-50 dark:border-amber-700 dark:bg-transparent dark:text-amber-200 dark:hover:bg-amber-500/10"
+            :disabled="mailBusy"
+            @click="startMailpit"
+          >
+            <template v-if="mailBusy">Starting…</template>
+            <template v-else-if="mail.mailpitInstalled">Start Mailpit</template>
+            <template v-else>Install and start Mailpit</template>
+          </button>
+        </div>
+
+        <p v-if="mailError" class="mt-2 text-xs text-red-600 dark:text-red-400">{{ mailError }}</p>
+      </div>
 
       <!-- HTTPS: independent of composer.json, so shown for every project
            once the PHP question itself could be asked. -->
