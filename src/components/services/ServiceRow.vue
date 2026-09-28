@@ -58,10 +58,9 @@ async function onInstall() {
   if (!id) return
   error.value = null
   try {
+    // Refetches the service list itself, which is what flips this row to
+    // Start.
     await binaries.install(id)
-    // `installed` is part of the service's own status, so the row only
-    // flips to Start once the list is refetched.
-    await store.fetchAll()
   } catch (e) {
     error.value = errorMessage(e)
   }

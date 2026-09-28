@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type { BinaryStatus, InstallProgress } from '@/types/binary'
 import type { InstalledVersion, MariaDbRelease } from '@/types/runtime'
+import { useServicesStore } from '@/stores/services'
 
 // Keep in sync with `PROGRESS_EVENT` in src-tauri/src/services/binaries.rs
 const PROGRESS_EVENT = 'binary://install-progress'
@@ -52,6 +53,12 @@ export const useBinariesStore = defineStore('binaries', () => {
       const updated = await invoke<BinaryStatus>('install_binary', { id })
       const index = binaries.value.findIndex((b) => b.id === id)
       if (index !== -1) binaries.value[index] = updated
+      // A service card's Install/Start button reads `installed` from the
+      // service list, not from here — refetch it, so installing from the
+      // Switch page or the Install version modal flips the card too.
+      await useServicesStore()
+        .fetchAll()
+        .catch(() => {})
     } finally {
       installingIds.value.delete(id)
       delete progress.value[id]

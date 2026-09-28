@@ -72,6 +72,14 @@ beneran kekirim gak" itu pertanyaan harian buat siapapun yang develop fitur auth
       dipakai worker PHP), jadi bentrok di 8025 ditelusuri sama baiknya dengan di 1025
 - [x] Log viewer — `mailpit` masuk `LOG_SERVICES`; stdout/stderr-nya sudah lewat `LogSink` yang
       sama dengan service lain
+- [x] **Tambahan atas permintaan maintainer:** Mailpit juga bisa di-install dari halaman **Switch**
+      (baris sendiri di bawah MariaDB, pola yang sama dengan Nginx: satu versi yang di-pin, jadi
+      baris itu melaporkan terinstall/tidak, bukan dropdown pilih versi) dan dari modal **Install
+      version** (ubin Mailpit). Langkah Nginx di modal dijadikan generik untuk semua paket pinned
+      (`PINNED = ['nginx', 'mailpit']`) alih-alih diduplikasi. `binariesStore.install` sekarang
+      me-refresh daftar service setelah berhasil — sebelumnya install dari Switch/modal tidak
+      mengubah kartu Services (tetap "Not installed") sampai app dibuka ulang, karena daftar service
+      cuma di-fetch saat startup dan saat ada event supervisor
 - [x] Tombol **Open** di kartu saat running → command `open_service_ui(id)`, yang mengambil URL dari
       service itu sendiri di Rust (frontend tidak pernah mengirim URL). Error jelas kalau service
       belum jalan (`ServiceNotRunning`) atau tidak punya web UI (`NoWebUi`)

@@ -87,7 +87,6 @@ async function startMailpit() {
   mailError.value = null
   try {
     if (!mail.value?.mailpitInstalled) await binariesStore.install('mailpit')
-    await servicesStore.fetchAll()
     await servicesStore.start('mailpit')
     if (store.doctorFor) await store.runDoctor(store.doctorFor)
   } catch (e) {

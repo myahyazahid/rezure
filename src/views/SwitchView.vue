@@ -64,6 +64,15 @@ const nginxVersions = computed<RuntimeVersionEntry[]>(() =>
     : [],
 )
 
+// Same shape as Nginx: one build Rezure pins and checksums itself, so the
+// row reports whether it's installed rather than offering a switch.
+const mailpit = computed(() => binariesStore.binaries.find((b) => b.id === 'mailpit') ?? null)
+const mailpitVersions = computed<RuntimeVersionEntry[]>(() =>
+  mailpit.value
+    ? [{ id: 'mailpit', version: mailpit.value.version, installed: mailpit.value.installed }]
+    : [],
+)
+
 // MariaDB can have several versions installed (each database profile picks
 // its own compatible build — see `db_profiles::resolve_server_exe`), so
 // there's no single "active" version at this page's level the way PHP has
@@ -202,6 +211,15 @@ const hasPhpConfig = computed(
         :versions="mariadbVersions"
         :installing-id="binariesStore.installingMariaDbVersion"
         :progress="mariadbProgress"
+      />
+      <RuntimeSwitchRow
+        icon="mailpit"
+        name="Mailpit"
+        :active-version="mailpit?.installed ? mailpit.version : null"
+        :installed-count="mailpit?.installed ? 1 : 0"
+        :versions="mailpitVersions"
+        :installing-id="binariesStore.isInstalling('mailpit') ? 'mailpit' : null"
+        :progress="binariesStore.progressFor('mailpit')"
       />
       <RuntimeSwitchRow
         icon="composer"

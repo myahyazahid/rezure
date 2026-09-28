@@ -15,19 +15,29 @@ const binariesStore = useBinariesStore()
 const composerStore = useComposerStore()
 const nodeStore = useNodeStore()
 
-type Runtime = 'php' | 'nginx' | 'mariadb' | 'composer' | 'node'
+type Runtime = 'php' | 'nginx' | 'mariadb' | 'mailpit' | 'composer' | 'node'
 
 const RUNTIMES: { id: Runtime; label: string; icon: string }[] = [
   { id: 'php', label: 'PHP', icon: 'php' },
   { id: 'nginx', label: 'Nginx', icon: 'nginx' },
   { id: 'mariadb', label: 'MariaDB', icon: 'mariadb' },
+  { id: 'mailpit', label: 'Mailpit', icon: 'mailpit' },
   { id: 'composer', label: 'Composer', icon: 'composer' },
   { id: 'node', label: 'Node.js', icon: 'node' },
 ]
 
+/** Runtimes with exactly one build, pinned and checksummed in
+ *  `binaries::MANIFEST` rather than read from a live catalog. Their id is
+ *  also their package id. */
+const PINNED: Runtime[] = ['nginx', 'mailpit']
+
 const selected = ref<Runtime | null>(null)
 
-const nginxPackage = computed(() => binariesStore.binaries.find((b) => b.id === 'nginx') ?? null)
+const isPinned = computed(() => selected.value !== null && PINNED.includes(selected.value))
+
+const pinnedPackage = computed(() =>
+  isPinned.value ? (binariesStore.binaries.find((b) => b.id === selected.value) ?? null) : null,
+)
 
 /** Any install in flight, across every runtime — closing mid-download would
  *  leave the frontend with no way to see it finish. */
@@ -35,7 +45,7 @@ const busy = computed(
   () =>
     phpStore.installingId !== null ||
     phpStore.adding ||
-    binariesStore.isInstalling('nginx') ||
+    PINNED.some((id) => binariesStore.isInstalling(id)) ||
     binariesStore.installingMariaDbVersion !== null ||
     composerStore.installingVersion !== null ||
     nodeStore.installingVersion !== null,
@@ -53,7 +63,9 @@ function back() {
 
 watch(selected, (runtime) => {
   if (runtime === 'php' && phpStore.catalog.length === 0) phpStore.fetchCatalog()
-  if (runtime === 'nginx' && binariesStore.binaries.length === 0) binariesStore.fetchAll()
+  if (runtime && PINNED.includes(runtime) && binariesStore.binaries.length === 0) {
+    binariesStore.fetchAll()
+  }
   if (runtime === 'mariadb' && binariesStore.mariadbCatalog.length === 0) {
     binariesStore.fetchMariaDbCatalog()
   }
@@ -226,33 +238,35 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
           </div>
         </template>
 
-        <!-- Step 2b: Nginx — one pinned version, no live catalog (see the
-             open question in docs/v3/rezure-app-v3-phases-tasks.md) -->
-        <template v-else-if="selected === 'nginx'">
+        <!-- Step 2b: Nginx and Mailpit — one pinned version each, no live
+             catalog (Nginx: see the open question in
+             docs/v3/rezure-app-v3-phases-tasks.md; Mailpit: pinned so the
+             checksum is one Rezure itself vouches for) -->
+        <template v-else-if="isPinned && selected">
           <p v-if="binariesStore.loading" class="py-6 text-center text-sm text-neutral-500">
             Checking what's installed…
           </p>
           <div
-            v-else-if="nginxPackage"
+            v-else-if="pinnedPackage"
             class="rounded-2xl border border-neutral-200 bg-neutral-50/70 p-3.5 dark:border-neutral-800 dark:bg-neutral-900/60"
           >
             <div class="flex items-center gap-3">
               <div class="min-w-0 flex-1">
                 <span class="font-mono font-semibold text-neutral-900 dark:text-neutral-100">
-                  {{ nginxPackage.version }}
+                  {{ pinnedPackage.version }}
                 </span>
                 <p class="mt-0.5 text-xs text-neutral-500">
                   Only one build is offered for now — there's nothing to pick between yet.
                 </p>
               </div>
               <button
-                v-if="!nginxPackage.installed"
+                v-if="!pinnedPackage.installed"
                 type="button"
                 class="shrink-0 rounded-full bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-red-600/30 transition hover:bg-red-500 disabled:opacity-50"
                 :disabled="busy"
-                @click="binariesStore.install('nginx')"
+                @click="binariesStore.install(selected)"
               >
-                {{ binariesStore.isInstalling('nginx') ? 'Installing…' : 'Install' }}
+                {{ binariesStore.isInstalling(selected) ? 'Installing…' : 'Install' }}
               </button>
               <span
                 v-else
