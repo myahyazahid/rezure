@@ -70,6 +70,16 @@ pub fn mark_sent(conn: &Connection, id: &str, sent_at: i64) -> Result<(), AppErr
     Ok(())
 }
 
+/// Removes a row that can never be sent — one the backend rejected outright,
+/// or one that no longer parses. Left in place it would be refetched first
+/// every cycle (the queue is oldest-first), and a batch's worth of them
+/// would stop everything behind them from ever going out.
+pub fn discard(conn: &Connection, id: &str) -> Result<(), AppError> {
+    conn.execute("DELETE FROM pending_events WHERE id = ?1", [id])
+        .map_err(db_err)?;
+    Ok(())
+}
+
 /// Drops sent rows older than `cutoff` — retention, not correctness: a row
 /// still `NULL` (unsent) is never touched here regardless of age.
 pub fn delete_sent_before(conn: &Connection, cutoff: i64) -> Result<usize, AppError> {
@@ -84,6 +94,19 @@ pub fn delete_sent_before(conn: &Connection, cutoff: i64) -> Result<usize, AppEr
 mod tests {
     use super::*;
     use crate::db::init_migrations_for_test;
+
+    #[test]
+    fn a_discarded_row_stops_blocking_the_rows_behind_it() {
+        let conn = init_migrations_for_test();
+        insert_pending(&conn, "evt-1", "{}", "event", 100).unwrap();
+        insert_pending(&conn, "evt-2", "{}", "event", 200).unwrap();
+
+        discard(&conn, "evt-1").unwrap();
+
+        let unsent = fetch_unsent(&conn, 1).unwrap();
+        assert_eq!(unsent.len(), 1);
+        assert_eq!(unsent[0].id, "evt-2");
+    }
 
     #[test]
     fn inserts_a_row_with_no_sent_at() {

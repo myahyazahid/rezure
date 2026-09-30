@@ -41,13 +41,15 @@ Recording and sending are two separate steps, and each independently respects
 | Trigger | Kind | Fires from |
 |---|---|---|
 | App finishes starting (`db::init()` succeeds) | event, `app_opened` | `lib.rs` `setup()` |
-| A service is started via the Services page | event, `service.start` (name = the service, e.g. `nginx`) | `commands::services::start_service` |
+| A service is started via the Services page | event, `service.start` (name = the service's display name, e.g. `Nginx`, `MariaDB`), with the PHP/database versions in `payload` | `commands::services::start_service` |
 | A service is stopped via the Services page | event, `service.stop` | `commands::services::stop_service` |
+| Starting, stopping or restarting a service fails | event, `error.report` (name = the error's kind, e.g. `PortInUse`) | `commands::services::{start,stop,restart}_service` |
+| Every worker of a service dies on its own | event, `error.report` (name = `ServiceCrashed`) | the crash sink in `services::process::real_services` |
 | Every 5 minutes while the app is open (plus once immediately) | heartbeat | `lib.rs`'s heartbeat-recorder loop |
 | The app is quitting (`ExitRequested`), if a session is open | heartbeat, with `ended_at` set | `lib.rs`'s `app.run(...)` closure |
 
-`force_stop_service` and `restart_service` are **not** instrumented — only the two
-actions above, matching the v2 roadmap's Fase 2.4 scope.
+`force_stop_service` isn't instrumented, and a successful `restart_service` isn't either:
+only its failures are reported.
 
 ## Payload shapes (as actually serialized)
 
@@ -57,12 +59,26 @@ actions above, matching the v2 roadmap's Fase 2.4 scope.
 {
   "device_id": "…",
   "event_id": "…",
-  "event_type": "app_opened | service.start | service.stop",
-  "event_name": "nginx | null",
+  "event_type": "app_opened | service.start | service.stop | error.report",
+  "event_name": "Nginx | PortInUse | … | null",
   "app_version": "1.0.0",
+  "payload": { "…": "…" },
   "occurred_at": "2026-09-02T06:00:00+00:00"
 }
 ```
+
+`payload` is left off entirely when an event has none (`app_opened`, `service.stop`).
+When it's there, it's one of:
+
+- **`service.start`**: the stack in use, which the dashboard's "top stack combos" chart
+  pairs up: `{ "php_version": "8.3.33", "mariadb_version": "MariaDB 11.8.9" }`, or
+  `mysql_version` / `"MySQL 8.4.2"` when the active database profile is MySQL. A PHP
+  service reports its own version (a project's pinned one), anything else the active PHP.
+  Keys for what isn't installed are left out (`services::telemetry::stack_context`).
+- **`error.report`**: what was being done to which service:
+  `{ "action": "service.start | service.stop | service.restart | service.run", "service": "php-8.0.30" }`
+  (`service.run` is a crash). `event_name` is `AppError::code()`, the variant's name,
+  or `ServiceCrashed`.
 
 **Heartbeat** (`HeartbeatPayload` in `services/telemetry.rs`):
 
@@ -91,9 +107,13 @@ in-memory only, never persisted) and reused on every heartbeat for that run.
 first, POSTing each one individually to `{base_url}/api/v1/telemetry/event` or
 `.../heartbeat` depending on its stored `type` — the real backend has no bulk endpoint,
 so "batch" here means "several requests per wake-up", not one combined request. On
-success the row's `sent_at` is set; on any failure it's left alone and retried on the
-next tick (the queue's whole retry strategy — no explicit backoff timer). A `429`
-response stops the rest of that tick's batch early. Rows already sent are deleted after
+success the row's `sent_at` is set. A `5xx`, `408` or network failure leaves it alone to
+be retried on the next tick (the queue's whole retry strategy — no explicit backoff
+timer). A `429` response stops the rest of that tick's batch early. Any other `4xx` (a
+`422` validation failure, say) is a verdict on the row itself, so the row is deleted
+(`db::telemetry::discard`), as is a row that no longer parses. Left in place, such rows
+would be refetched first every tick, and 20 of them would stop everything recorded after
+them from ever being sent. Rows already sent are deleted after
 7 days (`db::telemetry::delete_sent_before`) — `pending_events` is a bounded local queue,
 not a permanent log.
 
@@ -105,6 +125,9 @@ mengganggu user" requirement from Fase 2.5.
 
 - No file paths, project names, database names, or anything else from the user's local
   filesystem/config beyond the fields listed above.
-- `event_name` is limited to the service id (`nginx`, `php`, `mariadb`) or omitted — never
+- `event_name` is limited to a service's display name, an error kind, or omitted — never
   free text a user typed (that's what support tickets are for, a separate, explicit,
   user-initiated action documented in `docs/v2/rezure-app-v2-phases-tasks.md`'s Fase 2.1).
+- `error.report` never carries the error's message. Messages hold paths, project names
+  and hostnames, so only the kind (`AppError::code()`) and the service id go out.
+- `payload` holds version numbers and service ids only.

@@ -211,3 +211,89 @@ impl Serialize for AppError {
         serializer.serialize_str(&self.to_string())
     }
 }
+
+impl AppError {
+    /// The kind of failure, as a stable identifier (the variant's name) —
+    /// what telemetry's `error.report` events carry. Never the message:
+    /// messages hold paths, project names and hostnames from the user's
+    /// machine, and the dashboard groups errors by this exact string, so it
+    /// mustn't vary with them either.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::ServiceNotFound { .. } => "ServiceNotFound",
+            Self::PhpVersionNotFound { .. } => "PhpVersionNotFound",
+            Self::NodeVersionNotFound { .. } => "NodeVersionNotFound",
+            Self::CatalogVersionNotFound { .. } => "CatalogVersionNotFound",
+            Self::PhpVersionAlreadyInstalled { .. } => "PhpVersionAlreadyInstalled",
+            Self::UnknownBinary { .. } => "UnknownBinary",
+            Self::ExtensionUnavailable { .. } => "ExtensionUnavailable",
+            Self::UnknownExtension { .. } => "UnknownExtension",
+            Self::Download { .. } => "Download",
+            Self::ChecksumMismatch { .. } => "ChecksumMismatch",
+            Self::Extract { .. } => "Extract",
+            Self::Io { .. } => "Io",
+            Self::BinaryNotInstalled { .. } => "BinaryNotInstalled",
+            Self::ServiceNotRunning { .. } => "ServiceNotRunning",
+            Self::NoWebUi { .. } => "NoWebUi",
+            Self::ProcessSpawnFailed { .. } => "ProcessSpawnFailed",
+            Self::ProcessBootstrapFailed { .. } => "ProcessBootstrapFailed",
+            Self::PortInUse { .. } => "PortInUse",
+            Self::HostsUpdateCancelled => "HostsUpdateCancelled",
+            Self::HostsUpdateFailed { .. } => "HostsUpdateFailed",
+            Self::UnknownTemplate { .. } => "UnknownTemplate",
+            Self::InvalidProjectName { .. } => "InvalidProjectName",
+            Self::ProjectAlreadyExists { .. } => "ProjectAlreadyExists",
+            Self::ScaffoldFailed { .. } => "ScaffoldFailed",
+            Self::ProjectNotFound { .. } => "ProjectNotFound",
+            Self::OpenFailed { .. } => "OpenFailed",
+            Self::InvalidDatabaseName { .. } => "InvalidDatabaseName",
+            Self::DatabaseQueryFailed { .. } => "DatabaseQueryFailed",
+            Self::TunnelFailed { .. } => "TunnelFailed",
+            Self::ExportCancelled { .. } => "ExportCancelled",
+            Self::ShareFailed { .. } => "ShareFailed",
+            Self::ServerUnreachable { .. } => "ServerUnreachable",
+            Self::UnknownDbClient { .. } => "UnknownDbClient",
+            Self::Settings { .. } => "Settings",
+            Self::Database { .. } => "Database",
+            Self::ProfileNotFound { .. } => "ProfileNotFound",
+            Self::ProfileUndeletable { .. } => "ProfileUndeletable",
+            Self::DatadirAlreadyRegistered { .. } => "DatadirAlreadyRegistered",
+            Self::NotADatadir { .. } => "NotADatadir",
+            Self::EngineBinaryMissing { .. } => "EngineBinaryMissing",
+            Self::EngineMismatch { .. } => "EngineMismatch",
+            Self::DatadirInUse { .. } => "DatadirInUse",
+            Self::SwitchRolledBack { .. } => "SwitchRolledBack",
+            Self::PortHolderProtected { .. } => "PortHolderProtected",
+            Self::UnusableProjectPath { .. } => "UnusableProjectPath",
+            Self::ProjectAlreadyLinked { .. } => "ProjectAlreadyLinked",
+            Self::PortInUseBy { .. } => "PortInUseBy",
+            Self::AttachmentRejected { .. } => "AttachmentRejected",
+            Self::ConnectionNotFound { .. } => "ConnectionNotFound",
+            Self::ConnectionAlreadyExists { .. } => "ConnectionAlreadyExists",
+            Self::ConnectionReadOnly { .. } => "ConnectionReadOnly",
+            Self::InvalidConnection { .. } => "InvalidConnection",
+            Self::CredentialStore { .. } => "CredentialStore",
+            Self::TicketSubmitFailed { .. } => "TicketSubmitFailed",
+            Self::TicketHistoryFailed { .. } => "TicketHistoryFailed",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn code_is_the_variant_name_and_never_the_message() {
+        let err = AppError::PortInUse {
+            port: 80,
+            name: r"C:\Users\someone\secret-project".to_string(),
+        };
+        assert_eq!(err.code(), "PortInUse");
+        assert_eq!(AppError::Io(r"C:\Users\someone".to_string()).code(), "Io");
+        assert_eq!(
+            AppError::HostsUpdateCancelled.code(),
+            "HostsUpdateCancelled"
+        );
+    }
+}

@@ -1129,6 +1129,14 @@ pub fn real_services(app: AppHandle) -> ServiceManager {
     });
 
     let crash_sink: CrashSink = Arc::new(move |service_id| {
+        // Reported whether or not the user wants a notification — that
+        // setting is about interrupting them, not about the crash counting.
+        // On its own thread because this can fire from inside `list()`,
+        // whose caller may be holding the database lock `record` needs.
+        let telemetry_app = app.clone();
+        let crashed = service_id.to_string();
+        std::thread::spawn(move || super::telemetry::record_crash(&telemetry_app, &crashed));
+
         // Looked up lazily (rather than at construction) since
         // `SettingsState` isn't managed yet at the point `real_services` is
         // called from `lib.rs`'s `setup()` — by the time a crash can

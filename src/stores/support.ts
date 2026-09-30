@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type {
   Attachment,
@@ -10,6 +10,10 @@ import type {
 } from '@/types/support'
 
 const DRAFT_KEY = 'rezure.support.draft'
+
+/** The backend takes at most 5 files per ticket, and the attached log goes
+ *  up as one of them (`latest-log.txt`). */
+const MAX_ATTACHMENTS = 5
 
 interface Draft {
   clientTicketId: string
@@ -50,6 +54,10 @@ export const useSupportStore = defineStore('support', () => {
   const includeSystemInfo = ref(draft?.includeSystemInfo ?? true)
   const logText = ref<string | null>(null)
 
+  const attachmentSlotsLeft = computed(
+    () => MAX_ATTACHMENTS - attachments.value.length - (logText.value ? 1 : 0),
+  )
+
   const attachmentError = ref<string | null>(null)
   const submitting = ref(false)
   const submitError = ref<string | null>(null)
@@ -85,8 +93,8 @@ export const useSupportStore = defineStore('support', () => {
 
   async function addAttachment(path: string) {
     attachmentError.value = null
-    if (attachments.value.length >= 5) {
-      attachmentError.value = 'Only up to 5 attachments are allowed.'
+    if (attachmentSlotsLeft.value <= 0) {
+      attachmentError.value = `Only up to ${MAX_ATTACHMENTS} attachments are allowed, including the attached log.`
       return
     }
     try {
@@ -124,6 +132,11 @@ export const useSupportStore = defineStore('support', () => {
   }
 
   function setLogText(value: string | null) {
+    attachmentError.value = null
+    if (value && !logText.value && attachmentSlotsLeft.value <= 0) {
+      attachmentError.value = `Only up to ${MAX_ATTACHMENTS} attachments are allowed, including the attached log.`
+      return
+    }
     logText.value = value
   }
 
@@ -188,6 +201,7 @@ export const useSupportStore = defineStore('support', () => {
     attachments,
     includeSystemInfo,
     logText,
+    attachmentSlotsLeft,
     attachmentError,
     submitting,
     submitError,

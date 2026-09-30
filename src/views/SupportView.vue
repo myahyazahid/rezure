@@ -157,6 +157,7 @@ function formatSize(bytes: number): string {
             <button
               type="button"
               class="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-semibold text-neutral-600 transition hover:border-red-400 hover:text-red-600 dark:border-neutral-700 dark:text-neutral-300"
+              :disabled="!store.logText && store.attachmentSlotsLeft <= 0"
               @click="attachLatestLog"
             >
               Attach latest log
@@ -164,7 +165,7 @@ function formatSize(bytes: number): string {
             <button
               type="button"
               class="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-semibold text-neutral-600 transition hover:border-red-400 hover:text-red-600 dark:border-neutral-700 dark:text-neutral-300"
-              :disabled="store.attachments.length >= 5"
+              :disabled="store.attachmentSlotsLeft <= 0"
               @click="pickAttachments"
             >
               Browse…

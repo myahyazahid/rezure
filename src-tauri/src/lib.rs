@@ -390,6 +390,7 @@ pub fn run() {
                             &device_id,
                             "app_opened",
                             None,
+                            None,
                             &app_version,
                         ) {
                             log::warn!("could not record app_opened event: {err}");
@@ -407,6 +408,10 @@ pub fn run() {
                             &app.state::<db::DbState>(),
                             "on startup",
                         );
+
+                        // AGENTS.md & co. in the Rezure home, so AI coding
+                        // agents know Rezure (not Laragon) serves the projects.
+                        services::agent_docs::start(app.handle().clone());
 
                         // Heartbeat recorder — queues a "still open" ping every 5
                         // minutes (and once immediately, since `interval`'s first
