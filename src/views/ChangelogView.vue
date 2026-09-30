@@ -70,7 +70,7 @@ function goToPage(next: number) {
 
     <div
       v-else-if="updateStore.available"
-      class="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-500/20 dark:bg-red-500/10"
+      class="mt-4 rounded-2xl border border-red-300/60 bg-red-100/50 p-4 dark:border-red-500/20 dark:bg-red-500/10"
     >
       <div class="flex flex-wrap items-center justify-between gap-3">
         <p class="text-sm font-semibold text-red-900 dark:text-red-200">
@@ -78,7 +78,7 @@ function goToPage(next: number) {
         </p>
         <button
           type="button"
-          class="shrink-0 rounded-full bg-red-600 px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-red-500 disabled:opacity-60"
+          class="glass-accent shrink-0 rounded-full px-4 py-1.5 text-sm font-semibold transition disabled:opacity-60"
           :disabled="updateStore.downloading"
           @click="updateStore.downloadAndApply()"
         >
@@ -88,10 +88,10 @@ function goToPage(next: number) {
 
       <div
         v-if="updateStore.downloading"
-        class="mt-3 h-1.5 overflow-hidden rounded-full bg-red-200/70 dark:bg-red-900/40"
+        class="mt-3 h-1.5 overflow-hidden rounded-full bg-red-500/15 dark:bg-red-900/40"
       >
         <div
-          class="h-full rounded-full bg-red-600 transition-all"
+          class="h-full rounded-full bg-linear-to-r from-red-500 to-orange-400 transition-all"
           :class="updateProgressPercent === null ? 'w-1/3 animate-pulse' : ''"
           :style="
             updateProgressPercent !== null ? { width: `${updateProgressPercent}%` } : undefined
@@ -105,10 +105,7 @@ function goToPage(next: number) {
     </div>
 
     <!-- A newer major line: a pointer to the website, never an in-app update. -->
-    <div
-      v-if="updateStore.upgradeNotice"
-      class="mt-4 rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/60"
-    >
+    <div v-if="updateStore.upgradeNotice" class="glass mt-4 rounded-2xl p-4">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="min-w-0">
           <p class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
@@ -120,7 +117,7 @@ function goToPage(next: number) {
         </div>
         <button
           type="button"
-          class="shrink-0 rounded-full border border-neutral-200 bg-white/70 px-4 py-1.5 text-sm font-semibold text-neutral-700 transition hover:bg-white dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
+          class="glass-btn shrink-0 rounded-full px-4 py-1.5 text-sm font-semibold text-neutral-700 transition dark:text-neutral-200"
           @click="updateStore.openUpgradeNotice()"
         >
           Learn more
@@ -130,26 +127,19 @@ function goToPage(next: number) {
 
     <p v-if="store.loading && !hasEntries" class="mt-6 text-sm text-neutral-500">Loading…</p>
 
-    <p
-      v-else-if="!hasEntries"
-      class="mt-6 rounded-2xl border border-neutral-200 bg-white p-5 text-sm text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900/60"
-    >
+    <p v-else-if="!hasEntries" class="glass mt-6 rounded-2xl p-5 text-sm text-neutral-500">
       No changelog entries yet.
     </p>
 
     <div v-else class="mt-5 space-y-2.5">
-      <article
-        v-for="entry in pagedEntries"
-        :key="entry.version"
-        class="rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/60"
-      >
+      <article v-for="entry in pagedEntries" :key="entry.version" class="glass rounded-2xl p-4">
         <div class="flex flex-wrap items-baseline justify-between gap-2">
           <h2 class="font-semibold text-neutral-900 dark:text-neutral-100">
             {{ entry.title }}
           </h2>
           <div class="flex items-center gap-2 text-xs text-neutral-500">
             <span
-              class="rounded-full bg-red-50 px-2 py-0.5 font-mono font-semibold text-red-600 dark:bg-red-500/10 dark:text-red-400"
+              class="rounded-full bg-red-500/10 px-2 py-0.5 font-mono font-semibold text-red-600 dark:bg-red-500/10 dark:text-red-400"
             >
               v{{ entry.version }}
             </span>
@@ -168,7 +158,7 @@ function goToPage(next: number) {
     <div v-if="hasEntries && totalPages > 1" class="mt-4 flex items-center justify-between gap-3">
       <button
         type="button"
-        class="rounded-full border border-neutral-200 bg-white/70 px-4 py-1.5 text-sm font-semibold text-neutral-700 transition hover:bg-white disabled:opacity-40 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
+        class="glass-btn rounded-full px-4 py-1.5 text-sm font-semibold text-neutral-700 transition disabled:opacity-40 dark:text-neutral-200"
         :disabled="currentPage === 1"
         @click="goToPage(currentPage - 1)"
       >
@@ -177,7 +167,7 @@ function goToPage(next: number) {
       <span class="text-xs text-neutral-500">Page {{ currentPage }} of {{ totalPages }}</span>
       <button
         type="button"
-        class="rounded-full border border-neutral-200 bg-white/70 px-4 py-1.5 text-sm font-semibold text-neutral-700 transition hover:bg-white disabled:opacity-40 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
+        class="glass-btn rounded-full px-4 py-1.5 text-sm font-semibold text-neutral-700 transition disabled:opacity-40 dark:text-neutral-200"
         :disabled="currentPage === totalPages"
         @click="goToPage(currentPage + 1)"
       >
@@ -227,17 +217,20 @@ function goToPage(next: number) {
 }
 .changelog-body :deep(code) {
   border-radius: 0.25rem;
-  background: rgba(115, 115, 115, 0.15);
+  border: 1px solid var(--glass-inset-border);
+  background: var(--glass-inset-bg);
   padding: 0.1em 0.35em;
   font-size: 0.85em;
 }
 .changelog-body :deep(pre) {
   overflow-x: auto;
   border-radius: 0.5rem;
-  background: rgba(115, 115, 115, 0.15);
+  border: 1px solid var(--glass-inset-border);
+  background: var(--glass-inset-bg);
   padding: 0.75em;
 }
 .changelog-body :deep(pre code) {
+  border: none;
   background: none;
   padding: 0;
 }

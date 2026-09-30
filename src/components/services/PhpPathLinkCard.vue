@@ -48,7 +48,7 @@ onMounted(() => {
         :aria-checked="enabled"
         :aria-label="`Use Rezure's PHP everywhere`"
         class="relative h-6 w-11 shrink-0 rounded-full transition disabled:opacity-50"
-        :class="enabled ? 'bg-red-600' : 'bg-neutral-200 dark:bg-neutral-700'"
+        :class="enabled ? 'bg-red-600' : 'bg-neutral-900/15 dark:bg-white/15'"
         :disabled="store.pathBusy"
         @click="store.setPathLink(!enabled)"
       >
@@ -60,9 +60,7 @@ onMounted(() => {
     </div>
 
     <div v-if="enabled" class="mt-3 flex flex-col gap-1.5">
-      <div
-        class="flex items-center gap-2 rounded-lg bg-neutral-100 px-2.5 py-1.5 font-mono text-xs dark:bg-neutral-800/60"
-      >
+      <div class="glass-inset flex items-center gap-2 rounded-lg px-2.5 py-1.5 font-mono text-xs">
         <span class="shrink-0 text-neutral-500">php</span>
         <span class="shrink-0 text-neutral-400">→</span>
         <span class="shrink-0 font-semibold text-emerald-600 dark:text-emerald-400">
@@ -93,7 +91,7 @@ onMounted(() => {
          thing in Rezure that changes something outside the app. -->
     <p
       v-else-if="conflictSummary"
-      class="mt-3 rounded-lg bg-amber-50 px-2.5 py-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+      class="mt-3 rounded-lg bg-amber-100/50 px-2.5 py-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
     >
       <strong>{{ conflictSummary }}</strong> already provides <code class="font-mono">php</code>.
       Turning this on puts Rezure ahead of it; turning it off hands it straight back.

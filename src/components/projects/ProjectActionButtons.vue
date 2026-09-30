@@ -13,7 +13,7 @@ const props = defineProps<{
 const store = useProjectsStore()
 
 const ICON_BUTTON_CLASS =
-  'flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-neutral-200 bg-white text-neutral-500 transition hover:border-neutral-300 hover:text-neutral-800 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400 dark:hover:text-neutral-100'
+  'glass-btn flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-100'
 
 // A fixed-size icon button in every state (idle / starting / active) rather
 // than growing into a URL chip when active: this sits in a list row whose
@@ -38,7 +38,7 @@ function onShareClick() {
   <div class="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
     <button
       type="button"
-      class="flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-red-600 px-3.5 text-sm font-semibold text-white transition hover:bg-red-500"
+      class="glass-accent flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-sm font-semibold transition"
       :title="`Open http://${props.domain}`"
       @click="store.openSite(props.projectId)"
     >
@@ -58,10 +58,10 @@ function onShareClick() {
     <button
       type="button"
       :class="[
-        'flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition disabled:cursor-wait disabled:opacity-70',
+        'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition disabled:cursor-wait disabled:opacity-70',
         isActive
-          ? 'border-red-300 bg-red-50 text-red-600 hover:bg-red-100 dark:border-red-800 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20'
-          : 'border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300 hover:text-neutral-800 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400 dark:hover:text-neutral-100',
+          ? 'glass-selected text-red-600 hover:bg-red-500/15 dark:text-red-400 dark:hover:bg-red-500/20'
+          : 'glass-btn text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-100',
       ]"
       :disabled="isStarting"
       :title="
@@ -133,10 +133,10 @@ function onShareClick() {
     <button
       type="button"
       :class="[
-        'flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition',
+        'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition',
         props.phpVersion
-          ? 'border-red-300 bg-red-50 text-red-600 hover:bg-red-100 dark:border-red-800 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20'
-          : 'border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300 hover:text-neutral-800 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400 dark:hover:text-neutral-100',
+          ? 'glass-selected text-red-600 hover:bg-red-500/15 dark:text-red-400 dark:hover:bg-red-500/20'
+          : 'glass-btn text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-100',
       ]"
       :title="
         props.phpVersion
@@ -162,10 +162,10 @@ function onShareClick() {
     <button
       type="button"
       :class="[
-        'flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition',
+        'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition',
         props.nodeVersion
-          ? 'border-red-300 bg-red-50 text-red-600 hover:bg-red-100 dark:border-red-800 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20'
-          : 'border-neutral-200 bg-white text-neutral-500 hover:border-neutral-300 hover:text-neutral-800 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400 dark:hover:text-neutral-100',
+          ? 'glass-selected text-red-600 hover:bg-red-500/15 dark:text-red-400 dark:hover:bg-red-500/20'
+          : 'glass-btn text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-100',
       ]"
       :title="
         props.nodeVersion

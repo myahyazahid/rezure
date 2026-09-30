@@ -7,3 +7,195 @@ body,
 #app {
   height: 100%;
 }
+
+/*
+ * Glass design system
+ * ===================
+ *
+ * Every surface in the app is a sheet of frosted glass over one colourful
+ * backdrop (`bg-app`, on the root element in App.vue). The look comes from
+ * translucency plus a bright hairline edge and a top highlight — the colour
+ * of the backdrop showing through is what sells it.
+ *
+ * Tokens live here as CSS variables so light/dark is one switch (`.dark` on
+ * <html>, see useTheme) and components never repeat a `dark:` pair for a
+ * surface. Components pick a role, not a colour:
+ *
+ *   glass          card / row / panel sitting on the backdrop
+ *   glass-hover    add to `glass` for a clickable card
+ *   glass-strong   floating layer: modal panel, dropdown menu, popover
+ *   glass-inset    well inside a glass surface: input, chip, stat tile
+ *   glass-selected the chosen item in a list (red-tinted)
+ *   glass-btn      secondary button
+ *   glass-accent   primary (red) button
+ *   glass-divider  border colour for separators and table rules
+ *   glass-scrim    the dimmed, blurred layer behind a modal
+ *
+ * Why only `glass-strong` and `glass-scrim` blur what is behind them:
+ * `backdrop-filter` makes the element a containing block for `position:
+ * fixed` descendants and a new stacking context. Rows and cards here contain
+ * `fixed inset-0` click-catchers and whole modals, which would be clipped to
+ * the card, and dropdowns that must paint over the next row. Over the smooth
+ * backdrop a blur is invisible anyway — it only shows where real content sits
+ * behind the glass, which is exactly the floating layers.
+ */
+
+:root {
+  color-scheme: light;
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(248 113 113 / 0.5), transparent 70%),
+    radial-gradient(40% 45% at 100% 0%, rgb(251 146 60 / 0.4), transparent 70%),
+    radial-gradient(38% 42% at 58% 48%, rgb(244 114 182 / 0.2), transparent 70%),
+    radial-gradient(50% 50% at 88% 100%, rgb(236 72 153 / 0.3), transparent 70%),
+    radial-gradient(45% 50% at 8% 100%, rgb(129 140 248 / 0.32), transparent 70%),
+    linear-gradient(180deg, #fbf3f3, #f5f1f7);
+
+  --glass-bg: rgb(255 255 255 / 0.42);
+  --glass-bg-hover: rgb(255 255 255 / 0.7);
+  --glass-border: rgb(255 255 255 / 0.75);
+  --glass-border-hover: rgb(255 255 255 / 0.95);
+  --glass-highlight: rgb(255 255 255 / 0.85);
+  --glass-shadow: 0 1px 2px rgb(40 12 16 / 0.04), 0 10px 28px -12px rgb(127 29 29 / 0.18);
+
+  --glass-strong-bg: rgb(255 255 255 / 0.74);
+  --glass-strong-shadow: 0 2px 8px rgb(40 12 16 / 0.05), 0 28px 64px -18px rgb(76 18 28 / 0.35);
+
+  --glass-inset-bg: rgb(255 255 255 / 0.5);
+  --glass-inset-border: rgb(40 20 24 / 0.08);
+
+  --glass-selected-bg: rgb(239 68 68 / 0.1);
+  --glass-selected-border: rgb(239 68 68 / 0.3);
+
+  --glass-divider: rgb(40 20 24 / 0.08);
+  --glass-scrim: rgb(40 14 20 / 0.22);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --app-mesh:
+    radial-gradient(55% 50% at 0% 0%, rgb(220 38 38 / 0.4), transparent 70%),
+    radial-gradient(40% 40% at 100% 0%, rgb(234 88 12 / 0.2), transparent 70%),
+    radial-gradient(40% 45% at 60% 50%, rgb(159 18 57 / 0.18), transparent 70%),
+    radial-gradient(50% 50% at 92% 100%, rgb(190 24 93 / 0.28), transparent 70%),
+    radial-gradient(45% 50% at 5% 100%, rgb(79 70 229 / 0.24), transparent 70%),
+    linear-gradient(180deg, #120d10, #0a090c);
+
+  --glass-bg: rgb(255 255 255 / 0.05);
+  --glass-bg-hover: rgb(255 255 255 / 0.08);
+  --glass-border: rgb(255 255 255 / 0.1);
+  --glass-border-hover: rgb(255 255 255 / 0.16);
+  --glass-highlight: rgb(255 255 255 / 0.07);
+  --glass-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 12px 32px -14px rgb(0 0 0 / 0.7);
+
+  --glass-strong-bg: rgb(28 24 29 / 0.78);
+  --glass-strong-shadow: 0 2px 8px rgb(0 0 0 / 0.35), 0 28px 64px -16px rgb(0 0 0 / 0.8);
+
+  --glass-inset-bg: rgb(255 255 255 / 0.04);
+  --glass-inset-border: rgb(255 255 255 / 0.08);
+
+  --glass-selected-bg: rgb(239 68 68 / 0.14);
+  --glass-selected-border: rgb(248 113 113 / 0.3);
+
+  --glass-divider: rgb(255 255 255 / 0.08);
+  --glass-scrim: rgb(0 0 0 / 0.45);
+}
+
+/* A native <select>'s option list is painted from the options' own colours,
+   falling back to the select's. On a translucent glass select that fallback
+   comes out as a pale list under light text in dark mode, so the options get
+   solid colours of their own. */
+@layer base {
+  select option {
+    background-color: var(--color-white);
+    color: var(--color-neutral-900);
+  }
+
+  .dark select option {
+    background-color: var(--color-neutral-900);
+    color: var(--color-neutral-100);
+  }
+}
+
+/* The app backdrop the glass sits on. Static on purpose: animating it would
+   make every blurred layer re-sample the backdrop on every frame. */
+@utility bg-app {
+  background: var(--app-mesh);
+}
+
+/* Components layer, not `@utility`: a plain Tailwind class on the same
+   element (`border-red-400` on an invalid input, `shadow-none`, ...) has to
+   win over the role's defaults, and utilities always beat this layer
+   regardless of the order the two end up in the stylesheet. */
+@layer components {
+  .glass {
+    background-color: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      inset 0 1px 0 0 var(--glass-highlight),
+      var(--glass-shadow);
+  }
+
+  .glass-hover {
+    &:hover {
+      background-color: var(--glass-bg-hover);
+      border-color: var(--glass-border-hover);
+    }
+  }
+
+  .glass-strong {
+    background-color: var(--glass-strong-bg);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      inset 0 1px 0 0 var(--glass-highlight),
+      var(--glass-strong-shadow);
+    backdrop-filter: blur(24px) saturate(180%);
+  }
+
+  .glass-inset {
+    background-color: var(--glass-inset-bg);
+    border: 1px solid var(--glass-inset-border);
+  }
+
+  .glass-selected {
+    background-color: var(--glass-selected-bg);
+    border: 1px solid var(--glass-selected-border);
+    box-shadow: inset 0 1px 0 0 var(--glass-highlight);
+  }
+
+  .glass-btn {
+    background-color: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      inset 0 1px 0 0 var(--glass-highlight),
+      0 1px 2px rgb(0 0 0 / 0.05);
+
+    &:hover:not(:disabled) {
+      background-color: var(--glass-bg-hover);
+      border-color: var(--glass-border-hover);
+    }
+  }
+
+  .glass-accent {
+    color: var(--color-white);
+    background-image: linear-gradient(180deg, var(--color-red-500), var(--color-red-600));
+    border: 1px solid rgb(153 27 27 / 0.35);
+    box-shadow:
+      inset 0 1px 0 0 rgb(255 255 255 / 0.3),
+      0 8px 20px -8px rgb(220 38 38 / 0.6);
+
+    &:hover:not(:disabled) {
+      background-image: linear-gradient(180deg, var(--color-red-400), var(--color-red-500));
+    }
+  }
+
+  .glass-divider {
+    border-color: var(--glass-divider);
+  }
+
+  .glass-scrim {
+    background-color: var(--glass-scrim);
+    backdrop-filter: blur(10px) saturate(120%);
+  }
+}

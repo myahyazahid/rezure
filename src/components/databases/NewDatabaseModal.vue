@@ -59,10 +59,10 @@ watch(name, () => {
 
 <template>
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+    class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
     @click.self="close"
   >
-    <div class="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl dark:bg-neutral-900">
+    <div class="glass-strong w-full max-w-md rounded-3xl p-6">
       <h2 class="text-xl font-bold tracking-tight">New database</h2>
       <p class="mt-0.5 text-sm text-neutral-500">
         Created on Rezure's MariaDB — empty, with no tables.
@@ -74,12 +74,8 @@ watch(name, () => {
         type="text"
         placeholder="my_app"
         autofocus
-        class="mt-1 w-full rounded-xl border bg-white px-3.5 py-2.5 font-mono text-sm text-neutral-900 outline-none dark:bg-neutral-950 dark:text-neutral-100"
-        :class="
-          nameError
-            ? 'border-red-400 focus:border-red-500'
-            : 'border-neutral-200 focus:border-red-400 dark:border-neutral-700'
-        "
+        class="glass-inset mt-1 w-full rounded-xl px-3.5 py-2.5 font-mono text-sm text-neutral-900 outline-none dark:text-neutral-100"
+        :class="nameError ? 'border-red-400 focus:border-red-500' : 'focus:border-red-400/70'"
         @keyup.enter="submit"
       />
       <p v-if="nameError" class="mt-1.5 text-xs text-red-600 dark:text-red-400">{{ nameError }}</p>
@@ -87,7 +83,7 @@ watch(name, () => {
       <label class="mt-4 block text-xs font-medium text-neutral-500">Collation</label>
       <select
         v-model="collation"
-        class="mt-1 w-full rounded-xl border border-neutral-200 bg-white px-3.5 py-2.5 font-mono text-sm text-neutral-900 outline-none focus:border-red-400 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100"
+        class="glass-inset mt-1 w-full rounded-xl px-3.5 py-2.5 font-mono text-sm text-neutral-900 outline-none focus:border-red-400/70 dark:text-neutral-100"
       >
         <!-- The server's real list, once it has loaded; until then the
              default is still a valid choice on its own. -->
@@ -106,7 +102,7 @@ watch(name, () => {
       <div class="mt-5 flex justify-end gap-2">
         <button
           type="button"
-          class="rounded-full border border-neutral-200 bg-white/70 px-5 py-2.5 text-sm font-semibold text-neutral-700 transition hover:bg-white disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
+          class="glass-btn rounded-full px-5 py-2.5 text-sm font-semibold text-neutral-700 transition disabled:opacity-50 dark:text-neutral-200"
           :disabled="store.creating"
           @click="close"
         >
@@ -114,7 +110,7 @@ watch(name, () => {
         </button>
         <button
           type="button"
-          class="rounded-full bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-red-500/40 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+          class="glass-accent rounded-full px-5 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
           :disabled="!canCreate || store.creating"
           @click="submit"
         >

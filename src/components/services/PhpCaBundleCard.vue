@@ -31,7 +31,7 @@ onMounted(() => {
 
       <button
         type="button"
-        class="shrink-0 rounded-full border border-neutral-200 bg-white px-4 py-1.5 text-xs font-semibold text-neutral-700 transition hover:bg-neutral-100 disabled:cursor-wait disabled:opacity-60 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
+        class="glass-btn shrink-0 rounded-full px-4 py-1.5 text-xs font-semibold text-neutral-700 transition disabled:cursor-wait disabled:opacity-60 dark:text-neutral-200"
         :disabled="store.updatingCaBundle"
         @click="update"
       >
@@ -52,7 +52,7 @@ onMounted(() => {
           <template v-else>A bundle Rezure didn't put there — kept as it is.</template>
         </p>
         <p
-          class="truncate rounded-lg bg-neutral-100 px-2.5 py-1.5 font-mono text-xs text-neutral-500 dark:bg-neutral-800/60"
+          class="glass-inset truncate rounded-lg px-2.5 py-1.5 font-mono text-xs text-neutral-500"
           :title="store.caBundle.path"
         >
           {{ store.caBundle.path }}
@@ -60,14 +60,14 @@ onMounted(() => {
       </template>
       <p
         v-else
-        class="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+        class="rounded-xl bg-amber-100/50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
       >
         Not installed — HTTPS calls from PHP can't be verified.
       </p>
 
       <p
         v-if="result"
-        class="rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300"
+        class="rounded-xl bg-emerald-100/50 px-3 py-2 text-xs text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300"
       >
         <template v-if="result.created">
           Installed. Restart PHP for running sites to pick it up.

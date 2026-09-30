@@ -27,10 +27,10 @@ async function submit() {
 
 <template>
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+    class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
     @click.self="emit('close')"
   >
-    <div class="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl dark:bg-neutral-900">
+    <div class="glass-strong w-full max-w-sm rounded-2xl p-6">
       <h2 class="text-lg font-bold text-neutral-900 dark:text-neutral-100">
         Password for {{ props.connection.name }}
       </h2>
@@ -43,7 +43,7 @@ async function submit() {
         type="password"
         placeholder="••••••••"
         autofocus
-        class="mt-4 w-full rounded-xl border border-neutral-200 bg-white px-3.5 py-2.5 text-sm text-neutral-900 outline-none transition focus:border-red-400 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100"
+        class="glass-inset mt-4 w-full rounded-xl px-3.5 py-2.5 text-sm text-neutral-900 outline-none transition focus:border-red-400/70 dark:text-neutral-100"
         @keyup.enter="submit"
       />
 
@@ -68,7 +68,7 @@ async function submit() {
         </button>
         <button
           type="button"
-          class="rounded-full bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-red-500/40 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+          class="glass-accent rounded-full px-5 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
           :disabled="!canSubmit"
           @click="submit"
         >

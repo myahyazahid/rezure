@@ -104,18 +104,16 @@ async function submit() {
 }
 
 const INPUT_CLASS =
-  'mt-1 w-full rounded-xl border border-neutral-200 bg-white px-3.5 py-2.5 text-sm text-neutral-900 outline-none transition focus:border-red-400 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100'
+  'glass-inset mt-1 w-full rounded-xl px-3.5 py-2.5 text-sm text-neutral-900 outline-none transition focus:border-red-400/70 dark:text-neutral-100'
 const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
 </script>
 
 <template>
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+    class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
     @click.self="emit('close')"
   >
-    <div
-      class="max-h-[88vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-neutral-200 bg-white p-6 shadow-2xl dark:border-neutral-700 dark:bg-neutral-900"
-    >
+    <div class="glass-strong max-h-[88vh] w-full max-w-lg overflow-y-auto rounded-2xl p-6">
       <h2 class="text-lg font-bold text-neutral-900 dark:text-neutral-100">Add connection</h2>
       <p class="mt-1 text-sm text-neutral-500">
         A server Rezure talks to but doesn't run — staging, a VPS, a shared instance. Rezure never
@@ -175,10 +173,7 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
         </span>
       </label>
 
-      <div
-        v-if="draft.useSsh"
-        class="mt-3 rounded-xl border border-neutral-200 p-3.5 dark:border-neutral-700"
-      >
+      <div v-if="draft.useSsh" class="glass-divider mt-3 rounded-xl border p-3.5">
         <div class="flex gap-3">
           <label class="block flex-1">
             <span :class="LABEL_CLASS">SSH host</span>
@@ -211,11 +206,11 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
           <div class="mt-1 flex gap-2">
             <button
               type="button"
-              class="flex-1 rounded-xl border px-3 py-2 text-sm font-semibold transition"
+              class="flex-1 rounded-xl px-3 py-2 text-sm font-semibold transition"
               :class="
                 draft.sshAuth === 'key'
-                  ? 'border-red-400 bg-red-50 text-red-700 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300'
-                  : 'border-neutral-200 text-neutral-600 hover:border-neutral-300 dark:border-neutral-700 dark:text-neutral-300'
+                  ? 'glass-selected text-red-700 dark:text-red-300'
+                  : 'glass-inset text-neutral-600 hover:bg-white/70 dark:text-neutral-300 dark:hover:bg-white/8'
               "
               @click="draft.sshAuth = 'key'"
             >
@@ -223,11 +218,11 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
             </button>
             <button
               type="button"
-              class="flex-1 rounded-xl border px-3 py-2 text-sm font-semibold transition"
+              class="flex-1 rounded-xl px-3 py-2 text-sm font-semibold transition"
               :class="
                 draft.sshAuth === 'password'
-                  ? 'border-red-400 bg-red-50 text-red-700 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300'
-                  : 'border-neutral-200 text-neutral-600 hover:border-neutral-300 dark:border-neutral-700 dark:text-neutral-300'
+                  ? 'glass-selected text-red-700 dark:text-red-300'
+                  : 'glass-inset text-neutral-600 hover:bg-white/70 dark:text-neutral-300 dark:hover:bg-white/8'
               "
               @click="draft.sshAuth = 'password'"
             >
@@ -247,7 +242,7 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
             />
             <button
               type="button"
-              class="shrink-0 rounded-xl border border-neutral-200 px-3.5 text-sm font-semibold text-neutral-600 transition hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+              class="glass-btn shrink-0 rounded-xl px-3.5 text-sm font-semibold text-neutral-600 transition dark:text-neutral-300"
               @click="pickKey"
             >
               Browse
@@ -269,7 +264,7 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
              box, which otherwise only fails once the tunnel is attempted. -->
         <p
           v-if="keyLooksLikeAPassword"
-          class="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+          class="mt-2 rounded-xl bg-amber-100/50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
         >
           That doesn't look like a file path. This box wants the private <em>key file</em> — if your
           server logs in with a password, switch to
@@ -297,11 +292,11 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
             v-for="engine in ENGINES"
             :key="engine"
             type="button"
-            class="flex-1 rounded-xl border px-3 py-2 text-sm font-semibold transition"
+            class="flex-1 rounded-xl px-3 py-2 text-sm font-semibold transition"
             :class="
               draft.engine === engine
-                ? 'border-red-400 bg-red-50 text-red-700 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300'
-                : 'border-neutral-200 text-neutral-600 hover:border-neutral-300 dark:border-neutral-700 dark:text-neutral-300'
+                ? 'glass-selected text-red-700 dark:text-red-300'
+                : 'glass-inset text-neutral-600 hover:bg-white/70 dark:text-neutral-300 dark:hover:bg-white/8'
             "
             @click="draft.engine = engine"
           >
@@ -317,11 +312,11 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
             v-for="mode in TLS_MODES"
             :key="mode.value"
             type="button"
-            class="flex-1 rounded-xl border px-3 py-2 text-xs font-semibold transition"
+            class="flex-1 rounded-xl px-3 py-2 text-xs font-semibold transition"
             :class="
               draft.tlsMode === mode.value
-                ? 'border-red-400 bg-red-50 text-red-700 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300'
-                : 'border-neutral-200 text-neutral-600 hover:border-neutral-300 dark:border-neutral-700 dark:text-neutral-300'
+                ? 'glass-selected text-red-700 dark:text-red-300'
+                : 'glass-inset text-neutral-600 hover:bg-white/70 dark:text-neutral-300 dark:hover:bg-white/8'
             "
             :title="mode.hint"
             @click="draft.tlsMode = mode.value"
@@ -356,7 +351,7 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
            state can't be something the UI decided on its own. -->
       <div
         v-if="store.testResult"
-        class="mt-5 rounded-xl bg-emerald-50 px-3.5 py-2.5 text-sm text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300"
+        class="mt-5 rounded-xl bg-emerald-100/50 px-3.5 py-2.5 text-sm text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300"
       >
         Connected — server reports
         <span class="font-mono">{{ store.testResult }}</span>
@@ -371,7 +366,7 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
       <div class="mt-5 flex items-center justify-between gap-2">
         <button
           type="button"
-          class="rounded-full border border-neutral-200 bg-white/70 px-5 py-2.5 text-sm font-semibold text-neutral-700 transition hover:bg-white disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
+          class="glass-btn rounded-full px-5 py-2.5 text-sm font-semibold text-neutral-700 transition disabled:opacity-50 dark:text-neutral-200"
           :disabled="!complete || store.testing"
           @click="store.test(draft)"
         >
@@ -388,7 +383,7 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
           </button>
           <button
             type="button"
-            class="rounded-full bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-red-500/40 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+            class="glass-accent rounded-full px-5 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
             :disabled="!canSave || store.saving"
             :title="canSave ? '' : 'Test the connection first'"
             @click="submit"

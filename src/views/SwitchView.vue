@@ -140,7 +140,7 @@ const hasPhpConfig = computed(
 
       <button
         type="button"
-        class="flex shrink-0 items-center gap-2 rounded-full bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-red-500/40 transition hover:bg-red-500"
+        class="glass-accent flex shrink-0 items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition"
         @click="showInstallModal = true"
       >
         <svg
@@ -180,9 +180,7 @@ const hasPhpConfig = computed(
     <h2 class="mt-6 mb-2 text-xs font-semibold tracking-wide text-neutral-400 uppercase">
       Runtimes
     </h2>
-    <div
-      class="flex flex-col divide-y divide-neutral-200/80 rounded-2xl border border-neutral-200/80 bg-neutral-100/60 dark:divide-neutral-800 dark:border-neutral-800 dark:bg-neutral-900/60"
-    >
+    <div class="glass flex flex-col divide-y divide-neutral-900/8 rounded-2xl dark:divide-white/8">
       <RuntimeSwitchRow
         icon="php"
         name="PHP"
@@ -256,9 +254,9 @@ const hasPhpConfig = computed(
       hand — Rezure didn't checksum those.
     </p>
     <p class="mt-2 text-xs text-neutral-400">
-      The PHP and Node.js versions picked here are what a project's terminal uses unless that project
-      pins its own (see the PHP and Node icons on a project's card). Python isn't available yet — it
-      publishes no checksum Rezure can verify a download against.
+      The PHP and Node.js versions picked here are what a project's terminal uses unless that
+      project pins its own (see the PHP and Node icons on a project's card). Python isn't available
+      yet — it publishes no checksum Rezure can verify a download against.
     </p>
 
     <h2
@@ -269,7 +267,7 @@ const hasPhpConfig = computed(
     </h2>
     <div
       v-if="hasPhpConfig"
-      class="divide-y divide-neutral-200/80 rounded-2xl border border-neutral-200/80 bg-neutral-100/60 dark:divide-neutral-800 dark:border-neutral-800 dark:bg-neutral-900/60"
+      class="glass divide-y divide-neutral-900/8 rounded-2xl dark:divide-white/8"
     >
       <PhpPathLinkCard />
       <PhpConfigCard />
@@ -286,14 +284,14 @@ const hasPhpConfig = computed(
           </div>
           <button
             type="button"
-            class="shrink-0 rounded-full border border-neutral-200 bg-white px-4 py-1.5 text-xs font-semibold text-neutral-700 transition hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
+            class="glass-btn shrink-0 rounded-full px-4 py-1.5 text-xs font-semibold text-neutral-700 transition dark:text-neutral-200"
             @click="phpStore.openDropInDir"
           >
             Open folder
           </button>
         </div>
         <p
-          class="mt-3 truncate rounded-lg bg-neutral-100 px-2.5 py-1.5 font-mono text-xs text-neutral-500 dark:bg-neutral-800/60"
+          class="glass-inset mt-3 truncate rounded-lg px-2.5 py-1.5 font-mono text-xs text-neutral-500"
           :title="phpStore.dropInDir"
         >
           {{ phpStore.dropInDir }}

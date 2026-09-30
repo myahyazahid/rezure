@@ -132,27 +132,28 @@ const ringOffset = computed(() => {
 </script>
 
 <template>
-  <aside
-    class="flex w-64 shrink-0 flex-col gap-3 border-r border-neutral-200/70 p-4 dark:border-neutral-800"
-  >
-    <nav class="flex flex-col gap-2">
+  <aside class="glass flex w-64 shrink-0 flex-col gap-3 rounded-3xl p-3">
+    <nav class="flex flex-col gap-1">
+      <!-- Inactive items are bare so the panel reads as one sheet of glass;
+           the transparent border keeps rows from shifting when one becomes
+           active and picks up a real edge. -->
       <RouterLink
         v-for="item in navItems"
         :key="item.to"
         :to="item.to"
-        class="flex items-center gap-3 rounded-2xl border px-3 py-2.5 transition"
+        class="flex items-center gap-3 rounded-2xl px-3 py-2 transition"
         :class="
           isActive(item.to)
-            ? 'border-red-200 bg-red-50 dark:border-red-500/30 dark:bg-red-500/10'
-            : 'border-neutral-200 bg-white/70 hover:border-neutral-300 dark:border-neutral-800 dark:bg-neutral-900/60 dark:hover:border-neutral-700'
+            ? 'glass-selected'
+            : 'border border-transparent hover:bg-white/50 dark:hover:bg-white/5'
         "
       >
         <span
           class="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition"
           :class="
             isActive(item.to)
-              ? 'bg-red-600 text-white shadow-sm shadow-red-600/30'
-              : 'bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400'
+              ? 'glass-accent'
+              : 'glass-inset text-neutral-500 dark:text-neutral-400'
           "
         >
           <svg
@@ -308,7 +309,7 @@ const ringOffset = computed(() => {
           class="rounded-full px-2 py-0.5 text-xs font-medium"
           :class="
             isActive(item.to)
-              ? 'bg-white/80 text-red-600 dark:bg-neutral-900/60 dark:text-red-400'
+              ? 'bg-white/70 text-red-600 dark:bg-white/10 dark:text-red-400'
               : 'text-neutral-500 dark:text-neutral-400'
           "
         >
@@ -317,9 +318,7 @@ const ringOffset = computed(() => {
       </RouterLink>
     </nav>
 
-    <div
-      class="mt-auto rounded-2xl border border-neutral-200 bg-white/70 p-4 dark:border-neutral-800 dark:bg-neutral-900/60"
-    >
+    <div class="glass-inset mt-auto rounded-2xl p-4">
       <div class="flex items-center gap-3">
         <div class="relative h-11 w-11 shrink-0">
           <svg viewBox="0 0 40 40" class="h-11 w-11 -rotate-90">
@@ -330,7 +329,7 @@ const ringOffset = computed(() => {
               fill="none"
               stroke="currentColor"
               stroke-width="4"
-              class="text-neutral-200 dark:text-neutral-800"
+              class="text-neutral-900/10 dark:text-white/10"
             />
             <circle
               cx="20"
@@ -355,9 +354,7 @@ const ringOffset = computed(() => {
         </div>
       </div>
 
-      <div
-        class="mt-3 flex items-center justify-between border-t border-neutral-200 pt-3 text-xs dark:border-neutral-800"
-      >
+      <div class="glass-divider mt-3 flex items-center justify-between border-t pt-3 text-xs">
         <span class="text-neutral-500">Uptime</span>
         <span class="font-semibold">{{ uptimeLabel }}</span>
       </div>

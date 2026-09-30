@@ -58,8 +58,8 @@ function levelClass(level: LogLevel) {
           class="rounded-full px-4 py-2 text-sm font-semibold transition"
           :class="
             store.paused
-              ? 'bg-neutral-200/70 text-neutral-700 hover:bg-neutral-300/70 dark:bg-neutral-800 dark:text-neutral-200 dark:hover:bg-neutral-700'
-              : 'bg-red-100 text-red-600 hover:bg-red-200 dark:bg-red-500/15 dark:text-red-400 dark:hover:bg-red-500/25'
+              ? 'glass-btn text-neutral-700 dark:text-neutral-200'
+              : 'border border-red-500/25 bg-red-500/10 text-red-600 hover:bg-red-500/20 dark:border-red-400/25 dark:bg-red-500/15 dark:text-red-400 dark:hover:bg-red-500/25'
           "
           @click="store.togglePause"
         >
@@ -67,7 +67,7 @@ function levelClass(level: LogLevel) {
         </button>
         <button
           type="button"
-          class="rounded-full border border-neutral-200 bg-white/70 px-4 py-2 text-sm font-semibold text-neutral-700 transition hover:bg-white dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
+          class="glass-btn rounded-full px-4 py-2 text-sm font-semibold text-neutral-700 transition dark:text-neutral-200"
           @click="store.clear"
         >
           Clear
@@ -84,8 +84,8 @@ function levelClass(level: LogLevel) {
           class="rounded-full px-3.5 py-1.5 text-sm font-medium transition"
           :class="
             selectedService === null
-              ? 'bg-red-600 text-white shadow-sm shadow-red-600/30'
-              : 'border border-neutral-200 bg-white/70 text-neutral-600 hover:bg-white dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-300 dark:hover:bg-neutral-800'
+              ? 'glass-accent'
+              : 'glass-btn text-neutral-600 dark:text-neutral-300'
           "
           @click="selectedService = null"
         >
@@ -98,8 +98,8 @@ function levelClass(level: LogLevel) {
           class="rounded-full px-3.5 py-1.5 text-sm font-medium transition"
           :class="
             selectedService === service
-              ? 'bg-red-600 text-white shadow-sm shadow-red-600/30'
-              : 'border border-neutral-200 bg-white/70 text-neutral-600 hover:bg-white dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-300 dark:hover:bg-neutral-800'
+              ? 'glass-accent'
+              : 'glass-btn text-neutral-600 dark:text-neutral-300'
           "
           @click="selectedService = service"
         >
@@ -107,9 +107,7 @@ function levelClass(level: LogLevel) {
         </button>
       </div>
 
-      <div
-        class="ml-auto flex shrink-0 items-center gap-0.5 rounded-full border border-neutral-200 bg-white/70 p-1 dark:border-neutral-700 dark:bg-neutral-900/60"
-      >
+      <div class="glass ml-auto flex shrink-0 items-center gap-0.5 rounded-full p-1">
         <button
           v-for="level in LEVELS"
           :key="level.label"
@@ -117,8 +115,8 @@ function levelClass(level: LogLevel) {
           class="rounded-full px-3 py-1 text-xs font-semibold transition"
           :class="
             selectedLevel === level.value
-              ? 'bg-red-600 text-white'
-              : 'text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-100'
+              ? 'glass-accent'
+              : 'border border-transparent text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-100'
           "
           @click="selectedLevel = level.value"
         >
@@ -127,9 +125,7 @@ function levelClass(level: LogLevel) {
       </div>
     </div>
 
-    <div
-      class="mt-4 rounded-2xl border border-neutral-200/80 bg-neutral-100/60 dark:border-neutral-800 dark:bg-neutral-900/60"
-    >
+    <div class="glass mt-4 rounded-2xl">
       <div v-if="filtered.length === 0" class="p-6 text-center text-sm text-neutral-500">
         No log lines match the current filters.
       </div>
@@ -137,7 +133,7 @@ function levelClass(level: LogLevel) {
         <div
           v-for="entry in filtered"
           :key="entry.id"
-          class="flex items-start gap-3 rounded-lg px-2.5 py-1.5 font-mono text-xs hover:bg-white/60 dark:hover:bg-neutral-800/60"
+          class="flex items-start gap-3 rounded-lg px-2.5 py-1.5 font-mono text-xs hover:bg-white/50 dark:hover:bg-white/5"
         >
           <span class="w-16 shrink-0 text-neutral-400">{{ entry.time }}</span>
           <span class="w-16 shrink-0 text-neutral-500">{{ entry.service }}</span>
@@ -151,7 +147,7 @@ function levelClass(level: LogLevel) {
       </div>
 
       <div
-        class="flex items-center justify-between border-t border-neutral-200 px-4 py-2.5 text-xs text-neutral-500 dark:border-neutral-800"
+        class="glass-divider flex items-center justify-between border-t px-4 py-2.5 text-xs text-neutral-500"
       >
         <span>{{ filtered.length }} lines</span>
         <span>{{ store.paused ? 'Paused' : 'Live tail' }}</span>

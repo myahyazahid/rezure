@@ -80,10 +80,10 @@ watch(name, () => {
 
 <template>
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+    class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
     @click.self="close"
   >
-    <div class="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl dark:bg-neutral-900">
+    <div class="glass-strong w-full max-w-md rounded-3xl p-6">
       <h2 class="text-xl font-bold tracking-tight">Import .sql</h2>
       <p class="mt-0.5 truncate font-mono text-xs text-neutral-500" :title="props.file">
         {{ props.file }}
@@ -95,19 +95,15 @@ watch(name, () => {
         type="text"
         placeholder="my_app"
         autofocus
-        class="mt-1 w-full rounded-xl border bg-white px-3.5 py-2.5 font-mono text-sm text-neutral-900 outline-none dark:bg-neutral-950 dark:text-neutral-100"
-        :class="
-          nameError
-            ? 'border-red-400 focus:border-red-500'
-            : 'border-neutral-200 focus:border-red-400 dark:border-neutral-700'
-        "
+        class="glass-inset mt-1 w-full rounded-xl px-3.5 py-2.5 font-mono text-sm text-neutral-900 outline-none dark:text-neutral-100"
+        :class="nameError ? 'border-red-400 focus:border-red-500' : 'focus:border-red-400/70'"
         @keyup.enter="submit"
       />
       <p v-if="nameError" class="mt-1.5 text-xs text-red-600 dark:text-red-400">{{ nameError }}</p>
 
       <p
         v-else-if="existing"
-        class="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+        class="mt-2 rounded-xl bg-amber-100/50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
       >
         <strong>{{ name.trim() }}</strong> already exists. A dump usually contains
         <code>DROP TABLE</code> statements, so tables it defines will be replaced.
@@ -121,7 +117,7 @@ watch(name, () => {
            read-only fails before anything reaches it. -->
       <div
         v-if="remote"
-        class="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-3 dark:border-amber-500/30 dark:bg-amber-500/10"
+        class="mt-4 rounded-xl border border-amber-400/50 bg-amber-100/50 px-3.5 py-3 dark:border-amber-500/30 dark:bg-amber-500/10"
       >
         <p class="text-xs text-amber-900 dark:text-amber-200">
           This writes to <strong>{{ store.server?.label }}</strong> at
@@ -132,7 +128,7 @@ watch(name, () => {
           v-model="confirmation"
           type="text"
           :placeholder="name.trim()"
-          class="mt-2 w-full rounded-lg border border-amber-300 bg-white px-3 py-2 font-mono text-sm outline-none focus:border-amber-500 dark:border-amber-500/30 dark:bg-neutral-950"
+          class="glass-inset mt-2 w-full rounded-lg border-amber-400/50 px-3 py-2 font-mono text-sm outline-none focus:border-amber-500 dark:border-amber-500/30"
         />
       </div>
 
@@ -143,7 +139,7 @@ watch(name, () => {
       <div class="mt-5 flex justify-end gap-2">
         <button
           type="button"
-          class="rounded-full border border-neutral-200 bg-white/70 px-5 py-2.5 text-sm font-semibold text-neutral-700 transition hover:bg-white disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
+          class="glass-btn rounded-full px-5 py-2.5 text-sm font-semibold text-neutral-700 transition disabled:opacity-50 dark:text-neutral-200"
           :disabled="store.importing"
           @click="close"
         >
@@ -151,7 +147,7 @@ watch(name, () => {
         </button>
         <button
           type="button"
-          class="rounded-full bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-red-500/40 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+          class="glass-accent rounded-full px-5 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
           :disabled="!canImport || store.importing"
           @click="submit"
         >

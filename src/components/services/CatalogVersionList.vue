@@ -57,7 +57,7 @@ function progressPercent(version: string) {
 
   <div
     v-else-if="error"
-    class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-200"
+    class="rounded-2xl border border-amber-300/60 bg-amber-100/50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-200"
   >
     Couldn't reach {{ sourceLabel }}: {{ error }}
     <button type="button" class="ml-1 font-semibold underline" @click="emit('retry')">Retry</button>
@@ -68,11 +68,7 @@ function progressPercent(version: string) {
   </p>
 
   <div v-else class="flex flex-col gap-2">
-    <div
-      v-for="release in releases"
-      :key="release.version"
-      class="rounded-2xl border border-neutral-200 bg-neutral-50/70 p-3.5 dark:border-neutral-800 dark:bg-neutral-900/60"
-    >
+    <div v-for="release in releases" :key="release.version" class="glass-inset rounded-2xl p-3.5">
       <div class="flex items-center gap-3">
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-2">
@@ -81,13 +77,13 @@ function progressPercent(version: string) {
             </span>
             <span
               v-if="release.latest"
-              class="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold tracking-wide text-red-600 uppercase dark:bg-red-500/15 dark:text-red-400"
+              class="rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] font-bold tracking-wide text-red-600 uppercase dark:bg-red-500/15 dark:text-red-400"
             >
               Latest
             </span>
             <span
               v-else-if="release.lts"
-              class="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold tracking-wide text-emerald-600 uppercase dark:bg-emerald-500/15 dark:text-emerald-400"
+              class="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold tracking-wide text-emerald-600 uppercase dark:bg-emerald-500/15 dark:text-emerald-400"
             >
               LTS {{ release.lts }}
             </span>
@@ -113,7 +109,7 @@ function progressPercent(version: string) {
         <button
           v-if="!release.installed"
           type="button"
-          class="shrink-0 rounded-full bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-red-600/30 transition hover:bg-red-500 disabled:opacity-50"
+          class="glass-accent shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition disabled:opacity-50"
           :disabled="busy"
           @click="emit('install', release.version)"
         >
@@ -121,7 +117,7 @@ function progressPercent(version: string) {
         </button>
         <span
           v-else
-          class="shrink-0 rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-400 dark:border-neutral-700 dark:text-neutral-500"
+          class="glass-inset shrink-0 rounded-full px-4 py-2 text-sm font-semibold text-neutral-400 dark:text-neutral-500"
         >
           Installed
         </span>
@@ -129,10 +125,10 @@ function progressPercent(version: string) {
 
       <div
         v-if="installingVersion === release.version"
-        class="mt-3 h-1.5 overflow-hidden rounded-full bg-neutral-200/70 dark:bg-neutral-800"
+        class="mt-3 h-1.5 overflow-hidden rounded-full bg-neutral-900/10 dark:bg-white/10"
       >
         <div
-          class="h-full rounded-full bg-red-500 transition-all"
+          class="h-full rounded-full bg-linear-to-r from-red-500 to-orange-400 transition-all"
           :class="progressPercent(release.version) === null ? 'w-1/3 animate-pulse' : ''"
           :style="
             progressPercent(release.version) !== null

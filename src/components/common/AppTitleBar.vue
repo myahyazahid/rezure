@@ -19,10 +19,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <header
-    data-tauri-drag-region
-    class="flex h-12 shrink-0 items-center gap-3 border-b border-neutral-200/70 px-4 dark:border-neutral-800"
-  >
+  <header data-tauri-drag-region class="flex h-12 shrink-0 items-center gap-3 px-4">
     <!-- Decorative window dots, part of the app's visual identity. -->
     <div class="flex shrink-0 items-center gap-2">
       <span class="h-3 w-3 rounded-full bg-[#ff5f57]"></span>
@@ -36,7 +33,7 @@ onMounted(async () => {
       <span class="text-xs font-semibold text-red-600 dark:text-red-500">Redscale</span>
       <span
         v-if="version"
-        class="rounded-md bg-neutral-100 px-1.5 py-0.5 font-mono text-[11px] text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400"
+        class="glass-inset rounded-md px-1.5 py-0.5 font-mono text-[11px] text-neutral-500 dark:text-neutral-400"
       >
         v{{ version }}
       </span>
@@ -44,16 +41,12 @@ onMounted(async () => {
 
     <button
       type="button"
-      class="flex shrink-0 items-center gap-1.5 rounded-full border border-neutral-200 py-1 pr-3 pl-1 text-xs font-medium transition hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+      class="glass-btn flex shrink-0 items-center gap-1.5 rounded-full py-1 pr-3 pl-1 text-xs font-medium transition"
       @click="toggle"
     >
       <span
         class="flex h-5 w-5 items-center justify-center rounded-full"
-        :class="
-          theme === 'dark'
-            ? 'bg-neutral-700 text-neutral-200'
-            : 'bg-red-100 text-red-600 dark:bg-red-500/20'
-        "
+        :class="theme === 'dark' ? 'bg-white/10 text-neutral-200' : 'bg-red-500/15 text-red-600'"
       >
         <svg v-if="theme === 'dark'" viewBox="0 0 24 24" fill="currentColor" class="h-3 w-3">
           <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" />
@@ -80,7 +73,7 @@ onMounted(async () => {
       <button
         type="button"
         title="Minimize"
-        class="flex h-7 w-7 items-center justify-center rounded-md text-neutral-500 transition hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
+        class="flex h-7 w-7 items-center justify-center rounded-md text-neutral-500 transition hover:bg-white/60 dark:text-neutral-400 dark:hover:bg-white/10"
         @click="minimize"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3 w-3">
@@ -90,7 +83,7 @@ onMounted(async () => {
       <button
         type="button"
         title="Maximize"
-        class="flex h-7 w-7 items-center justify-center rounded-md text-neutral-500 transition hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800"
+        class="flex h-7 w-7 items-center justify-center rounded-md text-neutral-500 transition hover:bg-white/60 dark:text-neutral-400 dark:hover:bg-white/10"
         @click="toggleMaximize"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3 w-3">

@@ -58,12 +58,10 @@ onUnmounted(() => {
 <template>
   <div
     v-if="store.shareModalFor"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+    class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
     @click.self="store.closeShareModal()"
   >
-    <div
-      class="w-full max-w-lg rounded-2xl border border-neutral-200 bg-white p-6 shadow-2xl dark:border-neutral-700 dark:bg-neutral-900"
-    >
+    <div class="glass-strong w-full max-w-lg rounded-2xl p-6">
       <h2 class="text-lg font-bold text-neutral-900 dark:text-neutral-100">
         Sharing this project
         <span v-if="project" class="font-normal text-neutral-400">· {{ project.name }}</span>
@@ -84,15 +82,13 @@ onUnmounted(() => {
       </div>
 
       <template v-else-if="url">
-        <div
-          class="mt-5 flex items-center gap-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2.5 dark:border-neutral-700 dark:bg-neutral-800/60"
-        >
+        <div class="glass-inset mt-5 flex items-center gap-2 rounded-xl px-3 py-2.5">
           <code class="flex-1 truncate font-mono text-sm text-neutral-800 dark:text-neutral-200">{{
             url
           }}</code>
           <button
             type="button"
-            class="shrink-0 rounded-full border border-neutral-200 px-3 py-1 text-xs font-semibold text-neutral-700 transition hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
+            class="glass-btn shrink-0 rounded-full px-3 py-1 text-xs font-semibold text-neutral-700 transition dark:text-neutral-200"
             @click="copyUrl"
           >
             {{ copied ? 'Copied!' : 'Copy' }}
@@ -110,7 +106,7 @@ onUnmounted(() => {
 
       <p
         v-if="store.shareError"
-        class="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+        class="mt-4 rounded-xl bg-amber-100/50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
       >
         {{ store.shareError }}
       </p>
@@ -119,14 +115,14 @@ onUnmounted(() => {
         <button
           v-if="url"
           type="button"
-          class="rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 transition hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
+          class="glass-btn rounded-full px-4 py-2 text-sm font-semibold text-neutral-700 transition dark:text-neutral-200"
           @click="stop"
         >
           Stop sharing
         </button>
         <button
           type="button"
-          class="rounded-full bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-500"
+          class="glass-accent rounded-full px-4 py-2 text-sm font-semibold transition"
           @click="store.closeShareModal()"
         >
           Close

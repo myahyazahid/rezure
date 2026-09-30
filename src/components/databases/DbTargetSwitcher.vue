@@ -133,7 +133,7 @@ function openAddConnection() {
 const SECTION_CLASS =
   'px-4 pt-3 pb-1 text-[11px] font-semibold tracking-wide text-neutral-400 uppercase'
 const ROW_CLASS =
-  'flex w-full items-start gap-3 px-4 py-2.5 text-left transition disabled:cursor-not-allowed hover:bg-neutral-50 dark:hover:bg-neutral-800/60'
+  'flex w-full items-start gap-3 px-4 py-2.5 text-left transition disabled:cursor-not-allowed hover:bg-white/50 dark:hover:bg-white/5'
 
 onMounted(() => {
   profiles.fetchAll()
@@ -145,7 +145,7 @@ onMounted(() => {
   <div class="relative">
     <button
       type="button"
-      class="flex h-9 items-center gap-2 rounded-full border border-neutral-200 bg-white px-3.5 text-sm font-semibold text-neutral-700 transition hover:border-neutral-300 hover:text-neutral-900 disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-200 dark:hover:text-neutral-50"
+      class="glass-btn flex h-9 items-center gap-2 rounded-full px-3.5 text-sm font-semibold text-neutral-700 transition hover:text-neutral-900 disabled:opacity-50 dark:text-neutral-200 dark:hover:text-neutral-50"
       :disabled="profiles.switchingId !== null || connections.switchingId !== null"
       @click="open = !open"
     >
@@ -197,7 +197,7 @@ onMounted(() => {
 
     <div
       v-if="open"
-      class="absolute right-0 z-20 mt-2 max-h-[70vh] w-80 overflow-y-auto rounded-2xl border border-neutral-200 bg-white shadow-xl dark:border-neutral-700 dark:bg-neutral-900"
+      class="glass-strong absolute right-0 z-20 mt-2 max-h-[70vh] w-80 overflow-y-auto rounded-2xl"
     >
       <p :class="SECTION_CLASS">Data directory</p>
 
@@ -251,7 +251,7 @@ onMounted(() => {
 
       <button
         type="button"
-        class="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm font-semibold text-red-600 transition hover:bg-neutral-50 dark:text-red-400 dark:hover:bg-neutral-800/60"
+        class="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm font-semibold text-red-600 transition hover:bg-white/50 dark:text-red-400 dark:hover:bg-white/5"
         @click="openAddProfile"
       >
         <svg
@@ -266,7 +266,7 @@ onMounted(() => {
         Add data directory
       </button>
 
-      <div class="border-t border-neutral-200 dark:border-neutral-700">
+      <div class="glass-divider border-t">
         <p :class="SECTION_CLASS">Connections</p>
 
         <p v-if="orderedConnections.length === 0" class="px-4 pb-2 text-xs text-neutral-500">
@@ -303,7 +303,7 @@ onMounted(() => {
               <span class="mt-0.5 flex flex-wrap gap-1.5">
                 <span
                   v-if="connection.readOnly"
-                  class="rounded-full bg-neutral-100 px-1.5 py-0.5 text-[10px] font-semibold text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400"
+                  class="glass-inset rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-neutral-500 dark:text-neutral-400"
                 >
                   Read-only
                 </span>
@@ -311,7 +311,7 @@ onMounted(() => {
                      it asks for one first rather than failing on the query. -->
                 <span
                   v-if="!connection.hasPassword"
-                  class="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+                  class="rounded-full bg-amber-100/50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
                 >
                   Needs password
                 </span>
@@ -336,7 +336,7 @@ onMounted(() => {
                hover-only and out of the row's own click target. -->
           <button
             type="button"
-            class="absolute top-3 right-3 hidden rounded-lg p-1.5 text-neutral-400 transition group-hover:block hover:bg-neutral-100 hover:text-red-600 dark:hover:bg-neutral-800"
+            class="absolute top-3 right-3 hidden rounded-lg p-1.5 text-neutral-400 transition group-hover:block hover:bg-white/60 hover:text-red-600 dark:hover:bg-white/10"
             :title="`Remove ${connection.name}`"
             @click.stop="removeConnection(connection)"
           >
@@ -354,7 +354,7 @@ onMounted(() => {
 
         <button
           type="button"
-          class="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-semibold text-red-600 transition hover:bg-neutral-50 dark:text-red-400 dark:hover:bg-neutral-800/60"
+          class="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-semibold text-red-600 transition hover:bg-white/50 dark:text-red-400 dark:hover:bg-white/5"
           @click="openAddConnection"
         >
           <svg

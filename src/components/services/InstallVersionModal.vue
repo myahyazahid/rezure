@@ -91,19 +91,17 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 <template>
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+    class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
     @click.self="close"
   >
-    <div
-      class="flex max-h-[85vh] w-full max-w-xl flex-col rounded-3xl bg-white shadow-2xl dark:bg-neutral-900"
-    >
+    <div class="glass-strong flex max-h-[85vh] w-full max-w-xl flex-col rounded-3xl">
       <div class="flex items-start justify-between gap-4 p-6 pb-4">
         <div class="min-w-0">
           <div class="flex items-center gap-2">
             <button
               v-if="selected"
               type="button"
-              class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-neutral-100 disabled:opacity-40 dark:hover:bg-neutral-800"
+              class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-white/60 disabled:opacity-40 dark:hover:bg-white/10"
               :disabled="busy"
               title="Choose a different runtime"
               @click="back"
@@ -136,7 +134,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         </div>
         <button
           type="button"
-          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-neutral-200 text-neutral-500 transition hover:bg-neutral-100 disabled:opacity-40 dark:border-neutral-700 dark:hover:bg-neutral-800"
+          class="glass-btn flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-neutral-500 transition disabled:opacity-40"
           :disabled="busy"
           title="Close"
           @click="close"
@@ -160,12 +158,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
             v-for="runtime in RUNTIMES"
             :key="runtime.id"
             type="button"
-            class="flex flex-col items-center gap-2 rounded-2xl border border-neutral-200 bg-neutral-50/70 p-4 text-center transition hover:border-red-300 hover:bg-red-50/50 dark:border-neutral-800 dark:bg-neutral-900/60 dark:hover:border-red-500/40 dark:hover:bg-red-500/10"
+            class="glass-inset flex flex-col items-center gap-2 rounded-2xl p-4 text-center transition hover:border-red-500/30 hover:bg-red-500/10 dark:hover:border-red-500/40 dark:hover:bg-red-500/10"
             @click="selected = runtime.id"
           >
-            <span
-              class="flex h-10 w-10 items-center justify-center rounded-full bg-white dark:bg-neutral-800"
-            >
+            <span class="glass-inset flex h-10 w-10 items-center justify-center rounded-full">
               <TechIcon :id="runtime.icon" :size="22" />
             </span>
             <span class="text-sm font-semibold text-neutral-800 dark:text-neutral-200">
@@ -187,7 +183,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
             @retry="phpStore.fetchCatalog(true)"
           />
 
-          <div class="mt-5 border-t border-neutral-200 pt-4 dark:border-neutral-800">
+          <div class="glass-divider mt-5 border-t pt-4">
             <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
               Already downloaded one?
             </h3>
@@ -221,7 +217,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
               </button>
               <button
                 type="button"
-                class="rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 transition hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                class="glass-btn rounded-full px-4 py-2 text-sm font-semibold text-neutral-700 transition dark:text-neutral-200"
                 @click="phpStore.openDropInDir"
               >
                 Open folder
@@ -246,10 +242,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
           <p v-if="binariesStore.loading" class="py-6 text-center text-sm text-neutral-500">
             Checking what's installed…
           </p>
-          <div
-            v-else-if="pinnedPackage"
-            class="rounded-2xl border border-neutral-200 bg-neutral-50/70 p-3.5 dark:border-neutral-800 dark:bg-neutral-900/60"
-          >
+          <div v-else-if="pinnedPackage" class="glass-inset rounded-2xl p-3.5">
             <div class="flex items-center gap-3">
               <div class="min-w-0 flex-1">
                 <span class="font-mono font-semibold text-neutral-900 dark:text-neutral-100">
@@ -262,7 +255,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
               <button
                 v-if="!pinnedPackage.installed"
                 type="button"
-                class="shrink-0 rounded-full bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-red-600/30 transition hover:bg-red-500 disabled:opacity-50"
+                class="glass-accent shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition disabled:opacity-50"
                 :disabled="busy"
                 @click="binariesStore.install(selected)"
               >
@@ -270,7 +263,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
               </button>
               <span
                 v-else
-                class="shrink-0 rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-400 dark:border-neutral-700 dark:text-neutral-500"
+                class="glass-inset shrink-0 rounded-full px-4 py-2 text-sm font-semibold text-neutral-400 dark:text-neutral-500"
               >
                 Installed
               </span>
@@ -325,15 +318,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         </template>
       </div>
 
-      <div
-        class="flex items-center justify-between gap-3 border-t border-neutral-200 p-6 pt-4 dark:border-neutral-800"
-      >
+      <div class="glass-divider flex items-center justify-between gap-3 border-t p-6 pt-4">
         <span class="text-xs text-neutral-400">
           Installed versions show up in the Switch dropdown right away.
         </span>
         <button
           type="button"
-          class="shrink-0 rounded-full border border-neutral-200 px-5 py-2.5 text-sm font-semibold text-neutral-700 transition hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
+          class="glass-btn shrink-0 rounded-full px-5 py-2.5 text-sm font-semibold text-neutral-700 transition disabled:opacity-50 dark:text-neutral-200"
           :disabled="busy"
           @click="close"
         >

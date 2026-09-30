@@ -50,7 +50,7 @@ const showBar = computed(() => props.percent !== null)
         aria-live="polite"
       >
         <div
-          class="pointer-events-auto flex flex-col items-center gap-3 rounded-2xl border border-neutral-200 bg-white/95 px-7 py-5 shadow-2xl shadow-neutral-900/15 backdrop-blur-sm dark:border-neutral-700 dark:bg-neutral-900/95 dark:shadow-black/50"
+          class="glass-strong pointer-events-auto flex flex-col items-center gap-3 rounded-2xl px-7 py-5"
         >
           <LeafLoader :size="56" />
           <div class="text-center">
@@ -65,10 +65,10 @@ const showBar = computed(() => props.percent !== null)
                above, which is honest about not knowing how much is left. -->
           <div v-if="showBar" class="w-56">
             <div
-              class="h-1.5 w-full overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-700"
+              class="h-1.5 w-full overflow-hidden rounded-full bg-neutral-900/10 dark:bg-white/10"
             >
               <div
-                class="h-full rounded-full bg-red-500 transition-[width] duration-300 ease-out"
+                class="h-full rounded-full bg-linear-to-r from-red-500 to-orange-400 transition-[width] duration-300 ease-out"
                 :style="{ width: `${percent}%` }"
               />
             </div>
@@ -80,7 +80,7 @@ const showBar = computed(() => props.percent !== null)
           <button
             v-if="onCancel"
             type="button"
-            class="mt-1 rounded-full border border-neutral-200 px-4 py-1.5 text-xs font-semibold text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-900 dark:border-neutral-700 dark:text-neutral-300 dark:hover:text-neutral-50"
+            class="glass-btn mt-1 rounded-full px-4 py-1.5 text-xs font-semibold text-neutral-600 transition hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-neutral-50"
             @click="onCancel"
           >
             Cancel

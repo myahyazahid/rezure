@@ -103,7 +103,7 @@ async function toggle(ext: BundledExtension) {
       <div v-if="store.versions.length > 1" class="relative shrink-0">
         <button
           type="button"
-          class="flex items-center gap-1.5 rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm font-semibold text-neutral-700 transition hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
+          class="glass-btn flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold text-neutral-700 transition dark:text-neutral-200"
           @click="versionMenuOpen = !versionMenuOpen"
         >
           PHP {{ selectedVersion }}
@@ -121,14 +121,12 @@ async function toggle(ext: BundledExtension) {
 
         <template v-if="versionMenuOpen">
           <div class="fixed inset-0 z-10" @click="versionMenuOpen = false"></div>
-          <div
-            class="absolute top-full right-0 z-20 mt-2 w-40 rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
-          >
+          <div class="glass-strong absolute top-full right-0 z-20 mt-2 w-40 rounded-xl p-1">
             <button
               v-for="v in store.versions"
               :key="v.id"
               type="button"
-              class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
+              class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm transition hover:bg-white/50 dark:hover:bg-white/5"
               @click="pickVersion(v.version)"
             >
               <span
@@ -148,7 +146,7 @@ async function toggle(ext: BundledExtension) {
 
     <p
       v-if="store.versions.length === 0"
-      class="mt-6 rounded-2xl border border-neutral-200/80 bg-neutral-100/60 p-6 text-center text-sm text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900/60"
+      class="glass mt-6 rounded-2xl p-6 text-center text-sm text-neutral-500"
     >
       No PHP version installed yet — install one from
       <RouterLink to="/switch" class="font-semibold text-red-600 hover:underline"
@@ -160,7 +158,7 @@ async function toggle(ext: BundledExtension) {
     <template v-else>
       <p
         v-if="runningThisVersion"
-        class="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+        class="mt-4 rounded-xl bg-amber-100/50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
       >
         PHP {{ selectedVersion }} is running right now — restart it (Dashboard → PHP) for a toggle
         here to reach requests it's already serving.
@@ -174,7 +172,7 @@ async function toggle(ext: BundledExtension) {
             {{ category }}
           </p>
           <div
-            class="flex flex-col divide-y divide-neutral-200/80 rounded-2xl border border-neutral-200/80 bg-neutral-100/60 dark:divide-neutral-800 dark:border-neutral-800 dark:bg-neutral-900/60"
+            class="glass flex flex-col divide-y divide-neutral-900/8 rounded-2xl dark:divide-white/8"
           >
             <div
               v-for="ext in exts"
@@ -190,14 +188,14 @@ async function toggle(ext: BundledExtension) {
                   <code class="text-[11px] text-neutral-400">{{ ext.id }}</code>
                   <span
                     v-if="ext.debugOnly"
-                    class="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
+                    class="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
                     title="Environment-dependent or debug-only — not an ordinary extension."
                   >
                     special
                   </span>
                   <span
                     v-if="!ext.available"
-                    class="rounded-full bg-neutral-200 px-1.5 py-0.5 text-[10px] font-semibold text-neutral-500 dark:bg-neutral-700 dark:text-neutral-400"
+                    class="glass-inset rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-neutral-500 dark:text-neutral-400"
                   >
                     not in this build
                   </span>
@@ -211,7 +209,7 @@ async function toggle(ext: BundledExtension) {
                 :aria-checked="ext.enabled"
                 :aria-label="ext.label"
                 class="relative h-5 w-9 shrink-0 rounded-full transition disabled:opacity-40"
-                :class="ext.enabled ? 'bg-red-600' : 'bg-neutral-200 dark:bg-neutral-700'"
+                :class="ext.enabled ? 'bg-red-600' : 'bg-neutral-900/15 dark:bg-white/15'"
                 :disabled="!ext.available || store.togglingExtension !== null"
                 @click="toggle(ext)"
               >

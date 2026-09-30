@@ -120,12 +120,10 @@ async function install(name: string) {
 <template>
   <div
     v-if="store.doctorFor"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+    class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
     @click.self="store.closeDoctor()"
   >
-    <div
-      class="w-full max-w-lg rounded-2xl border border-neutral-200 bg-white p-6 shadow-2xl dark:border-neutral-700 dark:bg-neutral-900"
-    >
+    <div class="glass-strong w-full max-w-lg rounded-2xl p-6">
       <h2 class="text-lg font-bold text-neutral-900 dark:text-neutral-100">
         Requirements check
         <span v-if="project" class="font-normal text-neutral-400">· {{ project.name }}</span>
@@ -140,7 +138,7 @@ async function install(name: string) {
 
       <p
         v-else-if="store.doctorError"
-        class="mt-5 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+        class="mt-5 rounded-xl bg-amber-100/50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
       >
         {{ store.doctorError }}
       </p>
@@ -161,8 +159,8 @@ async function install(name: string) {
             class="mt-5 rounded-xl px-3 py-2 text-sm"
             :class="
               missingCount > 0
-                ? 'bg-amber-50 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200'
-                : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300'
+                ? 'bg-amber-100/50 text-amber-900 dark:bg-amber-500/10 dark:text-amber-200'
+                : 'bg-emerald-100/50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300'
             "
           >
             <template v-if="missingCount > 0">
@@ -185,10 +183,10 @@ async function install(name: string) {
                 class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold"
                 :class="
                   check.loaded
-                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400'
+                    ? 'bg-emerald-500/15 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400'
                     : check.devOnly
-                      ? 'bg-neutral-200 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400'
-                      : 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300'
+                      ? 'glass-inset text-neutral-500 dark:text-neutral-400'
+                      : 'bg-amber-500/15 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300'
                 "
               >
                 {{ check.loaded ? '✓' : '!' }}
@@ -201,7 +199,7 @@ async function install(name: string) {
               <button
                 v-if="!check.loaded && installable(check.name)"
                 type="button"
-                class="ml-auto shrink-0 rounded-full border border-neutral-200 px-3 py-1 text-xs font-semibold text-neutral-700 transition hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                class="glass-btn ml-auto shrink-0 rounded-full px-3 py-1 text-xs font-semibold text-neutral-700 transition disabled:opacity-50 dark:text-neutral-200"
                 :disabled="phpStore.installingExtension !== null"
                 @click="install(check.name)"
               >
@@ -224,20 +222,17 @@ async function install(name: string) {
 
       <!-- Mail: only when the .env sends to an SMTP server meant to be on
            this machine. `log` or a real provider is a choice, not a gap. -->
-      <div
-        v-if="mail && !store.doctorError"
-        class="mt-5 border-t border-neutral-200 pt-4 dark:border-neutral-700"
-      >
+      <div v-if="mail && !store.doctorError" class="glass-divider mt-5 border-t pt-4">
         <template v-if="mailConfigured && mail.mailpitRunning">
           <p class="flex items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300">
             <span
-              class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[11px] font-bold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400"
+              class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-[11px] font-bold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400"
               >✓</span
             >
             Mail this project sends is caught by Mailpit.
             <button
               type="button"
-              class="ml-auto shrink-0 rounded-full border border-neutral-200 px-3 py-1 text-xs font-semibold text-neutral-700 transition hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
+              class="glass-btn ml-auto shrink-0 rounded-full px-3 py-1 text-xs font-semibold text-neutral-700 transition dark:text-neutral-200"
               @click="openInbox"
             >
               Open inbox
@@ -247,7 +242,7 @@ async function install(name: string) {
 
         <div
           v-else
-          class="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+          class="rounded-xl bg-amber-100/50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
         >
           <p v-if="!mail.hostReachable">
             <code class="font-mono">MAIL_HOST={{ mail.host }}</code> is Laravel Sail's Docker
@@ -269,7 +264,7 @@ async function install(name: string) {
           <button
             v-if="!mail.mailpitRunning"
             type="button"
-            class="mt-2 rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-semibold text-amber-900 transition hover:bg-amber-100 disabled:opacity-50 dark:border-amber-700 dark:bg-transparent dark:text-amber-200 dark:hover:bg-amber-500/10"
+            class="glass-btn mt-2 rounded-full px-3 py-1 text-xs font-semibold text-amber-900 transition disabled:opacity-50 dark:text-amber-200"
             :disabled="mailBusy"
             @click="startMailpit"
           >
@@ -284,10 +279,7 @@ async function install(name: string) {
 
       <!-- HTTPS: independent of composer.json, so shown for every project
            once the PHP question itself could be asked. -->
-      <div
-        v-if="!store.doctorError"
-        class="mt-5 border-t border-neutral-200 pt-4 dark:border-neutral-700"
-      >
+      <div v-if="!store.doctorError" class="glass-divider mt-5 border-t pt-4">
         <p v-if="phpStore.checkingTls" class="text-sm text-neutral-500">Testing HTTPS…</p>
 
         <template v-else-if="tls">
@@ -296,7 +288,7 @@ async function install(name: string) {
             class="flex items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300"
           >
             <span
-              class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[11px] font-bold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400"
+              class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-[11px] font-bold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400"
               >✓</span
             >
             HTTPS calls from PHP verify certificates.
@@ -304,7 +296,7 @@ async function install(name: string) {
 
           <div
             v-else-if="tlsNeedsBundle"
-            class="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+            class="rounded-xl bg-amber-100/50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
           >
             <p>
               <template v-if="tls.bundleInstalled">
@@ -319,7 +311,7 @@ async function install(name: string) {
             <p v-if="tls.detail" class="mt-1 font-mono text-xs opacity-80">{{ tls.detail }}</p>
             <button
               type="button"
-              class="mt-2 rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-semibold text-amber-900 transition hover:bg-amber-100 disabled:opacity-50 dark:border-amber-700 dark:bg-transparent dark:text-amber-200 dark:hover:bg-amber-500/10"
+              class="glass-btn mt-2 rounded-full px-3 py-1 text-xs font-semibold text-amber-900 transition disabled:opacity-50 dark:text-amber-200"
               :disabled="phpStore.updatingCaBundle"
               @click="fixBundle"
             >
@@ -343,7 +335,7 @@ async function install(name: string) {
 
         <p
           v-if="bundleFix"
-          class="mt-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300"
+          class="mt-3 rounded-xl bg-emerald-100/50 px-3 py-2 text-xs text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300"
         >
           <template v-if="bundleFix.created">
             CA bundle installed. Restart the PHP service for running sites to pick it up — the copy
@@ -355,7 +347,7 @@ async function install(name: string) {
 
       <p
         v-if="justInstalled.length"
-        class="mt-4 rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300"
+        class="mt-4 rounded-xl bg-emerald-100/50 px-3 py-2 text-xs text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300"
       >
         Installed <strong>{{ justInstalled.join(', ') }}</strong
         >. Restart the PHP service for running sites to pick it up — the copy already serving
@@ -364,7 +356,7 @@ async function install(name: string) {
 
       <p
         v-if="phpStore.error"
-        class="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+        class="mt-4 rounded-xl bg-amber-100/50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
       >
         {{ phpStore.error }}
       </p>
@@ -373,14 +365,14 @@ async function install(name: string) {
         <button
           v-if="missingCount > 0"
           type="button"
-          class="rounded-full border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 transition hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
+          class="glass-btn rounded-full px-4 py-2 text-sm font-semibold text-neutral-700 transition dark:text-neutral-200"
           @click="phpStore.openConfigDir()"
         >
           Open settings folder
         </button>
         <button
           type="button"
-          class="rounded-full bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-500"
+          class="glass-accent rounded-full px-4 py-2 text-sm font-semibold transition"
           @click="store.closeDoctor()"
         >
           Close

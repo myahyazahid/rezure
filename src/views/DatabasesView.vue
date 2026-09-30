@@ -73,7 +73,7 @@ async function pickSqlFile() {
 }
 
 const ACTION_BUTTON_CLASS =
-  'flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-neutral-200 bg-white px-3.5 text-sm font-semibold text-neutral-700 transition select-none hover:border-neutral-300 hover:text-neutral-900 disabled:opacity-40 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-200 dark:hover:text-neutral-50'
+  'glass-btn flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-sm font-semibold text-neutral-700 transition select-none hover:text-neutral-900 disabled:opacity-40 dark:text-neutral-200 dark:hover:text-neutral-50'
 
 // Kept-alive view: this runs on the first mount and on every return, and the
 // store keeps the existing rows on screen while it refetches.
@@ -140,7 +140,7 @@ const exporting = computed(
              otherwise no way to re-read it without navigating away and back. -->
         <button
           type="button"
-          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-neutral-200 bg-white/70 text-neutral-600 transition hover:bg-white hover:text-neutral-900 disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-neutral-50"
+          class="glass-btn flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-neutral-600 transition hover:text-neutral-900 disabled:opacity-50 dark:text-neutral-300 dark:hover:text-neutral-50"
           :disabled="store.refreshing"
           title="Refresh the database list"
           aria-label="Refresh the database list"
@@ -164,7 +164,7 @@ const exporting = computed(
 
         <button
           type="button"
-          class="flex shrink-0 items-center gap-2 rounded-full bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-red-500/40 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+          class="glass-accent flex shrink-0 items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
           :disabled="store.serverDown || readOnly"
           :title="readOnly ? `${store.server?.label} is read-only` : ''"
           @click="showNewDatabaseModal = true"
@@ -207,8 +207,8 @@ const exporting = computed(
       class="mt-4 flex shrink-0 flex-wrap items-center gap-3 rounded-2xl border px-4 py-3"
       :class="
         remote
-          ? 'border-amber-300/70 bg-amber-50/70 dark:border-amber-500/25 dark:bg-amber-500/10'
-          : 'border-red-200/70 bg-red-50/70 dark:border-red-500/25 dark:bg-red-500/10'
+          ? 'border-amber-400/50 bg-amber-100/50 dark:border-amber-500/25 dark:bg-amber-500/10'
+          : 'border-red-300/60 bg-red-100/50 dark:border-red-500/25 dark:bg-red-500/10'
       "
     >
       <span
@@ -231,12 +231,8 @@ const exporting = computed(
       </span>
       <button
         type="button"
-        class="flex shrink-0 items-center gap-2 rounded-full border bg-white/80 px-3.5 py-2 text-sm font-semibold transition hover:bg-white dark:bg-neutral-900/60"
-        :class="
-          remote
-            ? 'border-amber-300 text-amber-800 dark:border-amber-500/30 dark:text-amber-200'
-            : 'border-red-200 text-red-700 dark:border-red-500/30 dark:text-red-300'
-        "
+        class="glass-btn flex shrink-0 items-center gap-2 rounded-full px-3.5 py-2 text-sm font-semibold transition"
+        :class="remote ? 'text-amber-800 dark:text-amber-200' : 'text-red-700 dark:text-red-300'"
         :title="store.server.dsn"
         @click="copyDsn"
       >
@@ -252,7 +248,7 @@ const exporting = computed(
          explanation and a way forward rather than a raw client message. -->
     <div
       v-if="store.serverDown"
-      class="mt-4 shrink-0 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-200"
+      class="mt-4 shrink-0 rounded-2xl border border-amber-300/60 bg-amber-100/50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-200"
     >
       <template v-if="remote">
         Couldn't reach {{ store.server?.label }} at
@@ -311,7 +307,7 @@ const exporting = computed(
       <button
         v-if="!readOnly"
         type="button"
-        class="flex shrink-0 items-center gap-2 rounded-full border border-neutral-200 bg-white/70 px-4 py-2.5 text-sm font-semibold text-neutral-700 transition hover:bg-white dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
+        class="glass-btn flex shrink-0 items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold text-neutral-700 transition dark:text-neutral-200"
         @click="pickSqlFile"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
@@ -365,11 +361,11 @@ const exporting = computed(
 
     <div
       v-else-if="filteredDatabases.length > 0"
-      class="mt-5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900/60"
+      class="glass mt-5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl"
     >
       <!-- Column headings stay put; only the rows below them move. -->
       <div
-        class="flex shrink-0 items-center gap-3 border-b border-neutral-200 bg-neutral-50/80 px-5 py-3 text-[11px] font-semibold tracking-wide text-neutral-400 uppercase dark:border-neutral-800 dark:bg-neutral-900/40"
+        class="glass-divider flex shrink-0 items-center gap-3 border-b bg-white/50 px-5 py-3 text-[11px] font-semibold tracking-wide text-neutral-400 uppercase dark:bg-white/4"
       >
         <span class="flex-1">Database</span>
         <span class="w-20 shrink-0 text-right">Tables</span>
@@ -382,7 +378,7 @@ const exporting = computed(
         <div
           v-for="db in filteredDatabases"
           :key="db.name"
-          class="flex items-center gap-3 border-b border-neutral-200/70 px-5 py-3.5 transition last:border-b-0 hover:bg-neutral-50 dark:border-neutral-800/70 dark:hover:bg-neutral-800/30"
+          class="glass-divider flex items-center gap-3 border-b px-5 py-3.5 transition last:border-b-0 hover:bg-white/50 dark:hover:bg-white/5"
         >
           <div class="min-w-0 flex-1">
             <p class="truncate font-mono font-semibold text-neutral-900 dark:text-neutral-100">

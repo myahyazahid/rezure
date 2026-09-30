@@ -64,6 +64,7 @@ See [`docs/setup-dev.md`](docs/setup-dev.md) for a more detailed walkthrough, in
 - Shared logic goes in `composables/`, not duplicated across components
 - Type everything — avoid `any` in TypeScript unless justified with a comment
 - Keep components focused; if a component exceeds ~200 lines, consider splitting it
+- Surfaces use the glass role classes from `src/assets/main.css` (`glass`, `glass-inset`, `glass-strong`, `glass-btn`, `glass-accent`, …) instead of hand-picked `bg-*`/`border-*`/`dark:` pairs — the header comment there lists each role and when a surface may blur what is behind it
 
 ### General
 

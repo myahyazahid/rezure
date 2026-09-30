@@ -12,9 +12,7 @@ const donateStore = useDonateStore()
       built with Tauri + Rust + Vue 3.
     </p>
 
-    <div
-      class="mt-6 rounded-2xl border border-neutral-200 bg-white p-5 text-sm text-neutral-700 dark:border-neutral-800 dark:bg-neutral-900/60 dark:text-neutral-300"
-    >
+    <div class="glass mt-6 rounded-2xl p-5 text-sm text-neutral-700 dark:text-neutral-300">
       <!-- TODO: replace with the project's real story — this is a placeholder
            paragraph, not maintainer-authored content. -->
       <p>
@@ -28,7 +26,7 @@ const donateStore = useDonateStore()
          this button to the real repo URL once one exists. -->
     <button
       type="button"
-      class="mt-4 rounded-full bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-500"
+      class="glass-accent mt-4 rounded-full px-4 py-2 text-sm font-semibold transition"
       @click="donateStore.openLink('REPLACE_WITH_REPO_URL')"
     >
       View on GitHub

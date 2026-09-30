@@ -178,12 +178,10 @@ function requestForceStop() {
 </script>
 
 <template>
-  <div
-    class="rounded-2xl border border-neutral-200/80 bg-neutral-100/60 transition hover:border-neutral-300 dark:border-neutral-800 dark:bg-neutral-900/60"
-  >
+  <div class="glass glass-hover rounded-2xl transition">
     <div class="flex items-center gap-3 p-3.5">
       <div
-        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white dark:bg-neutral-800"
+        class="glass-inset flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
         :class="isRunning ? '' : 'opacity-50 grayscale'"
       >
         <TechIcon :id="service.id" :size="20" />
@@ -199,7 +197,11 @@ function requestForceStop() {
         <div class="mt-0.5 flex items-center gap-1.5 text-sm">
           <span
             class="h-1.5 w-1.5 rounded-full"
-            :class="isRunning ? 'bg-emerald-500' : 'bg-neutral-400 dark:bg-neutral-600'"
+            :class="
+              isRunning
+                ? 'bg-emerald-500 shadow-[0_0_6px_1px_rgb(16_185_129/0.6)]'
+                : 'bg-neutral-400 dark:bg-neutral-600'
+            "
           ></span>
           <span
             :class="
@@ -244,7 +246,7 @@ function requestForceStop() {
         v-if="service.webUrl && isRunning"
         type="button"
         :title="`Open ${service.webUrl}`"
-        class="flex shrink-0 items-center gap-1.5 rounded-lg border border-neutral-200 bg-white/70 px-3 py-1.5 text-sm font-semibold text-neutral-700 transition hover:bg-white dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
+        class="glass-btn flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold text-neutral-700 transition dark:text-neutral-200"
         @click="onOpenUi"
       >
         <svg
@@ -267,7 +269,7 @@ function requestForceStop() {
       <button
         v-if="needsInstall"
         type="button"
-        class="flex shrink-0 items-center gap-1.5 rounded-lg bg-red-600 px-3.5 py-1.5 text-sm font-semibold text-white shadow-sm shadow-red-600/30 transition hover:bg-red-500 disabled:opacity-60"
+        class="glass-accent flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-semibold transition disabled:opacity-60"
         :disabled="installing"
         @click="onInstall"
       >
@@ -294,8 +296,8 @@ function requestForceStop() {
         class="flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-semibold transition disabled:opacity-50"
         :class="
           isRunning
-            ? 'bg-red-100 text-red-600 hover:bg-red-200 dark:bg-red-500/15 dark:text-red-400 dark:hover:bg-red-500/25'
-            : 'bg-red-600 text-white shadow-sm shadow-red-600/30 hover:bg-red-500'
+            ? 'border border-red-500/25 bg-red-500/10 text-red-600 hover:bg-red-500/20 dark:border-red-400/25 dark:bg-red-500/15 dark:text-red-400 dark:hover:bg-red-500/25'
+            : 'glass-accent'
         "
         :disabled="isPending"
         @click="onPrimaryAction"
@@ -318,7 +320,7 @@ function requestForceStop() {
       <button
         type="button"
         title="Restart"
-        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-neutral-200 bg-white/60 text-neutral-500 transition hover:bg-white disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400 dark:hover:bg-neutral-800"
+        class="glass-btn flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-neutral-500 transition disabled:opacity-50 dark:text-neutral-400"
         :disabled="isPending || needsInstall"
         @click="onRestart"
       >
@@ -343,7 +345,7 @@ function requestForceStop() {
         <button
           type="button"
           title="More actions"
-          class="flex h-8 w-8 items-center justify-center rounded-full border border-neutral-200 bg-white/60 text-neutral-500 transition hover:bg-white dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400 dark:hover:bg-neutral-800"
+          class="glass-btn flex h-8 w-8 items-center justify-center rounded-full text-neutral-500 transition dark:text-neutral-400"
           @click="menuOpen = !menuOpen"
         >
           <svg viewBox="0 0 24 24" fill="currentColor" class="h-4 w-4">
@@ -357,11 +359,11 @@ function requestForceStop() {
 
         <div
           v-if="menuOpen"
-          class="absolute right-0 z-20 mt-2 w-56 overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-xl dark:border-neutral-700 dark:bg-neutral-900"
+          class="glass-strong absolute right-0 z-20 mt-2 w-56 overflow-hidden rounded-xl"
         >
           <button
             type="button"
-            class="flex w-full items-start gap-2.5 px-3.5 py-2.5 text-left transition hover:bg-neutral-50 disabled:opacity-50 dark:hover:bg-neutral-800/60"
+            class="flex w-full items-start gap-2.5 px-3.5 py-2.5 text-left transition hover:bg-white/50 disabled:opacity-50 dark:hover:bg-white/5"
             :disabled="isPending"
             @click="requestForceStop"
           >
@@ -393,7 +395,7 @@ function requestForceStop() {
       <button
         type="button"
         title="Toggle logs"
-        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-neutral-200 bg-white/60 text-neutral-500 transition hover:bg-white dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400 dark:hover:bg-neutral-800"
+        class="glass-btn flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-neutral-500 transition dark:text-neutral-400"
         @click="toggleExpanded"
       >
         <svg
@@ -416,8 +418,8 @@ function requestForceStop() {
       class="mx-3.5 mb-3.5 rounded-xl border p-3.5"
       :class="
         blocker.kind === 'system'
-          ? 'border-neutral-200 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800/40'
-          : 'border-amber-200 bg-amber-50 dark:border-amber-500/25 dark:bg-amber-500/10'
+          ? 'glass-inset'
+          : 'border-amber-300/60 bg-amber-100/50 dark:border-amber-500/25 dark:bg-amber-500/10'
       "
     >
       <p class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
@@ -443,7 +445,7 @@ function requestForceStop() {
       <div v-else class="mt-3 flex flex-wrap items-center gap-2">
         <button
           type="button"
-          class="rounded-full bg-red-600 px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-red-500 disabled:opacity-50"
+          class="glass-accent rounded-full px-4 py-1.5 text-sm font-semibold transition disabled:opacity-50"
           :disabled="freeing || isPending"
           @click="freePortAndStart"
         >
@@ -469,7 +471,7 @@ function requestForceStop() {
          button away. -->
     <div
       v-if="confirmingForceStop"
-      class="mx-3.5 mb-3.5 rounded-xl border border-amber-200 bg-amber-50 p-3.5 dark:border-amber-500/25 dark:bg-amber-500/10"
+      class="mx-3.5 mb-3.5 rounded-xl border border-amber-300/60 bg-amber-100/50 p-3.5 dark:border-amber-500/25 dark:bg-amber-500/10"
     >
       <p class="text-sm font-semibold text-amber-900 dark:text-amber-200">
         Force stop {{ service.name }}?
@@ -481,7 +483,7 @@ function requestForceStop() {
       <div class="mt-3 flex gap-2">
         <button
           type="button"
-          class="rounded-full bg-red-600 px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-red-500 disabled:opacity-50"
+          class="glass-accent rounded-full px-4 py-1.5 text-sm font-semibold transition disabled:opacity-50"
           :disabled="isPending"
           @click="onForceStop"
         >

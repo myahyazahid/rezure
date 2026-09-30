@@ -28,12 +28,10 @@ function choose(version: string | null) {
 <template>
   <div
     v-if="store.phpVersionModalFor"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+    class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
     @click.self="store.closePhpVersionModal()"
   >
-    <div
-      class="w-full max-w-lg rounded-2xl border border-neutral-200 bg-white p-6 shadow-2xl dark:border-neutral-700 dark:bg-neutral-900"
-    >
+    <div class="glass-strong w-full max-w-lg rounded-2xl p-6">
       <h2 class="text-lg font-bold text-neutral-900 dark:text-neutral-100">
         PHP version
         <span v-if="project" class="font-normal text-neutral-400">· {{ project.name }}</span>
@@ -50,11 +48,11 @@ function choose(version: string | null) {
       <div class="mt-5 space-y-1.5">
         <button
           type="button"
-          class="flex w-full items-center justify-between rounded-xl border px-3.5 py-2.5 text-left text-sm transition"
+          class="flex w-full items-center justify-between rounded-xl px-3.5 py-2.5 text-left text-sm transition"
           :class="
             !project?.phpVersion
-              ? 'border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-500/10'
-              : 'border-neutral-200 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800/60'
+              ? 'glass-selected'
+              : 'glass-inset hover:bg-white/70 dark:hover:bg-white/8'
           "
           :disabled="store.settingPhpVersion"
           @click="choose(null)"
@@ -74,11 +72,11 @@ function choose(version: string | null) {
           v-for="version in phpStore.versions"
           :key="version.id"
           type="button"
-          class="flex w-full items-center justify-between rounded-xl border px-3.5 py-2.5 text-left text-sm transition"
+          class="flex w-full items-center justify-between rounded-xl px-3.5 py-2.5 text-left text-sm transition"
           :class="
             project?.phpVersion === version.version
-              ? 'border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-500/10'
-              : 'border-neutral-200 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800/60'
+              ? 'glass-selected'
+              : 'glass-inset hover:bg-white/70 dark:hover:bg-white/8'
           "
           :disabled="store.settingPhpVersion"
           @click="choose(version.version)"
@@ -105,7 +103,7 @@ function choose(version: string | null) {
 
       <p
         v-if="store.phpVersionError"
-        class="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+        class="mt-4 rounded-xl bg-amber-100/50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
       >
         {{ store.phpVersionError }}
       </p>
@@ -113,7 +111,7 @@ function choose(version: string | null) {
       <div class="mt-6 flex items-center justify-end gap-2">
         <button
           type="button"
-          class="rounded-full bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-500"
+          class="glass-accent rounded-full px-4 py-2 text-sm font-semibold transition"
           @click="store.closePhpVersionModal()"
         >
           Close

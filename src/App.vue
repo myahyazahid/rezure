@@ -31,13 +31,13 @@ onMounted(() => {
 </script>
 
 <template>
-  <div
-    class="flex h-screen flex-col bg-linear-to-b from-red-50 via-neutral-50 to-neutral-50 text-neutral-900 dark:from-neutral-900 dark:via-neutral-950 dark:to-neutral-950 dark:text-neutral-100"
-  >
+  <!-- `bg-app` is the colourful backdrop every glass surface lets through;
+       see the design-system notes in assets/main.css. -->
+  <div class="bg-app flex h-screen flex-col text-neutral-900 dark:text-neutral-100">
     <AppTitleBar />
 
     <div class="flex min-h-0 flex-1">
-      <AppSidebar />
+      <AppSidebar class="mb-3 ml-3" />
       <!-- More room at the bottom than the top: the full-height views end
            flush with this edge, and without the gap their last row reads as
            clipped by the window rather than scrolled. -->

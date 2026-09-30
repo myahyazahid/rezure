@@ -44,7 +44,7 @@ async function runBulk(kind: BulkAction) {
 }
 
 const SECONDARY_BUTTON_CLASS =
-  'flex items-center gap-2 rounded-full border border-neutral-200 bg-white/70 px-5 py-2.5 text-sm font-semibold text-neutral-700 transition hover:bg-white disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800'
+  'glass-btn flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold text-neutral-700 transition disabled:opacity-50 dark:text-neutral-200'
 </script>
 
 <template>
@@ -58,7 +58,7 @@ const SECONDARY_BUTTON_CLASS =
       <div class="flex shrink-0 items-center gap-2">
         <button
           type="button"
-          class="flex items-center gap-2 rounded-full bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-red-500/40 transition hover:bg-red-500 disabled:opacity-50"
+          class="glass-accent flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition disabled:opacity-50"
           :disabled="bulk !== null"
           @click="runBulk('start')"
         >

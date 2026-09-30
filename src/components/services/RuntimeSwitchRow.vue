@@ -81,12 +81,12 @@ function pick(entry: RuntimeVersionEntry) {
 
 <template>
   <div
-    class="px-4 py-3.5 transition"
-    :class="disabled ? 'opacity-50' : 'hover:bg-neutral-100/70 dark:hover:bg-neutral-800/40'"
+    class="px-4 py-3.5 transition first:rounded-t-2xl last:rounded-b-2xl"
+    :class="disabled ? 'opacity-50' : 'hover:bg-white/50 dark:hover:bg-white/5'"
   >
     <div class="flex items-center gap-3">
       <span
-        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white dark:bg-neutral-800"
+        class="glass-inset flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
         :class="disabled || installedCount === 0 ? 'opacity-50 grayscale' : ''"
       >
         <TechIcon :id="icon" :size="20" />
@@ -128,7 +128,7 @@ function pick(entry: RuntimeVersionEntry) {
       <div v-if="!disabled" class="relative shrink-0">
         <button
           type="button"
-          class="flex items-center gap-1.5 rounded-full border border-neutral-200 bg-white/70 px-3 py-1.5 font-mono text-sm font-semibold text-neutral-700 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
+          class="glass-btn flex items-center gap-1.5 rounded-full px-3 py-1.5 font-mono text-sm font-semibold text-neutral-700 transition disabled:cursor-not-allowed disabled:opacity-50 dark:text-neutral-200"
           :disabled="busy || installedVersions.length === 0"
           :title="
             installedVersions.length === 0
@@ -152,9 +152,7 @@ function pick(entry: RuntimeVersionEntry) {
 
         <template v-if="open">
           <div class="fixed inset-0 z-10" @click="open = false"></div>
-          <div
-            class="absolute top-full right-0 z-20 mt-2 w-56 rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
-          >
+          <div class="glass-strong absolute top-full right-0 z-20 mt-2 w-56 rounded-xl p-1">
             <p v-if="installedVersions.length === 0" class="px-2.5 py-1.5 text-xs text-neutral-400">
               Nothing installed yet
             </p>
@@ -162,7 +160,7 @@ function pick(entry: RuntimeVersionEntry) {
               v-for="(entry, i) in installedVersions"
               :key="entry.id"
               type="button"
-              class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left font-mono text-sm transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
+              class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left font-mono text-sm transition hover:bg-white/50 dark:hover:bg-white/5"
               @click="pick(entry)"
             >
               <span
@@ -186,10 +184,10 @@ function pick(entry: RuntimeVersionEntry) {
 
     <div
       v-if="installing"
-      class="mt-3 h-1.5 overflow-hidden rounded-full bg-neutral-200/70 dark:bg-neutral-800"
+      class="mt-3 h-1.5 overflow-hidden rounded-full bg-neutral-900/10 dark:bg-white/10"
     >
       <div
-        class="h-full rounded-full bg-red-500 transition-all"
+        class="h-full rounded-full bg-linear-to-r from-red-500 to-orange-400 transition-all"
         :class="percent === null ? 'w-1/3 animate-pulse' : ''"
         :style="percent !== null ? { width: `${percent}%` } : undefined"
       ></div>
