@@ -38,6 +38,7 @@ pub mod supervisor;
 pub mod support;
 pub mod telemetry;
 pub mod tunnel;
+pub mod upgrade_notice;
 pub mod vhosts;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};

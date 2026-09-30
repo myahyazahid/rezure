@@ -54,6 +54,46 @@ endpoint must instead return a response `tauri-plugin-updater` can verify with a
   for "nothing to update to"), not `200` with a same-or-lower `version` — the plugin's
   behavior differs subtly between the two, and `204` is the unambiguous one.
 
+## Release lines: 3.x, 4.x, ... side by side
+
+Versions are strictly `MAJOR.MINOR.PATCH`, the same string in `tauri.conf.json`,
+`Cargo.toml`, `package.json` and the dashboard's publish form: `3.0.1`, never `v3.0.1` or
+`V.3.0.1`. The `v` prefix belongs on git tags only. The dashboard rejects anything else,
+because the updater can't parse it.
+
+- A **new major** (`4.0.0`) is a big release. **Minor/patch** releases (`3.0.1`, `3.1.0`)
+  are fixes and small additions within a line.
+- Each line lives on its own branch (`v1`, `v2`, `v3`, ...). A fix for an older line is
+  made on that line's branch, tagged (`v3.0.2`), and built and signed from the tag.
+- **The updater never crosses lines.** The backend reads the major off `current_version`
+  and only answers with releases from that line, highest version first (not most recently
+  published). A 3.x install gets 3.0.1, 3.1.0, ... and is never offered 4.0.0.
+
+Because of that, a 3.x user would never hear about 4.0 through the updater. That's what
+the upgrade notice is for.
+
+## Upgrade notice (a newer major is out)
+
+`GET /api/v1/version/upgrade?current_version=<this app's version>` returns
+`{ major, message, url }` when a maintainer has switched on an announcement for a major
+higher than this install's, and `204` otherwise. It's configured from the dashboard's
+Releases page, so it can be switched on, reworded, or switched off without an app release.
+
+- Fetched by `services::upgrade_notice` (command `fetch_upgrade_notice`, which sends
+  `app.package_info().version`) whenever the Changelog page is opened, alongside the
+  update check. Not at launch, and there's no sidebar badge for it.
+- Shown as a banner on `ChangelogView.vue`. Its button opens `url` in the system browser
+  through the existing `open_external_link` command. **It never downloads or installs
+  anything**: moving to a new major is the user's decision, made on the website.
+- Any failure (offline, `5xx`, unexpected body) just means no banner. It's never cached,
+  since a cached "v4 is out" would outlive the maintainer switching it off. The client also
+  drops a notice for its own major (or an older one) and any non-http(s) `url`, even though
+  the backend shouldn't send either.
+
+This code has to be in a line's **first** release to be useful there: a 3.x install that
+shipped without it can't learn to show the banner until it updates to a 3.x release that
+has it.
+
 ## What triggers a request
 
 Fired once per app launch (`AppSidebar.vue`'s `onMounted`, so the sidebar badge can

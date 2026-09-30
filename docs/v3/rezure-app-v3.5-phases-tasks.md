@@ -32,7 +32,7 @@ Beda dari PHP: Node **tidak** dijalankan Rezure sebagai service yang terus nyala
 
 Fix: `spawn_terminal` sekarang melewati `wt.exe` sepenuhnya kalau ada PATH override yang perlu diterapkan, langsung memakai fallback `cmd`-spawn (proses yang di-spawn Rezure sendiri dari awal sampai akhir, sehingga environment-nya tidak mungkin "tertelan" proses lain). Konsekuensinya: begitu user punya versi Node aktif (otomatis terjadi begitu ada 1+ versi terinstall), terminal dari project card menjadi jendela `cmd` polos, bukan tab Windows Terminal — trade-off yang diambil sadar demi PATH yang benar-benar benar, bukan yang kelihatan benar saja. Tanpa override (belum ada Node terinstall/aktif sama sekali), `wt.exe` tetap dipakai seperti sebelumnya.
 
-**Belum diverifikasi ulang oleh maintainer setelah fix ini** — laporan bug awal datang dari testing manual sebelum fix ditulis; fix-nya sendiri baru lolos `cargo test`/`cargo clippy`/`cargo fmt`, belum dicoba ulang manual di app sungguhan.
+**Sudah diverifikasi ulang oleh maintainer setelah fix ini** — laporan bug awal datang dari testing manual sebelum fix ditulis; fix-nya lolos `cargo test`/`cargo clippy`/`cargo fmt`, lalu dicoba ulang manual di app sungguhan dan berjalan dengan baik.
 
 ### Catatan lain
 - `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test --lib` (semua test lolos, termasuk test baru untuk `services::node`, `db::projects` bagian Node, dan `services::launcher`), `npm run lint`, `npm run type-check` — semuanya bersih
@@ -105,7 +105,8 @@ beneran kekirim gak" itu pertanyaan harian buat siapapun yang develop fitur auth
   di-mock: kartu Not installed/Install, Installing…, Running + Open (memanggil
   `open_service_ui`), dan empat keadaan bagian mail di requirements check
 - App dev (`tauri dev`) maintainer sudah menjalankan Mailpit hasil kode ini dengan argumen di atas
-- **Belum**: tombol Install diklik di jendela app sungguhan (unduhan nyata lewat `AppHandle`)
+- Tombol Install diklik maintainer di jendela app sungguhan (unduhan nyata lewat `AppHandle`) —
+  berjalan dengan baik
 
 ---
 

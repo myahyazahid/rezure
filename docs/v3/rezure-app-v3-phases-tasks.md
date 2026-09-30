@@ -86,6 +86,24 @@ sudah dipakai di `PhpConfigCard.vue` dan `RuntimeSwitchRow.vue`.
 - [x] Alur update: **satu tombol "Update"** di halaman Changelog memicu seluruh urutan (download dengan progress terlihat → install → di Windows app keluar sendiri setelah installer jalan) — bukan background pre-download + konfirmasi terpisah, sesuai keputusan produk final (one-click-does-it-all, konsisten sama pola tombol Share/Install PHP version yang udah ada)
 - [x] Generate keypair `tauri signer generate` (sekali, manual) — public key sudah masuk `tauri.conf.json` menggantikan placeholder; private key + password disimpan maintainer di luar repo (bukan file, ditampilkan sekali di terminal), tidak pernah masuk git
 - [x] `laravel-api` ubah response `GET /api/v1/version/latest` dari `{version, notes, published_at}` ke manifest bertanda tangan (`pub_date` + `platforms.windows-x86_64.{signature,url}`) — `VersionController` (`app/Http/Controllers/Api/V1/VersionController.php`) sudah mengembalikan shape ini persis sesuai `docs/version-contract.md`, kolom `signature`/`download_url` sudah ada di tabel `releases` (migrasi `2026_09_15_042915_add_signature_and_download_url_to_releases_table.php`), dan `204` dibalikin saat client sudah current
+- [x] **Jalur rilis per major (3.x, 4.x, … dirawat bersamaan)**, diputuskan maintainer: versi
+      wajib `MAJOR.MINOR.PATCH` (`3.0.1`, bukan `V.3.0.1`; prefix `v` hanya di git tag, satu
+      branch per major). Major baru berarti rilis besar, sedangkan minor/patch berarti perbaikan
+      di jalur yang sama. Semuanya di `laravel-api`, app tidak diubah: `VersionController` hanya
+      menawarkan rilis dengan major yang sama dengan `current_version` (user 3.x tidak pernah
+      auto-update ke 4.0). `Release::current()` sekarang memilih **versi tertinggi**, bukan
+      `published_at` terbaru, supaya hotfix 3.0.2 yang di-publish setelah 4.0.0 tidak mengacaukan
+      jalur lain. Form publish menolak format versi lain, dan halaman Releases menampilkan rilis
+      terbaru per jalur. Detail di `docs/version-contract.md`
+- [x] **Upgrade notice ("v4 sudah rilis")** untuk user di jalur lama, karena updater tidak pernah
+      lintas major. Diatur dinamis dari dashboard (halaman Releases, satu pengaturan: on/off,
+      major, pesan, link) lewat endpoint baru `GET /api/v1/version/upgrade`. Di app:
+      `services::upgrade_notice` + command `fetch_upgrade_notice`, ditampilkan sebagai banner di
+      `ChangelogView.vue` dengan tombol "Learn more" yang membuka link website lewat
+      `open_external_link`. Tidak pernah download/install apa pun. Gagal fetch berarti banner
+      tidak muncul, dan hasilnya tidak di-cache. Diuji lewat test Laravel (`UpgradeNoticeTest`,
+      `ReleaseManifestTest`, `ReleasesTest`) dan unit test Rust. **Belum** dilihat di app
+      sungguhan dengan notice yang dinyalakan di dashboard produksi
 - [ ] Uji end-to-end lawan endpoint asli — masih tersisa karena belum ada pipeline rilis nyata: repo ini belum punya workflow CI (`.github/workflows`) yang build+sign installer pakai key barusan, jadi belum ada release sungguhan berisi `signature`/`download_url` untuk diuji. Sementara ini kode sisi app sudah bisa diuji lokal lawan manifest tiruan (lihat prosedur di `docs/version-contract.md`)
 
 ---
@@ -325,10 +343,10 @@ murni soal port allocation + service lifecycle, bukan batasan PHP itu sendiri.
       generate dan `php.ini` hasil generate. Upload 5 MB: **413** tanpa baris itu (default nginx,
       kondisi sebelum fix) → **200**, PHP menerima 5.242.880 byte utuh dengan baris itu. Upload
       70 MB tetap 413 — di atas batas 64 MB, sesuai rancangan
-- [ ] T3 belum diuji di app sungguhan (kill `php-cgi.exe` lewat Task Manager → harus balik
-      sendiri dalam ~1–3 detik). Jalur heal-nya sendiri sudah terbukti lawan `php-cgi` asli lewat
-      test `a_dead_php_worker_is_healed_without_touching_the_rest` (lihat T4); yang belum dilihat
-      cuma thread supervisor di dalam app yang memanggilnya
+- [x] T3 diuji di app sungguhan oleh maintainer: `php-cgi.exe` di-kill lewat Task Manager →
+      thread supervisor di dalam app menghidupkannya lagi sendiri, berjalan dengan baik. Jalur
+      heal-nya sendiri sebelumnya sudah terbukti lawan `php-cgi` asli lewat test
+      `a_dead_php_worker_is_healed_without_touching_the_rest` (lihat T4)
 - [x] **T4** — Worker pool per versi (N `php-cgi` dalam satu service, nginx `upstream`).
       Alasannya: `php-cgi` di Windows cuma bisa melayani satu request sekaligus
       (`PHP_FCGI_CHILDREN` butuh `fork()`), jadi satu request lambat bikin request lain ke versi

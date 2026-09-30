@@ -18,7 +18,7 @@ onActivated(async () => {
   page.value = 1
   await store.fetchAll()
   await store.markSeen()
-  await updateStore.checkForUpdate()
+  await Promise.all([updateStore.checkForUpdate(), updateStore.fetchUpgradeNotice()])
 })
 
 const updateProgressPercent = computed(() => {
@@ -102,6 +102,30 @@ function goToPage(next: number) {
       <p v-if="updateStore.downloadError" class="mt-3 text-xs text-red-700 dark:text-red-300">
         {{ updateStore.downloadError }}
       </p>
+    </div>
+
+    <!-- A newer major line: a pointer to the website, never an in-app update. -->
+    <div
+      v-if="updateStore.upgradeNotice"
+      class="mt-4 rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/60"
+    >
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="min-w-0">
+          <p class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+            Rezure v{{ updateStore.upgradeNotice.major }} is out
+          </p>
+          <p class="mt-0.5 text-sm text-neutral-600 dark:text-neutral-400">
+            {{ updateStore.upgradeNotice.message }}
+          </p>
+        </div>
+        <button
+          type="button"
+          class="shrink-0 rounded-full border border-neutral-200 bg-white/70 px-4 py-1.5 text-sm font-semibold text-neutral-700 transition hover:bg-white dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
+          @click="updateStore.openUpgradeNotice()"
+        >
+          Learn more
+        </button>
+      </div>
     </div>
 
     <p v-if="store.loading && !hasEntries" class="mt-6 text-sm text-neutral-500">Loading…</p>

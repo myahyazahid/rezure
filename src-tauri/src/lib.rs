@@ -122,6 +122,7 @@ pub fn run() {
                 commands::support::submit_ticket,
                 commands::support::fetch_ticket_history,
                 commands::changelog::fetch_changelog,
+                commands::changelog::fetch_upgrade_notice,
                 commands::changelog::last_seen_changelog_version,
                 commands::changelog::mark_changelog_seen,
                 commands::donate::fetch_donate_config,

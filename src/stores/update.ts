@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import { check, type Update } from '@tauri-apps/plugin-updater'
+import type { UpgradeNotice } from '@/types/changelog'
 
 function errorMessage(e: unknown): string {
   if (typeof e === 'string') return e
@@ -17,6 +19,20 @@ export const useUpdateStore = defineStore('update', () => {
   const downloadedBytes = ref(0)
   const totalBytes = ref<number | null>(null)
   const downloadError = ref<string | null>(null)
+
+  const upgradeNotice = ref<UpgradeNotice | null>(null)
+
+  /** The updater never crosses major lines (3.x only gets 3.x), so a newer
+   *  major is announced separately. The command never fails — no notice
+   *  and an unreachable API both come back as `null`. */
+  async function fetchUpgradeNotice() {
+    upgradeNotice.value = await invoke<UpgradeNotice | null>('fetch_upgrade_notice')
+  }
+
+  async function openUpgradeNotice() {
+    if (!upgradeNotice.value) return
+    await invoke('open_external_link', { url: upgradeNotice.value.url })
+  }
 
   async function checkForUpdate() {
     checking.value = true
@@ -60,7 +76,10 @@ export const useUpdateStore = defineStore('update', () => {
     downloadedBytes,
     totalBytes,
     downloadError,
+    upgradeNotice,
     checkForUpdate,
     downloadAndApply,
+    fetchUpgradeNotice,
+    openUpgradeNotice,
   }
 })
