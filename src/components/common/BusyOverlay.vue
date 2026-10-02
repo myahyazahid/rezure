@@ -68,7 +68,7 @@ const showBar = computed(() => props.percent !== null)
               class="h-1.5 w-full overflow-hidden rounded-full bg-neutral-900/10 dark:bg-white/10"
             >
               <div
-                class="h-full rounded-full bg-linear-to-r from-red-500 to-orange-400 transition-[width] duration-300 ease-out"
+                class="h-full rounded-full bg-linear-to-r from-accent-500 to-accent-alt transition-[width] duration-300 ease-out"
                 :style="{ width: `${percent}%` }"
               />
             </div>

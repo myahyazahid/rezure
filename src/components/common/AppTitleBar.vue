@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { getVersion } from '@tauri-apps/api/app'
-import { useTheme } from '@/composables/useTheme'
+import { useAppearanceStore } from '@/stores/appearance'
 import { useWindowControls } from '@/composables/useWindowControls'
 
-const { theme, toggle } = useTheme()
+const appearance = useAppearanceStore()
 const { minimize, toggleMaximize, close } = useWindowControls()
 
 const version = ref('')
@@ -42,13 +42,15 @@ onMounted(async () => {
     <button
       type="button"
       class="glass-btn flex shrink-0 items-center gap-1.5 rounded-full py-1 pr-3 pl-1 text-xs font-medium transition"
-      @click="toggle"
+      @click="appearance.toggleDark()"
     >
       <span
         class="flex h-5 w-5 items-center justify-center rounded-full"
-        :class="theme === 'dark' ? 'bg-white/10 text-neutral-200' : 'bg-red-500/15 text-red-600'"
+        :class="
+          appearance.isDark ? 'bg-white/10 text-neutral-200' : 'bg-accent-500/15 text-accent-600'
+        "
       >
-        <svg v-if="theme === 'dark'" viewBox="0 0 24 24" fill="currentColor" class="h-3 w-3">
+        <svg v-if="appearance.isDark" viewBox="0 0 24 24" fill="currentColor" class="h-3 w-3">
           <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" />
         </svg>
         <svg
@@ -66,7 +68,7 @@ onMounted(async () => {
           />
         </svg>
       </span>
-      {{ theme === 'dark' ? 'Dark' : 'Light' }}
+      {{ appearance.isDark ? 'Dark' : 'Light' }}
     </button>
 
     <div class="flex shrink-0 items-center gap-1">

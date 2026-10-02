@@ -140,7 +140,7 @@ const hasPhpConfig = computed(
 
       <button
         type="button"
-        class="glass-accent flex shrink-0 items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition"
+        class="glass-accent flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition"
         @click="showInstallModal = true"
       >
         <svg

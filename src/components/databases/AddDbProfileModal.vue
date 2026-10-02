@@ -118,7 +118,7 @@ async function addManual() {
 
         <button
           type="button"
-          class="mt-5 text-sm font-semibold text-red-600 underline dark:text-red-400"
+          class="mt-5 text-sm font-semibold text-accent-600 underline dark:text-accent-400"
           @click="manual = true"
         >
           Point at a folder myself
@@ -187,7 +187,7 @@ async function addManual() {
           </button>
           <button
             type="button"
-            class="glass-accent rounded-full px-5 py-2 text-sm font-semibold transition disabled:opacity-50"
+            class="glass-accent rounded-full px-4 py-2 text-sm font-semibold transition disabled:opacity-50"
             :disabled="store.adding || !datadirPath.trim()"
             @click="addManual"
           >

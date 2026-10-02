@@ -34,7 +34,7 @@ server opens it.
 
 ## Connecting
 
-The page shows the connection once, at the top, with a **Copy DSN** button:
+The local server always listens on the same address:
 
 ```
 mysql://root@127.0.0.1:3306
@@ -192,7 +192,7 @@ port.
 
 **A client opens but connects to nothing** — for Workbench and Navicat this is
 expected on first launch; they open on the server (or just open), and you pick the database
-inside. Use **Copy DSN** if the client wants a connection string.
+inside. If the client wants a connection string, use the one under [Connecting](#connecting).
 
 **Sizes look wrong** — the Size column is `data_length + index_length` from
 `information_schema`, which is a storage estimate for InnoDB, not an exact byte count. A

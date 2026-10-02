@@ -104,7 +104,7 @@ async function submit() {
 }
 
 const INPUT_CLASS =
-  'glass-inset mt-1 w-full rounded-xl px-3.5 py-2.5 text-sm text-neutral-900 outline-none transition focus:border-red-400/70 dark:text-neutral-100'
+  'glass-inset mt-1 w-full rounded-xl px-3.5 py-2.5 text-sm text-neutral-900 outline-none transition focus:border-accent-400/70 dark:text-neutral-100'
 const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
 </script>
 
@@ -164,7 +164,7 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
       </div>
 
       <label class="mt-5 flex items-start gap-2.5">
-        <input v-model="draft.useSsh" type="checkbox" class="mt-0.5 accent-red-600" />
+        <input v-model="draft.useSsh" type="checkbox" class="mt-0.5 accent-accent-600" />
         <span class="text-sm text-neutral-600 dark:text-neutral-300">
           Connect through an SSH tunnel
           <span class="block text-xs text-neutral-500">
@@ -209,7 +209,7 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
               class="flex-1 rounded-xl px-3 py-2 text-sm font-semibold transition"
               :class="
                 draft.sshAuth === 'key'
-                  ? 'glass-selected text-red-700 dark:text-red-300'
+                  ? 'glass-selected text-neutral-900 dark:text-neutral-50'
                   : 'glass-inset text-neutral-600 hover:bg-white/70 dark:text-neutral-300 dark:hover:bg-white/8'
               "
               @click="draft.sshAuth = 'key'"
@@ -221,7 +221,7 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
               class="flex-1 rounded-xl px-3 py-2 text-sm font-semibold transition"
               :class="
                 draft.sshAuth === 'password'
-                  ? 'glass-selected text-red-700 dark:text-red-300'
+                  ? 'glass-selected text-neutral-900 dark:text-neutral-50'
                   : 'glass-inset text-neutral-600 hover:bg-white/70 dark:text-neutral-300 dark:hover:bg-white/8'
               "
               @click="draft.sshAuth = 'password'"
@@ -295,7 +295,7 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
             class="flex-1 rounded-xl px-3 py-2 text-sm font-semibold transition"
             :class="
               draft.engine === engine
-                ? 'glass-selected text-red-700 dark:text-red-300'
+                ? 'glass-selected text-neutral-900 dark:text-neutral-50'
                 : 'glass-inset text-neutral-600 hover:bg-white/70 dark:text-neutral-300 dark:hover:bg-white/8'
             "
             @click="draft.engine = engine"
@@ -315,7 +315,7 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
             class="flex-1 rounded-xl px-3 py-2 text-xs font-semibold transition"
             :class="
               draft.tlsMode === mode.value
-                ? 'glass-selected text-red-700 dark:text-red-300'
+                ? 'glass-selected text-neutral-900 dark:text-neutral-50'
                 : 'glass-inset text-neutral-600 hover:bg-white/70 dark:text-neutral-300 dark:hover:bg-white/8'
             "
             :title="mode.hint"
@@ -327,7 +327,7 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
       </div>
 
       <label class="mt-4 flex items-start gap-2.5">
-        <input v-model="draft.savePassword" type="checkbox" class="mt-0.5 accent-red-600" />
+        <input v-model="draft.savePassword" type="checkbox" class="mt-0.5 accent-accent-600" />
         <span class="text-sm text-neutral-600 dark:text-neutral-300">
           Save the password in Windows Credential Manager
           <span class="block text-xs text-neutral-500">
@@ -337,7 +337,7 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
       </label>
 
       <label class="mt-3 flex items-start gap-2.5">
-        <input v-model="draft.readOnly" type="checkbox" class="mt-0.5 accent-red-600" />
+        <input v-model="draft.readOnly" type="checkbox" class="mt-0.5 accent-accent-600" />
         <span class="text-sm text-neutral-600 dark:text-neutral-300">
           Read-only
           <span class="block text-xs text-neutral-500">
@@ -366,7 +366,7 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
       <div class="mt-5 flex items-center justify-between gap-2">
         <button
           type="button"
-          class="glass-btn rounded-full px-5 py-2.5 text-sm font-semibold text-neutral-700 transition disabled:opacity-50 dark:text-neutral-200"
+          class="glass-btn rounded-full px-4 py-2 text-sm font-semibold text-neutral-700 transition disabled:opacity-50 dark:text-neutral-200"
           :disabled="!complete || store.testing"
           @click="store.test(draft)"
         >
@@ -383,7 +383,7 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
           </button>
           <button
             type="button"
-            class="glass-accent rounded-full px-5 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
+            class="glass-accent rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
             :disabled="!canSave || store.saving"
             :title="canSave ? '' : 'Test the connection first'"
             @click="submit"

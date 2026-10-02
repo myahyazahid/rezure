@@ -158,7 +158,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
             v-for="runtime in RUNTIMES"
             :key="runtime.id"
             type="button"
-            class="glass-inset flex flex-col items-center gap-2 rounded-2xl p-4 text-center transition hover:border-red-500/30 hover:bg-red-500/10 dark:hover:border-red-500/40 dark:hover:bg-red-500/10"
+            class="glass-inset flex flex-col items-center gap-2 rounded-2xl p-4 text-center transition hover:border-accent-500/30 hover:bg-accent-500/10 dark:hover:border-accent-500/40 dark:hover:bg-accent-500/10"
             @click="selected = runtime.id"
           >
             <span class="glass-inset flex h-10 w-10 items-center justify-center rounded-full">
@@ -324,7 +324,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         </span>
         <button
           type="button"
-          class="glass-btn shrink-0 rounded-full px-5 py-2.5 text-sm font-semibold text-neutral-700 transition disabled:opacity-50 dark:text-neutral-200"
+          class="glass-btn shrink-0 rounded-full px-4 py-2 text-sm font-semibold text-neutral-700 transition disabled:opacity-50 dark:text-neutral-200"
           :disabled="busy"
           @click="close"
         >

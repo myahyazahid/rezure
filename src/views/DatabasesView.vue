@@ -25,7 +25,6 @@ const readOnly = computed(() => store.server?.readOnly === true)
 
 const showNewDatabaseModal = ref(false)
 const importFile = ref<string | null>(null)
-const copiedDsn = ref(false)
 const search = ref('')
 
 /** Matched on name alone — collation and size are things you read once you've
@@ -44,7 +43,7 @@ const subtitle = computed(() => {
   if (remote.value) {
     return `Reading ${store.server?.label ?? 'a remote server'} — list, export and ${handoff}.`
   }
-  return `Create, export and ${handoff} — Rezure never asks you for credentials.`
+  return `Import or Export your database with one click`
 })
 
 /** Binary units, matching what a database client would report. */
@@ -54,13 +53,6 @@ function formatSize(bytes: number) {
   const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
   const value = bytes / 1024 ** exponent
   return `${value >= 10 || exponent === 0 ? Math.round(value) : value.toFixed(1)} ${units[exponent]}`
-}
-
-async function copyDsn() {
-  if (!store.server) return
-  await navigator.clipboard.writeText(store.server.dsn)
-  copiedDsn.value = true
-  window.setTimeout(() => (copiedDsn.value = false), 1500)
 }
 
 async function pickSqlFile() {
@@ -140,7 +132,7 @@ const exporting = computed(
              otherwise no way to re-read it without navigating away and back. -->
         <button
           type="button"
-          class="glass-btn flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-neutral-600 transition hover:text-neutral-900 disabled:opacity-50 dark:text-neutral-300 dark:hover:text-neutral-50"
+          class="glass-btn flex h-9.5 w-9.5 shrink-0 items-center justify-center rounded-full text-neutral-600 transition hover:text-neutral-900 disabled:opacity-50 dark:text-neutral-300 dark:hover:text-neutral-50"
           :disabled="store.refreshing"
           title="Refresh the database list"
           aria-label="Refresh the database list"
@@ -164,7 +156,7 @@ const exporting = computed(
 
         <button
           type="button"
-          class="glass-accent flex shrink-0 items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
+          class="glass-accent flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
           :disabled="store.serverDown || readOnly"
           :title="readOnly ? `${store.server?.label} is read-only` : ''"
           @click="showNewDatabaseModal = true"
@@ -195,54 +187,6 @@ const exporting = computed(
     >
       {{ profilesStore.error ?? connectionsStore.error }}
     </p>
-
-    <!-- The connection, stated once and copyable — so nothing else in the
-         app has to ask the user for credentials it already knows.
-
-         A remote target is deliberately a different colour: "which server am
-         I about to drop a database on" must be answerable at a glance, not
-         by reading the hostname. -->
-    <div
-      v-if="store.server"
-      class="mt-4 flex shrink-0 flex-wrap items-center gap-3 rounded-2xl border px-4 py-3"
-      :class="
-        remote
-          ? 'border-amber-400/50 bg-amber-100/50 dark:border-amber-500/25 dark:bg-amber-500/10'
-          : 'border-red-300/60 bg-red-100/50 dark:border-red-500/25 dark:bg-red-500/10'
-      "
-    >
-      <span
-        class="text-[11px] font-semibold tracking-wide uppercase"
-        :class="remote ? 'text-amber-500' : 'text-red-400'"
-      >
-        {{ remote ? 'Remote' : 'Server' }}
-      </span>
-      <span
-        class="min-w-0 flex-1 truncate font-mono text-sm"
-        :class="remote ? 'text-amber-800 dark:text-amber-200' : 'text-red-700 dark:text-red-300'"
-      >
-        {{ store.server.host }}:{{ store.server.port }} · {{ store.server.user }} ·
-        {{ store.server.hasPassword ? 'password set' : 'no password' }}
-        <!-- Which data this is, stated beside the connection: "New database"
-             lands in whichever target is active, and that has to be obvious
-             before the button is clicked, not after. -->
-        <template v-if="store.server.label"> · {{ store.server.label }} </template>
-        <template v-if="readOnly"> · read-only </template>
-      </span>
-      <button
-        type="button"
-        class="glass-btn flex shrink-0 items-center gap-2 rounded-full px-3.5 py-2 text-sm font-semibold transition"
-        :class="remote ? 'text-amber-800 dark:text-amber-200' : 'text-red-700 dark:text-red-300'"
-        :title="store.server.dsn"
-        @click="copyDsn"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
-          <rect x="9" y="9" width="11" height="11" rx="2" />
-          <path stroke-linecap="round" d="M5 15V5a2 2 0 0 1 2-2h8" />
-        </svg>
-        {{ copiedDsn ? 'Copied' : 'Copy DSN' }}
-      </button>
-    </div>
 
     <!-- A stopped MariaDB isn't an error the user made, so it gets an
          explanation and a way forward rather than a raw client message. -->
@@ -275,7 +219,7 @@ const exporting = computed(
       <span class="min-w-0 truncate font-mono text-xs">{{ store.notice }}</span>
       <button
         type="button"
-        class="shrink-0 font-semibold text-red-600 underline dark:text-red-400"
+        class="shrink-0 font-semibold text-accent-600 underline dark:text-accent-400"
         @click="store.openDumpsFolder"
       >
         Show folder
@@ -307,7 +251,7 @@ const exporting = computed(
       <button
         v-if="!readOnly"
         type="button"
-        class="glass-btn flex shrink-0 items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold text-neutral-700 transition dark:text-neutral-200"
+        class="glass-btn flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-neutral-700 transition dark:text-neutral-200"
         @click="pickSqlFile"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
@@ -346,7 +290,7 @@ const exporting = computed(
       </template>
       <template v-else>
         No databases yet — create one, or
-        <button type="button" class="font-semibold text-red-600 underline" @click="pickSqlFile">
+        <button type="button" class="font-semibold text-accent-600 underline" @click="pickSqlFile">
           import a .sql dump</button
         >.
       </template>

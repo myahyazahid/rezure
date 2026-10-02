@@ -70,10 +70,10 @@ function goToPage(next: number) {
 
     <div
       v-else-if="updateStore.available"
-      class="mt-4 rounded-2xl border border-red-300/60 bg-red-100/50 p-4 dark:border-red-500/20 dark:bg-red-500/10"
+      class="mt-4 rounded-2xl border border-accent-300/60 bg-accent-100/50 p-4 dark:border-accent-500/20 dark:bg-accent-500/10"
     >
       <div class="flex flex-wrap items-center justify-between gap-3">
-        <p class="text-sm font-semibold text-red-900 dark:text-red-200">
+        <p class="text-sm font-semibold text-accent-900 dark:text-accent-200">
           Rezure {{ updateStore.available.version }} is available
         </p>
         <button
@@ -88,10 +88,10 @@ function goToPage(next: number) {
 
       <div
         v-if="updateStore.downloading"
-        class="mt-3 h-1.5 overflow-hidden rounded-full bg-red-500/15 dark:bg-red-900/40"
+        class="mt-3 h-1.5 overflow-hidden rounded-full bg-accent-500/15 dark:bg-accent-900/40"
       >
         <div
-          class="h-full rounded-full bg-linear-to-r from-red-500 to-orange-400 transition-all"
+          class="h-full rounded-full bg-linear-to-r from-accent-500 to-accent-alt transition-all"
           :class="updateProgressPercent === null ? 'w-1/3 animate-pulse' : ''"
           :style="
             updateProgressPercent !== null ? { width: `${updateProgressPercent}%` } : undefined
@@ -139,7 +139,7 @@ function goToPage(next: number) {
           </h2>
           <div class="flex items-center gap-2 text-xs text-neutral-500">
             <span
-              class="rounded-full bg-red-500/10 px-2 py-0.5 font-mono font-semibold text-red-600 dark:bg-red-500/10 dark:text-red-400"
+              class="rounded-full bg-accent-500/10 px-2 py-0.5 font-mono font-semibold text-accent-600 dark:bg-accent-500/10 dark:text-accent-400"
             >
               v{{ entry.version }}
             </span>

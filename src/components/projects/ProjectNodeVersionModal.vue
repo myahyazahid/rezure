@@ -65,7 +65,7 @@ function choose(version: string | null) {
           </span>
           <span
             v-if="!project?.nodeVersion"
-            class="text-xs font-semibold text-red-600 dark:text-red-400"
+            class="text-xs font-semibold text-accent-600 dark:text-accent-400"
             >Current</span
           >
         </button>
@@ -96,7 +96,7 @@ function choose(version: string | null) {
           </span>
           <span
             v-if="project?.nodeVersion === version.version"
-            class="text-xs font-semibold text-red-600 dark:text-red-400"
+            class="text-xs font-semibold text-accent-600 dark:text-accent-400"
             >Current</span
           >
         </button>

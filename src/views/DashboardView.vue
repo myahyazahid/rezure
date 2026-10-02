@@ -44,7 +44,7 @@ async function runBulk(kind: BulkAction) {
 }
 
 const SECONDARY_BUTTON_CLASS =
-  'glass-btn flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold text-neutral-700 transition disabled:opacity-50 dark:text-neutral-200'
+  'glass-ghost flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-semibold transition disabled:opacity-50'
 </script>
 
 <template>
@@ -55,14 +55,21 @@ const SECONDARY_BUTTON_CLASS =
         <p class="mt-1 text-sm text-neutral-500">Your local stack, one tap away.</p>
       </div>
 
-      <div class="flex shrink-0 items-center gap-2">
+      <!-- One toolbar, not three loose buttons: they're the same kind of
+           action (every service at once), and grouping them says so. -->
+      <div class="glass flex shrink-0 items-center gap-1 rounded-full p-1">
         <button
           type="button"
-          class="glass-accent flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition disabled:opacity-50"
+          class="glass-raised flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-semibold text-neutral-700 transition disabled:opacity-50 dark:text-neutral-100"
           :disabled="bulk !== null"
           @click="runBulk('start')"
         >
-          <svg viewBox="0 0 10 10" fill="currentColor" aria-hidden="true" class="h-2.5 w-2.5">
+          <svg
+            viewBox="0 0 10 10"
+            fill="currentColor"
+            aria-hidden="true"
+            class="h-2.5 w-2.5 text-emerald-500"
+          >
             <path d="M1.5 0.8 9 5 1.5 9.2Z" />
           </svg>
           Start all
@@ -102,7 +109,12 @@ const SECONDARY_BUTTON_CLASS =
           :disabled="bulk !== null"
           @click="runBulk('stop')"
         >
-          <svg viewBox="0 0 10 10" fill="currentColor" aria-hidden="true" class="h-2 w-2">
+          <svg
+            viewBox="0 0 10 10"
+            fill="currentColor"
+            aria-hidden="true"
+            class="h-2 w-2 text-red-500"
+          >
             <rect width="10" height="10" rx="1.5" />
           </svg>
           Stop all

@@ -131,7 +131,7 @@ async function toggle(ext: BundledExtension) {
             >
               <span
                 class="h-1.5 w-1.5 shrink-0 rounded-full"
-                :class="v.version === selectedVersion ? 'bg-red-500' : 'bg-transparent'"
+                :class="v.version === selectedVersion ? 'bg-accent-500' : 'bg-transparent'"
               />
               <span class="flex-1 truncate">PHP {{ v.version }}</span>
             </button>
@@ -149,7 +149,7 @@ async function toggle(ext: BundledExtension) {
       class="glass mt-6 rounded-2xl p-6 text-center text-sm text-neutral-500"
     >
       No PHP version installed yet — install one from
-      <RouterLink to="/switch" class="font-semibold text-red-600 hover:underline"
+      <RouterLink to="/switch" class="font-semibold text-accent-600 hover:underline"
         >Switch</RouterLink
       >
       first.
@@ -209,7 +209,7 @@ async function toggle(ext: BundledExtension) {
                 :aria-checked="ext.enabled"
                 :aria-label="ext.label"
                 class="relative h-5 w-9 shrink-0 rounded-full transition disabled:opacity-40"
-                :class="ext.enabled ? 'bg-red-600' : 'bg-neutral-900/15 dark:bg-white/15'"
+                :class="ext.enabled ? 'bg-accent-600' : 'bg-neutral-900/15 dark:bg-white/15'"
                 :disabled="!ext.available || store.togglingExtension !== null"
                 @click="toggle(ext)"
               >

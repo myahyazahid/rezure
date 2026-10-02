@@ -43,12 +43,12 @@ async function submit() {
         type="password"
         placeholder="••••••••"
         autofocus
-        class="glass-inset mt-4 w-full rounded-xl px-3.5 py-2.5 text-sm text-neutral-900 outline-none transition focus:border-red-400/70 dark:text-neutral-100"
+        class="glass-inset mt-4 w-full rounded-xl px-3.5 py-2.5 text-sm text-neutral-900 outline-none transition focus:border-accent-400/70 dark:text-neutral-100"
         @keyup.enter="submit"
       />
 
       <label class="mt-3 flex items-center gap-2.5">
-        <input v-model="save" type="checkbox" class="accent-red-600" />
+        <input v-model="save" type="checkbox" class="accent-accent-600" />
         <span class="text-sm text-neutral-600 dark:text-neutral-300">
           Save it in Windows Credential Manager
         </span>
@@ -68,7 +68,7 @@ async function submit() {
         </button>
         <button
           type="button"
-          class="glass-accent rounded-full px-5 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
+          class="glass-accent rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
           :disabled="!canSubmit"
           @click="submit"
         >

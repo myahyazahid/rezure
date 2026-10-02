@@ -152,7 +152,7 @@ function formatSize(bytes: number): string {
           <div class="flex gap-2">
             <button
               type="button"
-              class="glass-btn rounded-full px-3 py-1.5 text-xs font-semibold text-neutral-600 transition hover:text-red-600 dark:text-neutral-300"
+              class="glass-btn rounded-full px-3 py-1.5 text-xs font-semibold text-neutral-600 transition hover:text-accent-600 dark:text-neutral-300"
               :disabled="!store.logText && store.attachmentSlotsLeft <= 0"
               @click="attachLatestLog"
             >
@@ -160,7 +160,7 @@ function formatSize(bytes: number): string {
             </button>
             <button
               type="button"
-              class="glass-btn rounded-full px-3 py-1.5 text-xs font-semibold text-neutral-600 transition hover:text-red-600 dark:text-neutral-300"
+              class="glass-btn rounded-full px-3 py-1.5 text-xs font-semibold text-neutral-600 transition hover:text-accent-600 dark:text-neutral-300"
               :disabled="store.attachmentSlotsLeft <= 0"
               @click="pickAttachments"
             >
@@ -225,10 +225,24 @@ function formatSize(bytes: number): string {
         <button
           v-else
           type="button"
-          class="glass-accent rounded-full px-5 py-2 text-sm font-semibold transition disabled:opacity-50"
+          class="glass-accent flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition disabled:opacity-50"
           :disabled="!canSubmit"
           @click="store.submit()"
         >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            aria-hidden="true"
+            class="h-4 w-4"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M21 3 10 14M21 3l-7 18-4-7-7-4 18-7Z"
+            />
+          </svg>
           {{ store.submitting ? 'Sending…' : 'Send ticket' }}
         </button>
       </div>

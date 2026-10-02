@@ -145,7 +145,7 @@ onMounted(() => {
   <div class="relative">
     <button
       type="button"
-      class="glass-btn flex h-9 items-center gap-2 rounded-full px-3.5 text-sm font-semibold text-neutral-700 transition hover:text-neutral-900 disabled:opacity-50 dark:text-neutral-200 dark:hover:text-neutral-50"
+      class="glass-btn flex h-9.5 items-center gap-2 rounded-full px-3.5 text-sm font-semibold text-neutral-700 transition hover:text-neutral-900 disabled:opacity-50 dark:text-neutral-200 dark:hover:text-neutral-50"
       :disabled="profiles.switchingId !== null || connections.switchingId !== null"
       @click="open = !open"
     >
@@ -214,7 +214,7 @@ onMounted(() => {
           class="mt-1.5 h-2 w-2 shrink-0 rounded-full"
           :class="
             profile.active && !connections.active
-              ? 'bg-red-500'
+              ? 'bg-accent-500'
               : 'bg-neutral-300 dark:bg-neutral-600'
           "
         />
@@ -243,7 +243,7 @@ onMounted(() => {
         </span>
         <span
           v-if="profile.active && !connections.active"
-          class="mt-0.5 shrink-0 text-[11px] font-semibold text-red-500"
+          class="mt-0.5 shrink-0 text-[11px] font-semibold text-accent-500"
         >
           Active
         </span>
@@ -251,7 +251,7 @@ onMounted(() => {
 
       <button
         type="button"
-        class="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm font-semibold text-red-600 transition hover:bg-white/50 dark:text-red-400 dark:hover:bg-white/5"
+        class="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm font-semibold text-accent-600 transition hover:bg-white/50 dark:text-accent-400 dark:hover:bg-white/5"
         @click="openAddProfile"
       >
         <svg
@@ -284,7 +284,7 @@ onMounted(() => {
           >
             <span
               class="mt-1.5 h-2 w-2 shrink-0 rounded-full"
-              :class="connection.active ? 'bg-red-500' : 'bg-neutral-300 dark:bg-neutral-600'"
+              :class="connection.active ? 'bg-accent-500' : 'bg-neutral-300 dark:bg-neutral-600'"
             />
             <span class="min-w-0 flex-1">
               <span
@@ -325,7 +325,7 @@ onMounted(() => {
             </span>
             <span
               v-if="connection.active"
-              class="mt-0.5 shrink-0 text-[11px] font-semibold text-red-500"
+              class="mt-0.5 shrink-0 text-[11px] font-semibold text-accent-500"
             >
               Active
             </span>
@@ -354,7 +354,7 @@ onMounted(() => {
 
         <button
           type="button"
-          class="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-semibold text-red-600 transition hover:bg-white/50 dark:text-red-400 dark:hover:bg-white/5"
+          class="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-semibold text-accent-600 transition hover:bg-white/50 dark:text-accent-400 dark:hover:bg-white/5"
           @click="openAddConnection"
         >
           <svg

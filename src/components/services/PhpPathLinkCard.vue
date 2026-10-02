@@ -48,7 +48,7 @@ onMounted(() => {
         :aria-checked="enabled"
         :aria-label="`Use Rezure's PHP everywhere`"
         class="relative h-6 w-11 shrink-0 rounded-full transition disabled:opacity-50"
-        :class="enabled ? 'bg-red-600' : 'bg-neutral-900/15 dark:bg-white/15'"
+        :class="enabled ? 'bg-accent-600' : 'bg-neutral-900/15 dark:bg-white/15'"
         :disabled="store.pathBusy"
         @click="store.setPathLink(!enabled)"
       >

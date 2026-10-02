@@ -467,9 +467,220 @@ maintainer**. Sengaja hanya menulis ke Rezure home, tidak ke config agent milik 
 
 ---
 
+## Fase 3.13 — Appearance (Tema & Dekorasi)
+
+**Tujuan:** User bisa memilih tampilan Rezure: mode terang/gelap/ikut sistem, dan tema dekorasi
+dari tiga kategori (Default, Girls, Mens), dari menu sendiri di sidebar. Tidak ada di roadmap awal,
+**ditambahkan atas permintaan maintainer**.
+
+### Keputusan yang sudah diambil
+- **Nama kategori:** `Default`, `Girls`, `Mens`. Nama ini ditampilkan apa adanya di UI
+- **Tema ada sebelas:** awalnya tiga (satu per kategori). Atas permintaan maintainer ditambah
+  **Soft Pink** (Girls) dan **Navy** (Mens), lalu enam lagi dari rekomendasi yang disetujui
+  maintainer: **Lavender Dream**, **Peach**, **Matcha** (Girls) serta **Carbon**, **Forest**,
+  **Terminal** (Mens):
+
+  | Kategori | Tema | Aksen | Latar (mesh) & dekorasi |
+  |---|---|---|---|
+  | Default | **Rezure** | merah coral (yang sekarang) | mesh yang sekarang, tanpa pola |
+  | Girls | **Blossom** | rose/pink | pink, lavender, peach, pola kelopak tipis |
+  | Girls | **Soft Pink** | pink lembut (satu tingkat lebih terang) | glass paling bening: lebih transparan, tepi dan highlight lebih terang, bayangan pink, blur `glass-strong` 40px; latar pink pekat supaya transparansinya terlihat; pola gelembung |
+  | Mens | **Midnight** | biru/teal | navy, slate, teal, pola grid tipis |
+  | Mens | **Navy** | navy pekat (`blue-800`/`900`; versi dark lebih terang supaya terlihat) | navy dengan sentuhan emas: gradien navy → emas, latar navy dengan cahaya emas hangat, glass sedikit lebih solid supaya teks tetap terbaca; pola gelombang tipis |
+  | Girls | **Lavender Dream** | violet | lilac dan biru muda (ungu malam di dark), bulan sabit dan bintang |
+  | Girls | **Peach** | peach (oranye dicampur rose) | peach, krem, kuning lembut, hati kecil |
+  | Girls | **Matcha** | hijau kalem (hijau dicampur stone) | mint, krem, sage, daun kecil |
+  | Mens | **Carbon** | oranye | grafit hampir monokrom, anyaman serat karbon |
+  | Mens | **Forest** | olive (lime dicampur stone) | hijau tua dan tanah, garis kontur peta |
+  | Mens | **Terminal** | hijau neon | hitam pekat dengan cahaya hijau tipis (versi light putih kehijauan), scanline samar |
+
+- **Posisi menu:** `/appearance`, di sidebar tepat **di bawah Support Developer** dan di atas
+  Settings. Settings tetap paling bawah (lihat komentar di `AppSidebar.vue`). Ikon palet warna
+- **Kustomisasi lanjutan (Fase 3.13c)** awalnya ditunda, lalu sebagian dikerjakan atas permintaan
+  maintainer (kecerahan, intensitas warna, opacity glass, ukuran UI, kurangi animasi). Yang masih
+  ditunda: warna aksen kustom, yang sudah disepakati berupa **palet pilihan yang kontrasnya sudah
+  aman**, bukan color picker bebas
+- **Pilihan mode (Light / Dark / System) dihapus dari halaman Appearance** atas permintaan
+  maintainer. Tombol Light/Dark di title bar jadi satu-satunya kontrolnya. Nilai `system` tetap
+  didukung di data, jadi user yang sudah memilihnya tidak terganggu
+
+### Cara kerja (ringkas)
+- **Tema = satu set nilai variabel CSS.** Semua permukaan glass sudah memakai token
+  (`--app-mesh`, `--glass-*`) di `src/assets/main.css`, jadi tema tidak menyentuh komponen.
+  Nilainya di-override lewat atribut `data-theme` di `<html>`:
+  `[data-theme='blossom']` dan `.dark [data-theme='blossom']`. Atribut ini terpisah dari class
+  `.dark`, jadi setiap tema punya varian light dan dark
+- **Selector tema tidak boleh memakai `:root`.** Dengan `[data-theme='…']` biasa, elemen mana pun
+  bisa memakai tema lain untuk isinya. Itulah yang membuat kartu preview di halaman Appearance
+  murah: miniatur sidebar dan kartu cukup dibungkus `<div data-theme="midnight">`
+- **Accent dipisah dari danger.** Saat ini merah dipakai untuk dua hal, yaitu brand dan
+  error/destruktif, di sekitar 33 file. Brand pindah ke token `accent` (didaftarkan di `@theme`
+  Tailwind v4, jadi `bg-accent-500` dan seterusnya) yang ikut tema. Error, tombol destruktif,
+  badge alert, dan hover tombol close jendela tetap merah di semua tema
+- **Warna status tidak ikut tema:** hijau (running), kuning (warning), merah (error) sama di
+  ketiga tema
+- **Dekorasi** berupa pola SVG statis dengan opacity rendah, dilapis di atas mesh lewat variabel
+  (`--app-pattern`). **Tidak ada animasi.** Latar yang bergerak membuat setiap lapisan
+  `backdrop-filter` digambar ulang tiap frame (lihat catatan di `main.css`)
+- **Penyimpanan:** objek `appearance` di `settings.json` lewat `config::settings::Settings`
+  (`#[serde(default)]`, jadi file lama tetap terbaca), sehingga config tetap satu sumber kebenaran
+  (prinsip 4 di `CLAUDE.md`). Mode (`light`/`dark`/`system`) dan tema (`rezure`/`blossom`/
+  `midnight`) berupa enum di Rust, dan nilai yang tidak dikenal jatuh ke default
+- **localStorage hanya cache tampilan pertama.** Pengaturan dari `settings.json` baru datang
+  setelah `invoke` selesai, jadi tanpa cache layar sempat berkedip ke tema default. Cache dibaca
+  sinkron sebelum app di-mount, lalu dicocokkan dengan nilai dari Rust
+- **Mode System hanya kalau dipilih.** Default tetap Light. Keputusan lama di `useTheme.ts` (sudah
+  dihapus, digantikan `stores/appearance.ts`) tetap berlaku: tidak mengikuti OS supaya peluncuran
+  pertama terlihat sama untuk semua orang
+
+### Fase 3.13a — Token accent (prasyarat, tanpa perubahan visual)
+- [x] Token `accent` (skala 50–950 + `accent-alt` untuk ujung gradien) di `main.css` lewat
+      `@theme inline`, nilai default = merah/oranye yang dipakai sebelumnya
+- [x] Semua penggunaan merah sebagai brand diganti ke `accent`: toggle, titik/indikator aktif,
+      progress bar (`from-accent-500 to-accent-alt`), step indicator `NewProjectModal.vue`, badge
+      aktif sidebar, tombol mode di title bar, label "Current"/"Active"/"Latest", link, tepi fokus
+      input, checkbox (`accent-accent-600`). Bayangan glass yang berwarna merah sekarang diturunkan
+      dari `--accent-900`/`--accent-950`, `--glass-accent-icon` dan `--glass-selected-border` dari
+      accent
+- [x] Merah sebagai danger dibiarkan: pesan error, input invalid, tombol destruktif (Unlink, Force
+      stop, Free port), hover tombol hapus, ikon Stop, badge alert sidebar, hover tombol close
+      jendela. Wordmark "Redscale" di title bar juga tetap merah (nama perusahaan, bukan aksen)
+- [x] Build, `vue-tsc`, ESLint dan Prettier bersih. Di app sungguhan tema Rezure terlihat seperti
+      sebelumnya. Satu perbedaan kecil yang disengaja: bayangan glass memakai `red-900`/`red-950`
+      Tailwind, bukan nilai RGB tulisan tangan yang sebelumnya, jadi rona bayangannya sedikit
+      bergeser
+
+### Fase 3.13b — Halaman Appearance & tiga tema
+- [x] Rust: `AppearanceSettings { mode, theme, show_decoration }` di `config::settings::Settings`
+      sebagai `Option` (`None` = belum pernah disimpan), enum `ThemeMode`/`ThemePreset`, ikut di
+      `SettingsPatch`/`update_settings` (mengganti seluruh blok). Dibaca lewat `lenient`: nilai tak
+      dikenal jatuh ke default untuk field itu saja, tanpa membuat seluruh `settings.json` gagal
+      dibaca. Unit test: belum disimpan, round trip bentuk JSON, nilai tak dikenal
+- [x] Store Pinia `appearance` (`stores/appearance.ts`) menggantikan `useTheme.ts` (dihapus).
+      Tombol Light/Dark di `AppTitleBar.vue` tetap ada dan membaca store yang sama. Dari mode
+      System, tombol itu memilih kebalikan dari yang sedang tampil. Mode System mendengarkan
+      `prefers-color-scheme`
+- [x] Migrasi satu kali: kalau `appearance` di `settings.json` masih `null`, pilihan dari cache
+      (atau key lama `rezure-theme`) disimpan ke sana, lalu key lama dihapus
+- [x] Cache `rezure-appearance` di localStorage untuk tampilan pertama, divalidasi per field dan
+      dibungkus try/catch. Store dibuat di `main.ts` sebelum `mount`, jadi `<html>` sudah memakai
+      tema yang benar di frame pertama
+- [x] CSS tema (`rezure`, `blossom`, `midnight`), masing-masing varian light dan dark: skala
+      aksen, `--app-mesh`, `--app-pattern` (kelopak untuk Blossom, grid untuk Midnight). Class
+      `no-decoration` di `<html>` mematikan pola
+- [x] Tema keempat `softpink` (Soft Pink, kategori Girls). Selain warna, tema ini juga mengganti
+      token glass (`--glass-bg`, border, highlight, bayangan, `--glass-blur`). Blur `glass-strong`
+      sekarang memakai token `--glass-blur` (default 24px). Karena itu blok dark-nya harus
+      meng-override setiap token yang di-override blok light-nya (alasannya di komentar
+      `main.css`). Aksennya satu tingkat lebih terang (`accent-600` = `pink-500`), jadi kontras
+      teks kecilnya lebih rendah lagi dari tema lain. Itu konsekuensi dari "soft"
+- [ ] Soft Pink belum dilihat di app sungguhan, baik light maupun dark
+- [x] Tema kelima `navy` (Navy, kategori Mens). Awalnya dibuat sebagai "Soft Navy" (pasangan
+      Soft Pink), lalu diganti atas permintaan maintainer karena terlalu mirip Midnight. Bedanya
+      sekarang: aksen navy pekat (bukan biru terang), ujung gradien emas (bukan teal), latar navy
+      dengan cahaya emas, dan pola gelombang (bukan grid). Tema ini juga mengganti token glass,
+      jadi blok dark-nya meng-override semua token yang sama; di mode dark aksen 500–700 dinaikkan
+      satu tingkat supaya toggle tidak hilang di latar navy. Dirender di light dan dark lewat build
+      + headless Chrome; belum dilihat di app sungguhan
+- [x] Enam tema warna: `lavender`, `peach`, `matcha` (Girls), `carbon`, `forest`, `terminal`
+      (Mens). Seperti Blossom dan Midnight, keenamnya hanya mengganti skala aksen, mesh, dan pola
+      (glass tetap default). Test Rust memastikan kesebelas nama tema terbaca sebagai dirinya
+      sendiri. Galeri dan beberapa tema yang diterapkan ke seluruh app (Carbon light, Terminal dan
+      Forest dark) dirender lewat build + headless Chrome; belum dilihat di app sungguhan
+- [x] Menu `Appearance` di `AppSidebar.vue` (di bawah Support Developer, ikon palet), route
+      `/appearance`, `AppearanceView.vue`
+- [x] Isi halaman: ~~mode (Light / Dark / System)~~ (dihapus belakangan, lihat keputusan), filter kategori (All / Default / Girls / Mens),
+      grid kartu tema dengan miniatur preview memakai `data-theme`, toggle "Show background
+      decoration". Perubahan langsung diterapkan dan disimpan di belakang layar
+- [ ] Kontras WCAG AA: **belum lolos untuk teks kecil**, termasuk di tema default sejak sebelum
+      fase ini. `*-600` di atas glass terang punya kontras sekitar 4.2–4.3:1 (hitungan perkiraan,
+      bukan pengukuran di app), sedikit di bawah 4.5:1. Blossom dan Midnight setara dengan Rezure.
+      Kalau mau lolos, link dan label kecil perlu naik ke `accent-700`; ini keputusan desain
+      untuk semua tema sekaligus
+- [x] Dilihat di app sungguhan (`tauri dev`): Blossom dan Midnight di mode light tampil benar,
+      preview tiap kartu memakai temanya sendiri
+- [ ] Belum dicek: mode dark untuk Blossom/Midnight, restart app (pilihan bertahan dan tidak ada
+      kedipan saat start), dan migrasi dari key `rezure-theme` pada instalasi lama
+
+### Fase 3.13d — Menu Decorations (stiker)
+Ditambahkan atas permintaan maintainer: stiker lucu (pita pink dan lainnya) yang bisa ditempel di
+mana saja di window, dengan preview Rezure untuk memilih posisinya.
+
+**Cara kerja (ringkas)**
+- Stiker berupa 24 SVG buatan sendiri di `src/assets/stickers/`, dibagi dua kategori seperti tema.
+  **Girls**: bow, heart, sparkle, star, sakura, cloud, strawberry, cat, butterfly, rainbow, crown,
+  cherry. **Mens** (outline lebih gelap, warna lebih dingin): gamepad, rocket, bolt, flame, coffee,
+  terminal, football, headphones, shield, robot, planet, sunglasses. Tidak ada download dan tidak
+  ada aset pihak ketiga. Tepi putih ala stiker dan bayangan dibuat lewat class `.sticker` (filter
+  `drop-shadow`) di `main.css`, bukan di SVG-nya, supaya tebalnya sama di semua ukuran
+- Posisi (`x`, `y`) dan ukuran disimpan dalam **persen dari window**, jadi satu rumus
+  (`stickerStyle` di `stores/decorations.ts`) dipakai baik untuk window asli maupun preview
+- Preview di halaman Decorations memakai rasio dan tata letak window yang sedang dipakai (ukuran
+  title bar dan sidebar dalam persen) dan ikut berubah saat window di-resize, jadi posisi di preview
+  sama dengan posisi di window
+- `StickerOverlay.vue` (di `App.vue`) menggambar stiker di layer `fixed inset-0 z-40
+  pointer-events-none`: di atas halaman, di bawah modal (`z-50`), dan tidak pernah menghalangi
+  klik. Layer ini disembunyikan di halaman Decorations sendiri supaya tidak menutupi editor
+- Disimpan di `settings.json` sebagai `decorations { visible, stickers[] }`
+  (`config::stickers`). Jenis stiker berupa enum tertutup. Stiker yang tidak dikenal dibuang satu
+  per satu tanpa menghilangkan yang lain, nilai dibatasi ke rentangnya, dan jumlah maksimal 40.
+  Semua ini juga berlaku untuk data dari frontend (`update_settings`)
+
+**Tasks**
+- [x] `config::stickers`: `StickerKind`, `Sticker`, `Decorations::sanitized`, pembacaan lenient.
+      Unit test: bentuk JSON, stiker tak dikenal, blok rusak, clamp dan batas jumlah. Round trip
+      di test settings
+- [x] `Settings::decorations` dan `SettingsPatch::decorations` (mengganti seluruh blok, disanitasi)
+- [x] 24 aset SVG stiker (12 Girls, 12 Mens; kategori Mens ditambahkan atas permintaan maintainer)
+- [x] Tab kategori di palet (All / Girls / Mens)
+- [x] Feedback saat stiker ditambahkan (permintaan maintainer): notifikasi singkat di atas preview
+      ("Pink bow added — drag it into place", hilang setelah ~2 detik, juga dibacakan screen reader
+      lewat `aria-live`), stiker baru muncul dengan animasi "pop", dan langsung terpilih. Saat
+      sudah 40 stiker, notifikasinya memberi tahu batasnya. Duplikat juga diberi notifikasi
+- [x] Store Pinia `decorations` (tambah, geser, ubah ukuran dan rotasi, flip, duplikat, bawa ke
+      depan, hapus, hapus semua, tampil/sembunyi). Saat drag dan geser slider, perubahan hanya di
+      layar; penyimpanan terjadi saat dilepas
+- [x] `DecorationsView.vue` (`/decorations`, di sidebar di bawah Appearance): palet stiker, preview
+      dengan drag, panah untuk geser (Shift untuk langkah besar), Delete untuk hapus, panel kontrol
+      stiker terpilih, "Remove all" dengan konfirmasi klik kedua
+- [x] `StickerOverlay.vue` di `App.vue`
+- [x] Dicek lewat build + headless Chrome dengan backend tiruan: posisi di preview cocok dengan
+      window asli
+- [ ] Belum dicoba di app sungguhan (`tauri dev`): drag dengan mouse, penyimpanan lewat restart
+
+### Fase 3.13c — Kustomisasi lanjutan (sebagian dikerjakan)
+Bagian "Adjustments" di halaman Appearance. Semua nilainya ikut `AppearanceSettings` di
+`settings.json` (`brightness`, `saturation`, `glassSolidity`, `uiScale`, `reduceMotion`), dibatasi
+rentangnya di Rust (`AppearanceSettings::sanitized`, dipanggil saat load dan saat patch), dan ikut
+cache tampilan pertama.
+
+- [x] **Brightness** (70–120%) dan **Colour intensity** (50–150%): `filter: brightness() saturate()`
+      di `<html>`. Di elemen root, filter tidak menjadikan halaman containing block untuk
+      `position: fixed`, jadi modal dan layer stiker tidak terganggu. Di nilai 100% filternya
+      tidak dipasang sama sekali, supaya tampilan default tidak menambah beban compositing
+- [x] **Glass opacity** (0–60%): lapisan warna solid di atas `.glass`, `.glass-strong`,
+      `.glass-btn` lewat `--glass-fill`/`--glass-solidity`. 0 = tema apa adanya
+- [x] **Interface size** (90 / 100 / 110 / 125%): zoom webview asli (`setZoom`, permission
+      `core:webview:allow-set-webview-zoom`), bukan CSS `zoom` yang membuat layout `100vh`
+      ikut membesar dan meluber. Preview di halaman Decorations tetap pas karena ukuran window
+      dalam CSS px ikut berubah
+- [x] **Reduce motion**: class `reduce-motion` di `<html>` mematikan transition dan animation
+- [x] Tombol "Reset to default" (hanya bagian Adjustments, tema dan dekorasi tidak ikut)
+- [x] Slider memakai warna aksen (`accent-color` untuk `input[type=range]`)
+- [x] Unit test: nilai di luar rentang dibatasi. Dirender lewat build + headless Chrome dengan backend
+      tiruan
+- [ ] Belum dicoba di app sungguhan: zoom webview (termasuk izinnya) dan bertahan setelah restart
+- [ ] Masih ditunda: override warna aksen dari palet pilihan
+
+### Di luar v3
+Gambar latar sendiri (perlu copy file ke Rezure home dan asset protocol Tauri), export/import tema
+sebagai JSON, dan tema dari komunitas.
+
+---
+
 ## Dependency ke Proyek Lain
 
-Fase 3.4: `GET /api/v1/version/latest` di `laravel-api` **sudah** mengembalikan manifest bertanda tangan sesuai [`docs/version-contract.md`](../version-contract.md) (`VersionController`, kolom `signature`/`download_url` di `releases`). Yang masih tersisa cuma verifikasi end-to-end lawan rilis nyata — repo ini belum punya pipeline yang build+sign installer, jadi belum ada rilis sungguhan buat diuji; sementara kode sisi app sudah bisa diuji lokal lawan manifest tiruan (prosedur ada di doc kontrak itu). Fase 3.1, 3.5, 3.6, 3.10, dan 3.11 sepenuhnya independen, tidak bergantung pada backend.
+Fase 3.4: `GET /api/v1/version/latest` di `laravel-api` **sudah** mengembalikan manifest bertanda tangan sesuai [`docs/version-contract.md`](../version-contract.md) (`VersionController`, kolom `signature`/`download_url` di `releases`). Yang masih tersisa cuma verifikasi end-to-end lawan rilis nyata — repo ini belum punya pipeline yang build+sign installer, jadi belum ada rilis sungguhan buat diuji; sementara kode sisi app sudah bisa diuji lokal lawan manifest tiruan (prosedur ada di doc kontrak itu). Fase 3.1, 3.5, 3.6, 3.10, 3.11, dan 3.13 sepenuhnya independen, tidak bergantung pada backend.
 
 **Catatan soal analytics lanjutan (v3 `rezure-dashboard`):** fitur traffic by hour, breakdown negara, cohort retention, dll di dashboard **tidak membutuhkan perubahan apapun di app ini** — semua data granular yang dibutuhkan (timestamp, OS version, metadata service) sudah terkirim sejak fondasi telemetry v2. Geolocation negara diproses di sisi server dari IP request yang masuk, bukan dikirim dari client.
 
@@ -482,6 +693,9 @@ Fase 3.4: `GET /api/v1/version/latest` di `laravel-api` **sudah** mengembalikan 
 3. Fase 3.6 (Bundled PHP Extension Toggle) — nempel langsung ke infrastruktur `php_ini.rs`/`php_ext.rs` yang sudah ada, scope kecil dan kontributor-friendly
 4. Fase 3.10 (Multi-Version Installer) — nyentuh halaman Switch dan `php_catalog.rs`, sebaiknya sebelum Fase 3.5.1 (Node.js switcher) yang bakal butuh katalognya
 5. Fase 3.4 (Auto-Update) — sisa cuma verifikasi E2E, butuh pipeline rilis nyata dulu
+6. Fase 3.13 (Appearance) — 3.13a dan 3.13b sudah dikerjakan di branch `glassmorph` (bersama
+   redesain glassmorphism, karena 3.13a menyentuh file yang sama). Sisa verifikasi manual ada di
+   daftar task 3.13b. 3.13c ditunda
 
 **Fase 3.3 (Project Health Dashboard) dipindah ke v4** (jadi Fase 4.5) atas permintaan maintainer
 — lihat `docs/v4/rezure-app-v4-phases-tasks.md`.

@@ -1174,6 +1174,9 @@ pub fn real_services(app: AppHandle) -> ServiceManager {
     let php_pool_sink = sink.clone();
     let php_pool_crash_sink = crash_sink.clone();
 
+    // Registration order is only the order the Services page lists them in:
+    // nothing starts or stops in this order (Start all runs them
+    // concurrently), and pinned `php-<version>` pools are appended after.
     let services: Vec<ServiceHandle> = vec![
         Arc::new(
             ProcessService::nginx(sink.clone())
@@ -1181,13 +1184,13 @@ pub fn real_services(app: AppHandle) -> ServiceManager {
                 .with_crash_sink(crash_sink.clone()),
         ),
         Arc::new(
-            ProcessService::php(sink.clone())
-                .expect("php must be in binaries::MANIFEST")
+            ProcessService::mariadb(sink.clone())
+                .expect("mariadb must be in binaries::MANIFEST")
                 .with_crash_sink(crash_sink.clone()),
         ),
         Arc::new(
-            ProcessService::mariadb(sink.clone())
-                .expect("mariadb must be in binaries::MANIFEST")
+            ProcessService::php(sink.clone())
+                .expect("php must be in binaries::MANIFEST")
                 .with_crash_sink(crash_sink.clone()),
         ),
         Arc::new(

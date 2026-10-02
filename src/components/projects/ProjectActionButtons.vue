@@ -13,7 +13,12 @@ const props = defineProps<{
 const store = useProjectsStore()
 
 const ICON_BUTTON_CLASS =
-  'glass-btn flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-100'
+  'flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition'
+
+/** An icon button whose feature is switched on (a live share, a pinned
+ *  version) stays tinted in the accent colour, so the state is visible without a click. */
+const ON_CLASS =
+  'bg-accent-500/12 text-accent-600 hover:bg-accent-500/20 dark:bg-accent-500/20 dark:text-accent-300 dark:hover:bg-accent-500/30'
 
 // A fixed-size icon button in every state (idle / starting / active) rather
 // than growing into a URL chip when active: this sits in a list row whose
@@ -35,14 +40,22 @@ function onShareClick() {
 </script>
 
 <template>
-  <div class="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+  <!-- One toolbar, like a service row's: Open is the raised primary action and
+       the rest stay bare until hovered, instead of seven bordered bubbles. -->
+  <div class="glass-inset flex shrink-0 items-center gap-0.5 rounded-full p-1">
     <button
       type="button"
-      class="glass-accent flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-sm font-semibold transition"
+      class="glass-accent flex h-7 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-semibold transition"
       :title="`Open http://${props.domain}`"
       @click="store.openSite(props.projectId)"
     >
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        class="h-3.5 w-3.5"
+      >
         <circle cx="12" cy="12" r="9" />
         <path
           stroke-linecap="round"
@@ -52,16 +65,15 @@ function onShareClick() {
       Open
     </button>
 
-    <!-- Neutral like the other icon buttons while idle, filled red once a
+    <!-- Neutral like the other icon buttons while idle, filled with the accent once a
          share is live — the same on/off language as the PHP/Node pin
          buttons, so an active tunnel is visible without opening the modal. -->
     <button
       type="button"
       :class="[
-        'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition disabled:cursor-wait disabled:opacity-70',
-        isActive
-          ? 'glass-selected text-red-600 hover:bg-red-500/15 dark:text-red-400 dark:hover:bg-red-500/20'
-          : 'glass-btn text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-100',
+        ICON_BUTTON_CLASS,
+        'disabled:cursor-wait disabled:opacity-70',
+        isActive ? ON_CLASS : 'glass-ghost',
       ]"
       :disabled="isStarting"
       :title="
@@ -75,7 +87,7 @@ function onShareClick() {
     >
       <span
         v-if="isStarting"
-        class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+        class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent"
       />
       <svg
         v-else
@@ -83,7 +95,7 @@ function onShareClick() {
         fill="none"
         stroke="currentColor"
         stroke-width="2"
-        class="h-4 w-4"
+        class="h-3.5 w-3.5"
       >
         <path
           stroke-linecap="round"
@@ -95,11 +107,17 @@ function onShareClick() {
 
     <button
       type="button"
-      :class="ICON_BUTTON_CLASS"
+      :class="[ICON_BUTTON_CLASS, 'glass-ghost']"
       :title="`Open ${props.path} in Explorer`"
       @click="store.openFolder(props.projectId)"
     >
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        class="h-3.5 w-3.5"
+      >
         <path
           stroke-linecap="round"
           stroke-linejoin="round"
@@ -113,11 +131,17 @@ function onShareClick() {
          yet. -->
     <button
       type="button"
-      :class="ICON_BUTTON_CLASS"
+      :class="[ICON_BUTTON_CLASS, 'glass-ghost']"
       title="Check this project's PHP extension requirements"
       @click="store.runDoctor(props.projectId)"
     >
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        class="h-3.5 w-3.5"
+      >
         <path
           stroke-linecap="round"
           stroke-linejoin="round"
@@ -132,12 +156,7 @@ function onShareClick() {
          running on its own version is visible without opening the modal. -->
     <button
       type="button"
-      :class="[
-        'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition',
-        props.phpVersion
-          ? 'glass-selected text-red-600 hover:bg-red-500/15 dark:text-red-400 dark:hover:bg-red-500/20'
-          : 'glass-btn text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-100',
-      ]"
+      :class="[ICON_BUTTON_CLASS, props.phpVersion ? ON_CLASS : 'glass-ghost']"
       :title="
         props.phpVersion
           ? `Pinned to PHP ${props.phpVersion} — click to change`
@@ -145,7 +164,13 @@ function onShareClick() {
       "
       @click="store.openPhpVersionModal(props.projectId)"
     >
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        class="h-3.5 w-3.5"
+      >
         <path
           stroke-linecap="round"
           stroke-linejoin="round"
@@ -161,12 +186,7 @@ function onShareClick() {
          as (see ProjectNodeVersionModal.vue). -->
     <button
       type="button"
-      :class="[
-        'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition',
-        props.nodeVersion
-          ? 'glass-selected text-red-600 hover:bg-red-500/15 dark:text-red-400 dark:hover:bg-red-500/20'
-          : 'glass-btn text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-100',
-      ]"
+      :class="[ICON_BUTTON_CLASS, props.nodeVersion ? ON_CLASS : 'glass-ghost']"
       :title="
         props.nodeVersion
           ? `Pinned to Node.js ${props.nodeVersion} — click to change`
@@ -174,7 +194,13 @@ function onShareClick() {
       "
       @click="store.openNodeVersionModal(props.projectId)"
     >
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        class="h-3.5 w-3.5"
+      >
         <path
           stroke-linecap="round"
           stroke-linejoin="round"
@@ -186,11 +212,17 @@ function onShareClick() {
 
     <button
       type="button"
-      :class="ICON_BUTTON_CLASS"
+      :class="[ICON_BUTTON_CLASS, 'glass-ghost']"
       title="Open a terminal in this folder"
       @click="store.openTerminal(props.projectId)"
     >
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        class="h-3.5 w-3.5"
+      >
         <rect x="3" y="4" width="18" height="16" rx="2" />
         <path stroke-linecap="round" stroke-linejoin="round" d="m7 9 3 3-3 3M13 15h4" />
       </svg>

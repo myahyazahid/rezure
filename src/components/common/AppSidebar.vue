@@ -105,6 +105,20 @@ const navItems = computed(() => [
     badge: '',
     variant: 'default' as const,
   },
+  {
+    to: '/appearance',
+    icon: 'palette' as const,
+    label: 'Appearance',
+    badge: '',
+    variant: 'default' as const,
+  },
+  {
+    to: '/decorations',
+    icon: 'sticker' as const,
+    label: 'Decorations',
+    badge: '',
+    variant: 'default' as const,
+  },
   // Last on purpose: the daily work (services, projects, databases) comes
   // first, and settings are visited rarely enough to sit out of the way.
   {
@@ -132,8 +146,10 @@ const ringOffset = computed(() => {
 </script>
 
 <template>
-  <aside class="glass flex w-64 shrink-0 flex-col gap-3 rounded-3xl p-3">
-    <nav class="flex flex-col gap-1">
+  <aside class="glass flex w-60 shrink-0 flex-col gap-3 rounded-3xl p-3">
+    <!-- Scrolls rather than clips when the window is at its minimum height;
+         at the default size every item fits. -->
+    <nav class="flex min-h-0 flex-col gap-0.5 overflow-y-auto [scrollbar-width:thin]">
       <!-- Inactive items are bare so the panel reads as one sheet of glass;
            the transparent border keeps rows from shifting when one becomes
            active and picks up a real edge. -->
@@ -141,7 +157,7 @@ const ringOffset = computed(() => {
         v-for="item in navItems"
         :key="item.to"
         :to="item.to"
-        class="flex items-center gap-3 rounded-2xl px-3 py-2 transition"
+        class="flex items-center gap-3 rounded-xl px-2.5 py-1.5 transition"
         :class="
           isActive(item.to)
             ? 'glass-selected'
@@ -149,7 +165,7 @@ const ringOffset = computed(() => {
         "
       >
         <span
-          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition"
+          class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition"
           :class="
             isActive(item.to)
               ? 'glass-accent'
@@ -271,6 +287,42 @@ const ringOffset = computed(() => {
             />
           </svg>
           <svg
+            v-else-if="item.icon === 'palette'"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="h-4 w-4"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M12 21a9 9 0 1 1 9-9c0 1.66-1.34 3-3 3h-1.5a1.5 1.5 0 0 0-1.06 2.56A1.5 1.5 0 0 1 14.38 21H12Z"
+            />
+            <circle cx="7.5" cy="11.5" r="1" fill="currentColor" stroke="none" />
+            <circle cx="10.5" cy="7.5" r="1" fill="currentColor" stroke="none" />
+            <circle cx="15" cy="8.5" r="1" fill="currentColor" stroke="none" />
+          </svg>
+          <svg
+            v-else-if="item.icon === 'sticker'"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="h-4 w-4"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M12 3.5c.5 3.6 2 5.6 5.5 6.2-3.5.6-5 2.6-5.5 6.2-.5-3.6-2-5.6-5.5-6.2 3.5-.6 5-2.6 5.5-6.2Z"
+            />
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M18.5 15.5c.2 1.4.8 2.1 2 2.3-1.2.2-1.8.9-2 2.3-.2-1.4-.8-2.1-2-2.3 1.2-.2 1.8-.9 2-2.3Z"
+            />
+          </svg>
+          <svg
             v-else
             viewBox="0 0 24 24"
             fill="none"
@@ -309,7 +361,7 @@ const ringOffset = computed(() => {
           class="rounded-full px-2 py-0.5 text-xs font-medium"
           :class="
             isActive(item.to)
-              ? 'bg-white/70 text-red-600 dark:bg-white/10 dark:text-red-400'
+              ? 'bg-accent-500/10 text-accent-600 dark:bg-accent-500/20 dark:text-accent-300'
               : 'text-neutral-500 dark:text-neutral-400'
           "
         >
@@ -318,10 +370,10 @@ const ringOffset = computed(() => {
       </RouterLink>
     </nav>
 
-    <div class="glass-inset mt-auto rounded-2xl p-4">
+    <div class="glass-inset mt-auto shrink-0 rounded-2xl p-3">
       <div class="flex items-center gap-3">
-        <div class="relative h-11 w-11 shrink-0">
-          <svg viewBox="0 0 40 40" class="h-11 w-11 -rotate-90">
+        <div class="relative h-10 w-10 shrink-0">
+          <svg viewBox="0 0 40 40" class="h-10 w-10 -rotate-90">
             <circle
               cx="20"
               cy="20"
@@ -354,7 +406,7 @@ const ringOffset = computed(() => {
         </div>
       </div>
 
-      <div class="glass-divider mt-3 flex items-center justify-between border-t pt-3 text-xs">
+      <div class="glass-divider mt-2.5 flex items-center justify-between border-t pt-2.5 text-xs">
         <span class="text-neutral-500">Uptime</span>
         <span class="font-semibold">{{ uptimeLabel }}</span>
       </div>

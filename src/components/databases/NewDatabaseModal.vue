@@ -75,7 +75,7 @@ watch(name, () => {
         placeholder="my_app"
         autofocus
         class="glass-inset mt-1 w-full rounded-xl px-3.5 py-2.5 font-mono text-sm text-neutral-900 outline-none dark:text-neutral-100"
-        :class="nameError ? 'border-red-400 focus:border-red-500' : 'focus:border-red-400/70'"
+        :class="nameError ? 'border-red-400 focus:border-red-500' : 'focus:border-accent-400/70'"
         @keyup.enter="submit"
       />
       <p v-if="nameError" class="mt-1.5 text-xs text-red-600 dark:text-red-400">{{ nameError }}</p>
@@ -83,7 +83,7 @@ watch(name, () => {
       <label class="mt-4 block text-xs font-medium text-neutral-500">Collation</label>
       <select
         v-model="collation"
-        class="glass-inset mt-1 w-full rounded-xl px-3.5 py-2.5 font-mono text-sm text-neutral-900 outline-none focus:border-red-400/70 dark:text-neutral-100"
+        class="glass-inset mt-1 w-full rounded-xl px-3.5 py-2.5 font-mono text-sm text-neutral-900 outline-none focus:border-accent-400/70 dark:text-neutral-100"
       >
         <!-- The server's real list, once it has loaded; until then the
              default is still a valid choice on its own. -->
@@ -102,7 +102,7 @@ watch(name, () => {
       <div class="mt-5 flex justify-end gap-2">
         <button
           type="button"
-          class="glass-btn rounded-full px-5 py-2.5 text-sm font-semibold text-neutral-700 transition disabled:opacity-50 dark:text-neutral-200"
+          class="glass-btn rounded-full px-4 py-2 text-sm font-semibold text-neutral-700 transition disabled:opacity-50 dark:text-neutral-200"
           :disabled="store.creating"
           @click="close"
         >
@@ -110,7 +110,7 @@ watch(name, () => {
         </button>
         <button
           type="button"
-          class="glass-accent rounded-full px-5 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
+          class="glass-accent rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
           :disabled="!canCreate || store.creating"
           @click="submit"
         >

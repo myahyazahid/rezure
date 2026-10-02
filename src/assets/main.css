@@ -18,16 +18,25 @@ body,
  * of the backdrop showing through is what sells it.
  *
  * Tokens live here as CSS variables so light/dark is one switch (`.dark` on
- * <html>, see useTheme) and components never repeat a `dark:` pair for a
+ * <html>, see stores/appearance.ts) and components never repeat a `dark:` pair for a
  * surface. Components pick a role, not a colour:
  *
  *   glass          card / row / panel sitting on the backdrop
  *   glass-hover    add to `glass` for a clickable card
  *   glass-strong   floating layer: modal panel, dropdown menu, popover
  *   glass-inset    well inside a glass surface: input, chip, stat tile
- *   glass-selected the chosen item in a list (red-tinted)
- *   glass-btn      secondary button
- *   glass-accent   primary (red) button
+ *   glass-selected the chosen item in a list: lifted white with a faint accent
+ *                  edge, like the selected segment of a segmented control
+ *   glass-btn      secondary button standing on its own
+ *   glass-accent   primary button: an opaque white pill that sits above the
+ *                  translucent glass around it, dark text, accent icon. No accent
+ *                  fill — emphasis comes from being the solid thing on the
+ *                  page, and the colour is kept to the icon. A destructive
+ *                  one adds `text-red-600 dark:text-red-400`.
+ *   glass-raised   the lifted segment inside a toolbar (a `glass-inset`
+ *                  pill grouping related actions, e.g. a service's Stop)
+ *   glass-ghost    icon/text button with no chrome until hovered — the
+ *                  secondary actions inside a toolbar
  *   glass-divider  border colour for separators and table rules
  *   glass-scrim    the dimmed, blurred layer behind a modal
  *
@@ -38,10 +47,77 @@ body,
  * the card, and dropdowns that must paint over the next row. Over the smooth
  * backdrop a blur is invisible anyway — it only shows where real content sits
  * behind the glass, which is exactly the floating layers.
+ *
+ * Accent vs danger
+ * ----------------
+ * `accent-*` (bg-accent-500, text-accent-600, ...) is the brand colour: toggles,
+ * active dots, progress bars, links, focus edges. It follows the Appearance
+ * theme. Red stays red for meaning, not branding: error text, destructive
+ * buttons, the alert badge, the window's close button. Status colours (green
+ * running, amber warning) never follow the theme either. When adding UI, pick
+ * by meaning: "this is Rezure's colour" is accent, "this went wrong / this
+ * destroys something" is red.
+ *
+ * Themes
+ * ------
+ * A theme is a set of values for the variables below, switched by
+ * `data-theme` on <html> (see stores/appearance.ts), independently of the
+ * `.dark` class. The selectors deliberately also match `[data-theme]` on any
+ * element, not just :root: a subtree can wear a different theme, which is how
+ * the preview cards on the Appearance page render each theme for free. That
+ * is also why the accent-derived tokens are declared on `[data-theme]` again
+ * rather than inherited — a custom property is resolved where it is declared,
+ * so one inherited from :root would keep :root's accent.
+ *
+ * The default theme (Rezure) lives in the base blocks; other themes only
+ * override the accent scale, the backdrop mesh and the decoration pattern.
  */
 
 :root {
+  /* Set inline on <html> by stores/appearance.ts; declared only here so
+     every themed subtree inherits the one value. */
+  --glass-solidity: 0;
+}
+
+@theme inline {
+  --color-accent-50: var(--accent-50);
+  --color-accent-100: var(--accent-100);
+  --color-accent-200: var(--accent-200);
+  --color-accent-300: var(--accent-300);
+  --color-accent-400: var(--accent-400);
+  --color-accent-500: var(--accent-500);
+  --color-accent-600: var(--accent-600);
+  --color-accent-700: var(--accent-700);
+  --color-accent-800: var(--accent-800);
+  --color-accent-900: var(--accent-900);
+  --color-accent-950: var(--accent-950);
+  /* Second stop of the accent gradient (progress bars): `from-accent-500
+     to-accent-alt`. */
+  --color-accent-alt: var(--accent-alt);
+}
+
+:root,
+[data-theme] {
   color-scheme: light;
+
+  --accent-50: var(--color-red-50);
+  --accent-100: var(--color-red-100);
+  --accent-200: var(--color-red-200);
+  --accent-300: var(--color-red-300);
+  --accent-400: var(--color-red-400);
+  --accent-500: var(--color-red-500);
+  --accent-600: var(--color-red-600);
+  --accent-700: var(--color-red-700);
+  --accent-800: var(--color-red-800);
+  --accent-900: var(--color-red-900);
+  --accent-950: var(--color-red-950);
+  --accent-alt: var(--color-orange-400);
+
+  /* Tiled decoration drawn over the mesh. None for the default theme. */
+  --app-pattern: none;
+
+  /* Blur behind floating layers (`glass-strong`). */
+  --glass-blur: 24px;
 
   --app-mesh:
     radial-gradient(60% 55% at 0% 0%, rgb(248 113 113 / 0.5), transparent 70%),
@@ -56,22 +132,52 @@ body,
   --glass-border: rgb(255 255 255 / 0.75);
   --glass-border-hover: rgb(255 255 255 / 0.95);
   --glass-highlight: rgb(255 255 255 / 0.85);
-  --glass-shadow: 0 1px 2px rgb(40 12 16 / 0.04), 0 10px 28px -12px rgb(127 29 29 / 0.18);
+  --glass-shadow:
+    0 1px 2px rgb(40 12 16 / 0.04),
+    0 10px 28px -12px color-mix(in srgb, var(--accent-900) 18%, transparent);
 
   --glass-strong-bg: rgb(255 255 255 / 0.74);
-  --glass-strong-shadow: 0 2px 8px rgb(40 12 16 / 0.05), 0 28px 64px -18px rgb(76 18 28 / 0.35);
+  --glass-strong-shadow:
+    0 2px 8px rgb(40 12 16 / 0.05),
+    0 28px 64px -18px color-mix(in srgb, var(--accent-950) 35%, transparent);
 
   --glass-inset-bg: rgb(255 255 255 / 0.5);
   --glass-inset-border: rgb(40 20 24 / 0.08);
 
-  --glass-selected-bg: rgb(239 68 68 / 0.1);
-  --glass-selected-border: rgb(239 68 68 / 0.3);
+  --glass-selected-bg: rgb(255 255 255 / 0.9);
+  --glass-selected-border: color-mix(in srgb, var(--accent-500) 25%, transparent);
+  --glass-selected-shadow:
+    0 1px 2px rgb(40 20 24 / 0.06),
+    0 4px 12px -6px color-mix(in srgb, var(--accent-900) 20%, transparent);
+
+  --glass-accent-bg: rgb(255 255 255 / 0.92);
+  --glass-accent-bg-hover: rgb(255 255 255);
+  --glass-accent-border: rgb(40 20 24 / 0.07);
+  --glass-accent-text: var(--color-neutral-800);
+  --glass-accent-icon: var(--accent-500);
+  --glass-accent-shadow:
+    0 1px 2px rgb(40 20 24 / 0.08),
+    0 6px 16px -8px color-mix(in srgb, var(--accent-900) 28%, transparent);
+
+  --glass-raised-bg: rgb(255 255 255 / 0.92);
+  --glass-raised-bg-hover: rgb(255 255 255);
+  --glass-raised-shadow: 0 0 0 1px rgb(40 20 24 / 0.05), 0 1px 3px rgb(40 20 24 / 0.1);
+
+  --glass-ghost-text: var(--color-neutral-500);
+  --glass-ghost-text-hover: var(--color-neutral-800);
+  --glass-ghost-bg-hover: rgb(255 255 255 / 0.85);
 
   --glass-divider: rgb(40 20 24 / 0.08);
   --glass-scrim: rgb(40 14 20 / 0.22);
+
+  /* Solid layer over glass panels, scaled by the Appearance page's "Glass
+     opacity" (`--glass-solidity`, 0–0.6, set on <html>). Transparent by
+     default, so every theme looks as designed until the user asks. */
+  --glass-fill: rgb(255 255 255 / var(--glass-solidity));
 }
 
-.dark {
+.dark,
+.dark [data-theme] {
   color-scheme: dark;
 
   --app-mesh:
@@ -95,11 +201,536 @@ body,
   --glass-inset-bg: rgb(255 255 255 / 0.04);
   --glass-inset-border: rgb(255 255 255 / 0.08);
 
-  --glass-selected-bg: rgb(239 68 68 / 0.14);
-  --glass-selected-border: rgb(248 113 113 / 0.3);
+  --glass-selected-bg: rgb(255 255 255 / 0.1);
+  --glass-selected-border: color-mix(in srgb, var(--accent-400) 30%, transparent);
+  --glass-selected-shadow: 0 1px 3px rgb(0 0 0 / 0.4);
+
+  --glass-accent-bg: rgb(255 255 255 / 0.12);
+  --glass-accent-bg-hover: rgb(255 255 255 / 0.17);
+  --glass-accent-border: rgb(255 255 255 / 0.12);
+  --glass-accent-text: var(--color-neutral-50);
+  --glass-accent-icon: var(--accent-400);
+  --glass-accent-shadow: 0 1px 3px rgb(0 0 0 / 0.45), 0 8px 20px -10px rgb(0 0 0 / 0.6);
+
+  --glass-raised-bg: rgb(255 255 255 / 0.1);
+  --glass-raised-bg-hover: rgb(255 255 255 / 0.15);
+  --glass-raised-shadow: 0 0 0 1px rgb(255 255 255 / 0.08), 0 1px 3px rgb(0 0 0 / 0.4);
+
+  --glass-ghost-text: var(--color-neutral-400);
+  --glass-ghost-text-hover: var(--color-neutral-100);
+  --glass-ghost-bg-hover: rgb(255 255 255 / 0.1);
 
   --glass-divider: rgb(255 255 255 / 0.08);
   --glass-scrim: rgb(0 0 0 / 0.45);
+
+  --glass-fill: rgb(24 20 27 / var(--glass-solidity));
+}
+
+/* Blossom (category Girls): pink accent over a pink / lavender / peach
+   backdrop, scattered with small petals. */
+[data-theme='blossom'] {
+  --accent-50: var(--color-pink-50);
+  --accent-100: var(--color-pink-100);
+  --accent-200: var(--color-pink-200);
+  --accent-300: var(--color-pink-300);
+  --accent-400: var(--color-pink-400);
+  --accent-500: var(--color-pink-500);
+  --accent-600: var(--color-pink-600);
+  --accent-700: var(--color-pink-700);
+  --accent-800: var(--color-pink-800);
+  --accent-900: var(--color-pink-900);
+  --accent-950: var(--color-pink-950);
+  --accent-alt: var(--color-purple-400);
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><defs><g id='p'><ellipse cy='-5' rx='2.6' ry='5'/><ellipse cy='-5' rx='2.6' ry='5' transform='rotate(72)'/><ellipse cy='-5' rx='2.6' ry='5' transform='rotate(144)'/><ellipse cy='-5' rx='2.6' ry='5' transform='rotate(216)'/><ellipse cy='-5' rx='2.6' ry='5' transform='rotate(288)'/></g></defs><g fill='%23ffffff' fill-opacity='0.55'><use href='%23p' transform='translate(28 30)'/><use href='%23p' transform='translate(88 84) scale(.7) rotate(20)'/><circle cx='80' cy='22' r='1.4'/><circle cx='22' cy='92' r='1.2'/><circle cx='58' cy='60' r='1'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(244 114 182 / 0.45), transparent 70%),
+    radial-gradient(40% 45% at 100% 0%, rgb(253 186 116 / 0.4), transparent 70%),
+    radial-gradient(38% 42% at 58% 48%, rgb(216 180 254 / 0.25), transparent 70%),
+    radial-gradient(50% 50% at 88% 100%, rgb(192 132 252 / 0.32), transparent 70%),
+    radial-gradient(45% 50% at 8% 100%, rgb(249 168 212 / 0.45), transparent 70%),
+    linear-gradient(180deg, #fdf2f8, #f7f1fb);
+}
+
+.dark[data-theme='blossom'],
+.dark [data-theme='blossom'] {
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><defs><g id='p'><ellipse cy='-5' rx='2.6' ry='5'/><ellipse cy='-5' rx='2.6' ry='5' transform='rotate(72)'/><ellipse cy='-5' rx='2.6' ry='5' transform='rotate(144)'/><ellipse cy='-5' rx='2.6' ry='5' transform='rotate(216)'/><ellipse cy='-5' rx='2.6' ry='5' transform='rotate(288)'/></g></defs><g fill='%23f9a8d4' fill-opacity='0.08'><use href='%23p' transform='translate(28 30)'/><use href='%23p' transform='translate(88 84) scale(.7) rotate(20)'/><circle cx='80' cy='22' r='1.4'/><circle cx='22' cy='92' r='1.2'/><circle cx='58' cy='60' r='1'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(55% 50% at 0% 0%, rgb(219 39 119 / 0.38), transparent 70%),
+    radial-gradient(40% 40% at 100% 0%, rgb(251 146 60 / 0.16), transparent 70%),
+    radial-gradient(40% 45% at 60% 50%, rgb(147 51 234 / 0.16), transparent 70%),
+    radial-gradient(50% 50% at 92% 100%, rgb(168 85 247 / 0.26), transparent 70%),
+    radial-gradient(45% 50% at 5% 100%, rgb(236 72 153 / 0.2), transparent 70%),
+    linear-gradient(180deg, #140c12, #0c090d);
+}
+
+/* Midnight (category Mens): blue accent over a navy / slate / teal backdrop,
+   with a faint grid. */
+[data-theme='midnight'] {
+  --accent-50: var(--color-blue-50);
+  --accent-100: var(--color-blue-100);
+  --accent-200: var(--color-blue-200);
+  --accent-300: var(--color-blue-300);
+  --accent-400: var(--color-blue-400);
+  --accent-500: var(--color-blue-500);
+  --accent-600: var(--color-blue-600);
+  --accent-700: var(--color-blue-700);
+  --accent-800: var(--color-blue-800);
+  --accent-900: var(--color-blue-900);
+  --accent-950: var(--color-blue-950);
+  --accent-alt: var(--color-teal-400);
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='28' height='28'><path d='M28 .5H.5V28' fill='none' stroke='%231e3a8a' stroke-opacity='0.07'/></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(96 165 250 / 0.42), transparent 70%),
+    radial-gradient(40% 45% at 100% 0%, rgb(45 212 191 / 0.32), transparent 70%),
+    radial-gradient(38% 42% at 58% 48%, rgb(148 163 184 / 0.22), transparent 70%),
+    radial-gradient(50% 50% at 88% 100%, rgb(30 64 175 / 0.24), transparent 70%),
+    radial-gradient(45% 50% at 8% 100%, rgb(94 234 212 / 0.3), transparent 70%),
+    linear-gradient(180deg, #f1f5f9, #eef2f7);
+}
+
+.dark[data-theme='midnight'],
+.dark [data-theme='midnight'] {
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='28' height='28'><path d='M28 .5H.5V28' fill='none' stroke='%2393c5fd' stroke-opacity='0.05'/></svg>");
+
+  --app-mesh:
+    radial-gradient(55% 50% at 0% 0%, rgb(37 99 235 / 0.36), transparent 70%),
+    radial-gradient(40% 40% at 100% 0%, rgb(13 148 136 / 0.22), transparent 70%),
+    radial-gradient(40% 45% at 60% 50%, rgb(30 58 138 / 0.22), transparent 70%),
+    radial-gradient(50% 50% at 92% 100%, rgb(15 118 110 / 0.26), transparent 70%),
+    radial-gradient(45% 50% at 5% 100%, rgb(51 65 85 / 0.4), transparent 70%),
+    linear-gradient(180deg, #0b0f17, #080a0f);
+}
+
+/* Soft Pink (category Girls): the most "glass" of the themes. The glass
+   itself is pushed further than elsewhere: more see-through, brighter edges
+   and top highlight, pink-tinted shadows, a stronger blur on floating
+   layers. The backdrop is saturated pink on purpose, because translucency
+   only reads when there is colour behind it to show through. The accent sits
+   one step lighter than the usual scale (500 is pink-400) for a softer look.
+
+   It replaces glass tokens, not just colours, so the dark block below must
+   override every token this block does: on <html>, `.dark` and this
+   selector have the same specificity, and this one comes later. */
+[data-theme='softpink'] {
+  --accent-50: var(--color-pink-50);
+  --accent-100: var(--color-pink-100);
+  --accent-200: var(--color-pink-200);
+  --accent-300: var(--color-pink-300);
+  --accent-400: var(--color-pink-300);
+  --accent-500: var(--color-pink-400);
+  --accent-600: var(--color-pink-500);
+  --accent-700: var(--color-pink-600);
+  --accent-800: var(--color-pink-700);
+  --accent-900: var(--color-pink-800);
+  --accent-950: var(--color-pink-900);
+  --accent-alt: var(--color-rose-300);
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><g fill='%23ffffff'><circle cx='38' cy='46' r='16' fill-opacity='0.28'/><circle cx='118' cy='28' r='6' fill-opacity='0.4'/><circle cx='112' cy='118' r='11' fill-opacity='0.22'/><circle cx='30' cy='132' r='4' fill-opacity='0.45'/><circle cx='76' cy='88' r='2.5' fill-opacity='0.55'/></g><g fill='none' stroke='%23ffffff' stroke-opacity='0.55'><circle cx='38' cy='46' r='16'/><circle cx='112' cy='118' r='11'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(249 168 212 / 0.6), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(254 205 211 / 0.7), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(251 207 232 / 0.55), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(245 208 254 / 0.55), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(253 164 175 / 0.45), transparent 70%),
+    linear-gradient(180deg, #fff1f6, #fdf2fa);
+
+  --glass-bg: rgb(255 255 255 / 0.3);
+  --glass-bg-hover: rgb(255 255 255 / 0.52);
+  --glass-border: rgb(255 255 255 / 0.9);
+  --glass-border-hover: rgb(255 255 255);
+  --glass-highlight: rgb(255 255 255);
+  --glass-shadow: 0 1px 2px rgb(131 24 67 / 0.04), 0 16px 40px -14px rgb(236 72 153 / 0.3);
+
+  --glass-strong-bg: rgb(255 255 255 / 0.55);
+  --glass-strong-shadow: 0 2px 8px rgb(131 24 67 / 0.05), 0 30px 70px -18px rgb(236 72 153 / 0.4);
+  --glass-blur: 40px;
+
+  --glass-inset-bg: rgb(255 255 255 / 0.38);
+  --glass-inset-border: rgb(255 255 255 / 0.75);
+
+  --glass-selected-bg: rgb(255 255 255 / 0.75);
+  --glass-selected-shadow: 0 1px 2px rgb(131 24 67 / 0.05), 0 6px 16px -6px rgb(236 72 153 / 0.35);
+
+  --glass-divider: rgb(236 72 153 / 0.12);
+  --glass-scrim: rgb(131 24 67 / 0.16);
+}
+
+.dark[data-theme='softpink'],
+.dark [data-theme='softpink'] {
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><g fill='%23fbcfe8'><circle cx='38' cy='46' r='16' fill-opacity='0.05'/><circle cx='118' cy='28' r='6' fill-opacity='0.07'/><circle cx='112' cy='118' r='11' fill-opacity='0.04'/><circle cx='30' cy='132' r='4' fill-opacity='0.08'/><circle cx='76' cy='88' r='2.5' fill-opacity='0.1'/></g><g fill='none' stroke='%23fbcfe8' stroke-opacity='0.1'><circle cx='38' cy='46' r='16'/><circle cx='112' cy='118' r='11'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(55% 50% at 0% 0%, rgb(236 72 153 / 0.32), transparent 70%),
+    radial-gradient(45% 45% at 100% 0%, rgb(251 113 133 / 0.2), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(219 39 119 / 0.14), transparent 70%),
+    radial-gradient(50% 50% at 92% 100%, rgb(192 38 211 / 0.2), transparent 70%),
+    radial-gradient(45% 50% at 5% 100%, rgb(244 114 182 / 0.2), transparent 70%),
+    linear-gradient(180deg, #170d14, #0e080c);
+
+  --glass-bg: rgb(255 228 240 / 0.06);
+  --glass-bg-hover: rgb(255 228 240 / 0.1);
+  --glass-border: rgb(255 214 233 / 0.16);
+  --glass-border-hover: rgb(255 214 233 / 0.24);
+  --glass-highlight: rgb(255 255 255 / 0.12);
+  --glass-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 14px 36px -14px rgb(80 7 36 / 0.7);
+
+  --glass-strong-bg: rgb(38 22 32 / 0.62);
+  --glass-strong-shadow: 0 2px 8px rgb(0 0 0 / 0.35), 0 28px 64px -16px rgb(80 7 36 / 0.8);
+  --glass-blur: 40px;
+
+  --glass-inset-bg: rgb(255 228 240 / 0.05);
+  --glass-inset-border: rgb(255 214 233 / 0.12);
+
+  --glass-selected-bg: rgb(255 228 240 / 0.12);
+  --glass-selected-shadow: 0 1px 3px rgb(0 0 0 / 0.4), 0 6px 16px -8px rgb(236 72 153 / 0.3);
+
+  --glass-divider: rgb(255 214 233 / 0.1);
+  --glass-scrim: rgb(0 0 0 / 0.45);
+}
+
+/* Navy (category Mens): deep navy with a gold accent stop — nautical
+   rather than Midnight's bright blue and teal. The accent is the real navy
+   end of the blue scale (500 is blue-800), lifted in dark mode where navy
+   on navy would disappear. The glass is a little more solid than default
+   so text stays readable over the deeper backdrop, and it replaces glass
+   tokens, so the dark block must override every token this one does. */
+[data-theme='navy'] {
+  --accent-50: var(--color-blue-50);
+  --accent-100: var(--color-blue-100);
+  --accent-200: var(--color-blue-200);
+  --accent-300: var(--color-blue-300);
+  --accent-400: var(--color-blue-400);
+  --accent-500: var(--color-blue-800);
+  --accent-600: var(--color-blue-900);
+  --accent-700: var(--color-blue-950);
+  --accent-800: var(--color-blue-950);
+  --accent-900: var(--color-blue-950);
+  --accent-950: var(--color-blue-950);
+  --accent-alt: var(--color-amber-400);
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='80'><g fill='none' stroke='%231e3a8a' stroke-width='1.2' stroke-linecap='round'><path stroke-opacity='0.09' d='M0 20 C20 12 33 12 53 20 S87 28 107 20 S140 12 160 20'/><path stroke-opacity='0.05' d='M0 60 C20 52 33 52 53 60 S87 68 107 60 S140 52 160 60'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(30 58 138 / 0.42), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(251 191 36 / 0.22), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(148 163 184 / 0.22), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(23 37 84 / 0.38), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(59 130 246 / 0.3), transparent 70%),
+    linear-gradient(180deg, #eef1f7, #e6eaf3);
+
+  --glass-bg: rgb(255 255 255 / 0.5);
+  --glass-bg-hover: rgb(255 255 255 / 0.7);
+  --glass-border: rgb(255 255 255 / 0.85);
+  --glass-border-hover: rgb(255 255 255);
+  --glass-highlight: rgb(255 255 255 / 0.95);
+  --glass-shadow: 0 1px 2px rgb(15 23 42 / 0.06), 0 14px 36px -14px rgb(23 37 84 / 0.38);
+
+  --glass-strong-bg: rgb(255 255 255 / 0.72);
+  --glass-strong-shadow: 0 2px 8px rgb(15 23 42 / 0.07), 0 30px 70px -18px rgb(23 37 84 / 0.45);
+  --glass-blur: 32px;
+
+  --glass-inset-bg: rgb(255 255 255 / 0.5);
+  --glass-inset-border: rgb(23 37 84 / 0.1);
+
+  --glass-selected-bg: rgb(255 255 255 / 0.88);
+  --glass-selected-shadow: 0 1px 2px rgb(15 23 42 / 0.07), 0 6px 16px -6px rgb(23 37 84 / 0.4);
+
+  --glass-divider: rgb(23 37 84 / 0.1);
+  --glass-scrim: rgb(15 23 42 / 0.28);
+}
+
+.dark[data-theme='navy'],
+.dark [data-theme='navy'] {
+  --accent-500: var(--color-blue-600);
+  --accent-600: var(--color-blue-700);
+  --accent-700: var(--color-blue-800);
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='80'><g fill='none' stroke='%2393c5fd' stroke-width='1.2' stroke-linecap='round'><path stroke-opacity='0.06' d='M0 20 C20 12 33 12 53 20 S87 28 107 20 S140 12 160 20'/><path stroke-opacity='0.035' d='M0 60 C20 52 33 52 53 60 S87 68 107 60 S140 52 160 60'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(55% 50% at 0% 0%, rgb(30 58 138 / 0.5), transparent 70%),
+    radial-gradient(45% 45% at 100% 0%, rgb(217 119 6 / 0.14), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(23 37 84 / 0.4), transparent 70%),
+    radial-gradient(50% 50% at 92% 100%, rgb(37 99 235 / 0.18), transparent 70%),
+    radial-gradient(45% 50% at 5% 100%, rgb(30 41 59 / 0.5), transparent 70%),
+    linear-gradient(180deg, #0a1022, #060a16);
+
+  --glass-bg: rgb(219 234 254 / 0.06);
+  --glass-bg-hover: rgb(219 234 254 / 0.1);
+  --glass-border: rgb(191 219 254 / 0.14);
+  --glass-border-hover: rgb(191 219 254 / 0.22);
+  --glass-highlight: rgb(255 255 255 / 0.1);
+  --glass-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 14px 36px -14px rgb(2 6 23 / 0.85);
+
+  --glass-strong-bg: rgb(15 23 42 / 0.75);
+  --glass-strong-shadow: 0 2px 8px rgb(0 0 0 / 0.35), 0 28px 64px -16px rgb(2 6 23 / 0.9);
+  --glass-blur: 32px;
+
+  --glass-inset-bg: rgb(219 234 254 / 0.05);
+  --glass-inset-border: rgb(191 219 254 / 0.1);
+
+  --glass-selected-bg: rgb(219 234 254 / 0.11);
+  --glass-selected-shadow: 0 1px 3px rgb(0 0 0 / 0.4), 0 6px 16px -8px rgb(251 191 36 / 0.18);
+
+  --glass-divider: rgb(191 219 254 / 0.09);
+  --glass-scrim: rgb(0 0 0 / 0.5);
+}
+
+/* Lavender Dream (category Girls): violet over lilac and baby blue, with a crescent moon and stars. */
+[data-theme='lavender'] {
+  --accent-50: var(--color-violet-50);
+  --accent-100: var(--color-violet-100);
+  --accent-200: var(--color-violet-200);
+  --accent-300: var(--color-violet-300);
+  --accent-400: var(--color-violet-400);
+  --accent-500: var(--color-violet-500);
+  --accent-600: var(--color-violet-600);
+  --accent-700: var(--color-violet-700);
+  --accent-800: var(--color-violet-800);
+  --accent-900: var(--color-violet-900);
+  --accent-950: var(--color-violet-950);
+  --accent-alt: var(--color-sky-300);
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><g fill='%23ffffff' fill-opacity='0.6'><path d='M44 22 A16 16 0 1 0 60 44 A12 12 0 1 1 44 22 Z'/><path d='M120 33 C121.05 38.95 121.05 38.95 127 40 C121.05 41.05 121.05 41.05 120 47 C118.95 41.05 118.95 41.05 113 40 C118.95 38.95 118.95 38.95 120 33 Z'/><path d='M96 113 C96.75 117.25 96.75 117.25 101 118 C96.75 118.75 96.75 118.75 96 123 C95.25 118.75 95.25 118.75 91 118 C95.25 117.25 95.25 117.25 96 113 Z'/><path d='M28 124 C28.6 127.4 28.6 127.4 32 128 C28.6 128.6 28.6 128.6 28 132 C27.4 128.6 27.4 128.6 24 128 C27.4 127.4 27.4 127.4 28 124 Z'/><circle cx='140' cy='100' r='1.6'/><circle cx='70' cy='86' r='1.2'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(196 181 253 / 0.5), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(186 230 253 / 0.55), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(233 213 255 / 0.5), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(167 139 250 / 0.3), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(251 207 232 / 0.35), transparent 70%),
+    linear-gradient(180deg, #f5f3ff, #f1f0fb);
+}
+
+.dark[data-theme='lavender'],
+.dark [data-theme='lavender'] {
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><g fill='%23ddd6fe' fill-opacity='0.08'><path d='M44 22 A16 16 0 1 0 60 44 A12 12 0 1 1 44 22 Z'/><path d='M120 33 C121.05 38.95 121.05 38.95 127 40 C121.05 41.05 121.05 41.05 120 47 C118.95 41.05 118.95 41.05 113 40 C118.95 38.95 118.95 38.95 120 33 Z'/><path d='M96 113 C96.75 117.25 96.75 117.25 101 118 C96.75 118.75 96.75 118.75 96 123 C95.25 118.75 95.25 118.75 91 118 C95.25 117.25 95.25 117.25 96 113 Z'/><path d='M28 124 C28.6 127.4 28.6 127.4 32 128 C28.6 128.6 28.6 128.6 28 132 C27.4 128.6 27.4 128.6 24 128 C27.4 127.4 27.4 127.4 28 124 Z'/><circle cx='140' cy='100' r='1.6'/><circle cx='70' cy='86' r='1.2'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(124 58 237 / 0.32), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(99 102 241 / 0.18), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(88 28 135 / 0.3), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(14 165 233 / 0.12), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(76 29 149 / 0.35), transparent 70%),
+    linear-gradient(180deg, #100c1c, #0a0812);
+}
+
+/* Peach (category Girls): warm peach accent (orange mixed with rose) over peach, cream and soft yellow, with little hearts. */
+[data-theme='peach'] {
+  --accent-50: color-mix(in oklab, var(--color-orange-50) 65%, var(--color-rose-50));
+  --accent-100: color-mix(in oklab, var(--color-orange-100) 65%, var(--color-rose-100));
+  --accent-200: color-mix(in oklab, var(--color-orange-200) 65%, var(--color-rose-200));
+  --accent-300: color-mix(in oklab, var(--color-orange-300) 65%, var(--color-rose-300));
+  --accent-400: color-mix(in oklab, var(--color-orange-400) 65%, var(--color-rose-400));
+  --accent-500: color-mix(in oklab, var(--color-orange-500) 65%, var(--color-rose-500));
+  --accent-600: color-mix(in oklab, var(--color-orange-600) 65%, var(--color-rose-600));
+  --accent-700: color-mix(in oklab, var(--color-orange-700) 65%, var(--color-rose-700));
+  --accent-800: color-mix(in oklab, var(--color-orange-800) 65%, var(--color-rose-800));
+  --accent-900: color-mix(in oklab, var(--color-orange-900) 65%, var(--color-rose-900));
+  --accent-950: color-mix(in oklab, var(--color-orange-950) 65%, var(--color-rose-950));
+  --accent-alt: var(--color-amber-300);
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><g fill='%23ffffff' fill-opacity='0.55'><path transform='translate(30 34) scale(1.3)' d='M0 8 C-8 2 -10 -3 -7 -6 C-4 -9 -1 -7 0 -5 C1 -7 4 -9 7 -6 C10 -3 8 2 0 8 Z'/><path transform='translate(104 96) scale(1)' d='M0 8 C-8 2 -10 -3 -7 -6 C-4 -9 -1 -7 0 -5 C1 -7 4 -9 7 -6 C10 -3 8 2 0 8 Z'/><path transform='translate(96 26) scale(0.7)' d='M0 8 C-8 2 -10 -3 -7 -6 C-4 -9 -1 -7 0 -5 C1 -7 4 -9 7 -6 C10 -3 8 2 0 8 Z'/><path transform='translate(30 112) scale(0.8)' d='M0 8 C-8 2 -10 -3 -7 -6 C-4 -9 -1 -7 0 -5 C1 -7 4 -9 7 -6 C10 -3 8 2 0 8 Z'/><circle cx='66' cy='66' r='1.5'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(253 186 116 / 0.5), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(253 230 138 / 0.5), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(254 205 211 / 0.45), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(254 215 170 / 0.55), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(253 164 175 / 0.35), transparent 70%),
+    linear-gradient(180deg, #fff7f0, #fdf4ee);
+}
+
+.dark[data-theme='peach'],
+.dark [data-theme='peach'] {
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><g fill='%23fed7aa' fill-opacity='0.07'><path transform='translate(30 34) scale(1.3)' d='M0 8 C-8 2 -10 -3 -7 -6 C-4 -9 -1 -7 0 -5 C1 -7 4 -9 7 -6 C10 -3 8 2 0 8 Z'/><path transform='translate(104 96) scale(1)' d='M0 8 C-8 2 -10 -3 -7 -6 C-4 -9 -1 -7 0 -5 C1 -7 4 -9 7 -6 C10 -3 8 2 0 8 Z'/><path transform='translate(96 26) scale(0.7)' d='M0 8 C-8 2 -10 -3 -7 -6 C-4 -9 -1 -7 0 -5 C1 -7 4 -9 7 -6 C10 -3 8 2 0 8 Z'/><path transform='translate(30 112) scale(0.8)' d='M0 8 C-8 2 -10 -3 -7 -6 C-4 -9 -1 -7 0 -5 C1 -7 4 -9 7 -6 C10 -3 8 2 0 8 Z'/><circle cx='66' cy='66' r='1.5'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(234 88 12 / 0.28), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(245 158 11 / 0.14), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(190 18 60 / 0.18), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(154 52 18 / 0.25), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(136 19 55 / 0.25), transparent 70%),
+    linear-gradient(180deg, #160d0a, #0d0907);
+}
+
+/* Matcha (category Girls): muted green (green mixed with stone) over mint, cream and sage, with small leaves. */
+[data-theme='matcha'] {
+  --accent-50: color-mix(in oklab, var(--color-green-50) 70%, var(--color-stone-50));
+  --accent-100: color-mix(in oklab, var(--color-green-100) 70%, var(--color-stone-100));
+  --accent-200: color-mix(in oklab, var(--color-green-200) 70%, var(--color-stone-200));
+  --accent-300: color-mix(in oklab, var(--color-green-300) 70%, var(--color-stone-300));
+  --accent-400: color-mix(in oklab, var(--color-green-400) 70%, var(--color-stone-400));
+  --accent-500: color-mix(in oklab, var(--color-green-500) 70%, var(--color-stone-500));
+  --accent-600: color-mix(in oklab, var(--color-green-600) 70%, var(--color-stone-600));
+  --accent-700: color-mix(in oklab, var(--color-green-700) 70%, var(--color-stone-700));
+  --accent-800: color-mix(in oklab, var(--color-green-800) 70%, var(--color-stone-800));
+  --accent-900: color-mix(in oklab, var(--color-green-900) 70%, var(--color-stone-900));
+  --accent-950: color-mix(in oklab, var(--color-green-950) 70%, var(--color-stone-950));
+  --accent-alt: var(--color-lime-300);
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='150' height='150'><g fill='%23ffffff' fill-opacity='0.6'><g transform='translate(32 36) rotate(35) scale(1.2)'><path d='M0 -10 C7 -5 7 5 0 10 C-7 5 -7 -5 0 -10 Z'/><path d='M0 -8 L0 8' stroke='%23ffffff' stroke-opacity='0.6' stroke-width='0.8' fill='none'/></g><g transform='translate(110 100) rotate(-40) scale(1)'><path d='M0 -10 C7 -5 7 5 0 10 C-7 5 -7 -5 0 -10 Z'/><path d='M0 -8 L0 8' stroke='%23ffffff' stroke-opacity='0.6' stroke-width='0.8' fill='none'/></g><g transform='translate(112 30) rotate(70) scale(0.7)'><path d='M0 -10 C7 -5 7 5 0 10 C-7 5 -7 -5 0 -10 Z'/><path d='M0 -8 L0 8' stroke='%23ffffff' stroke-opacity='0.6' stroke-width='0.8' fill='none'/></g><g transform='translate(36 118) rotate(-15) scale(0.8)'><path d='M0 -10 C7 -5 7 5 0 10 C-7 5 -7 -5 0 -10 Z'/><path d='M0 -8 L0 8' stroke='%23ffffff' stroke-opacity='0.6' stroke-width='0.8' fill='none'/></g></g></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(187 247 208 / 0.5), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(217 249 157 / 0.45), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(231 229 228 / 0.5), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(110 231 183 / 0.35), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(254 243 199 / 0.5), transparent 70%),
+    linear-gradient(180deg, #f4f8f1, #f1f5ee);
+}
+
+.dark[data-theme='matcha'],
+.dark [data-theme='matcha'] {
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='150' height='150'><g fill='%23bbf7d0' fill-opacity='0.07'><g transform='translate(32 36) rotate(35) scale(1.2)'><path d='M0 -10 C7 -5 7 5 0 10 C-7 5 -7 -5 0 -10 Z'/><path d='M0 -8 L0 8' stroke='%23bbf7d0' stroke-opacity='0.07' stroke-width='0.8' fill='none'/></g><g transform='translate(110 100) rotate(-40) scale(1)'><path d='M0 -10 C7 -5 7 5 0 10 C-7 5 -7 -5 0 -10 Z'/><path d='M0 -8 L0 8' stroke='%23bbf7d0' stroke-opacity='0.07' stroke-width='0.8' fill='none'/></g><g transform='translate(112 30) rotate(70) scale(0.7)'><path d='M0 -10 C7 -5 7 5 0 10 C-7 5 -7 -5 0 -10 Z'/><path d='M0 -8 L0 8' stroke='%23bbf7d0' stroke-opacity='0.07' stroke-width='0.8' fill='none'/></g><g transform='translate(36 118) rotate(-15) scale(0.8)'><path d='M0 -10 C7 -5 7 5 0 10 C-7 5 -7 -5 0 -10 Z'/><path d='M0 -8 L0 8' stroke='%23bbf7d0' stroke-opacity='0.07' stroke-width='0.8' fill='none'/></g></g></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(21 128 61 / 0.3), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(101 163 13 / 0.14), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(6 78 59 / 0.3), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(20 83 45 / 0.3), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(41 37 36 / 0.4), transparent 70%),
+    linear-gradient(180deg, #0b120d, #070b08);
+}
+
+/* Carbon (category Mens): orange accent over an almost monochrome graphite backdrop, with a carbon-fibre weave. */
+[data-theme='carbon'] {
+  --accent-50: var(--color-orange-50);
+  --accent-100: var(--color-orange-100);
+  --accent-200: var(--color-orange-200);
+  --accent-300: var(--color-orange-300);
+  --accent-400: var(--color-orange-400);
+  --accent-500: var(--color-orange-500);
+  --accent-600: var(--color-orange-600);
+  --accent-700: var(--color-orange-700);
+  --accent-800: var(--color-orange-800);
+  --accent-900: var(--color-orange-900);
+  --accent-950: var(--color-orange-950);
+  --accent-alt: var(--color-amber-400);
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'><g fill='%23000000' fill-opacity='0.045'><rect width='4' height='4'/><rect x='4' y='4' width='4' height='4'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(163 163 163 / 0.35), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(253 186 116 / 0.3), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(212 212 212 / 0.4), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(115 115 115 / 0.25), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(254 215 170 / 0.25), transparent 70%),
+    linear-gradient(180deg, #f2f2f2, #e9e9ea);
+}
+
+.dark[data-theme='carbon'],
+.dark [data-theme='carbon'] {
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'><g fill='%23ffffff' fill-opacity='0.025'><rect width='4' height='4'/><rect x='4' y='4' width='4' height='4'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(64 64 64 / 0.45), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(234 88 12 / 0.18), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(38 38 38 / 0.5), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(124 45 18 / 0.2), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(23 23 23 / 0.5), transparent 70%),
+    linear-gradient(180deg, #121212, #0a0a0a);
+}
+
+/* Forest (category Mens): olive accent (lime mixed with stone) over deep green and earth, with map contour lines. */
+[data-theme='forest'] {
+  --accent-50: color-mix(in oklab, var(--color-lime-50) 55%, var(--color-stone-50));
+  --accent-100: color-mix(in oklab, var(--color-lime-100) 55%, var(--color-stone-100));
+  --accent-200: color-mix(in oklab, var(--color-lime-200) 55%, var(--color-stone-200));
+  --accent-300: color-mix(in oklab, var(--color-lime-300) 55%, var(--color-stone-300));
+  --accent-400: color-mix(in oklab, var(--color-lime-400) 55%, var(--color-stone-400));
+  --accent-500: color-mix(in oklab, var(--color-lime-500) 55%, var(--color-stone-500));
+  --accent-600: color-mix(in oklab, var(--color-lime-600) 55%, var(--color-stone-600));
+  --accent-700: color-mix(in oklab, var(--color-lime-700) 55%, var(--color-stone-700));
+  --accent-800: color-mix(in oklab, var(--color-lime-800) 55%, var(--color-stone-800));
+  --accent-900: color-mix(in oklab, var(--color-lime-900) 55%, var(--color-stone-900));
+  --accent-950: color-mix(in oklab, var(--color-lime-950) 55%, var(--color-stone-950));
+  --accent-alt: var(--color-amber-600);
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><g fill='none' stroke='%23365314' stroke-opacity='0.1' stroke-width='1.2'><path transform='translate(0.0 0.0) scale(1)' d='M100 40 C150 38 172 80 162 112 C152 150 92 162 60 132 C30 104 48 42 100 40 Z'/><path transform='translate(29.4 27.2) scale(0.72)' d='M100 40 C150 38 172 80 162 112 C152 150 92 162 60 132 C30 104 48 42 100 40 Z'/><path transform='translate(57.8 53.4) scale(0.45)' d='M100 40 C150 38 172 80 162 112 C152 150 92 162 60 132 C30 104 48 42 100 40 Z'/><path transform='translate(84.0 77.6) scale(0.2)' d='M100 40 C150 38 172 80 162 112 C152 150 92 162 60 132 C30 104 48 42 100 40 Z'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(22 101 52 / 0.3), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(252 211 77 / 0.25), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(214 211 209 / 0.4), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(77 124 15 / 0.25), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(4 120 87 / 0.22), transparent 70%),
+    linear-gradient(180deg, #f3f4ee, #eceee6);
+}
+
+.dark[data-theme='forest'],
+.dark [data-theme='forest'] {
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><g fill='none' stroke='%23d9f99d' stroke-opacity='0.05' stroke-width='1.2'><path transform='translate(0.0 0.0) scale(1)' d='M100 40 C150 38 172 80 162 112 C152 150 92 162 60 132 C30 104 48 42 100 40 Z'/><path transform='translate(29.4 27.2) scale(0.72)' d='M100 40 C150 38 172 80 162 112 C152 150 92 162 60 132 C30 104 48 42 100 40 Z'/><path transform='translate(57.8 53.4) scale(0.45)' d='M100 40 C150 38 172 80 162 112 C152 150 92 162 60 132 C30 104 48 42 100 40 Z'/><path transform='translate(84.0 77.6) scale(0.2)' d='M100 40 C150 38 172 80 162 112 C152 150 92 162 60 132 C30 104 48 42 100 40 Z'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(20 83 45 / 0.45), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(180 83 9 / 0.15), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(41 37 36 / 0.45), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(54 83 20 / 0.35), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(2 44 34 / 0.5), transparent 70%),
+    linear-gradient(180deg, #0c110b, #080b07);
+}
+
+/* Terminal (category Mens): neon green on near-black, with faint CRT scanlines. Best in dark mode; the light variant is a pale green-white. */
+[data-theme='terminal'] {
+  --accent-50: var(--color-green-50);
+  --accent-100: var(--color-green-100);
+  --accent-200: var(--color-green-200);
+  --accent-300: var(--color-green-300);
+  --accent-400: var(--color-green-400);
+  --accent-500: var(--color-green-500);
+  --accent-600: var(--color-green-600);
+  --accent-700: var(--color-green-700);
+  --accent-800: var(--color-green-800);
+  --accent-900: var(--color-green-900);
+  --accent-950: var(--color-green-950);
+  --accent-alt: var(--color-emerald-300);
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'><rect width='4' height='1' fill='%23000000' fill-opacity='0.03'/></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(134 239 172 / 0.35), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(167 243 208 / 0.35), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(229 229 229 / 0.4), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(187 247 208 / 0.4), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(217 249 157 / 0.3), transparent 70%),
+    linear-gradient(180deg, #f3f7f3, #eef3ef);
+}
+
+.dark[data-theme='terminal'],
+.dark [data-theme='terminal'] {
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'><rect width='4' height='1' fill='%23000000' fill-opacity='0.25'/></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(34 197 94 / 0.16), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(5 150 105 / 0.12), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(23 23 23 / 0.6), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(20 83 45 / 0.3), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(10 10 10 / 0.6), transparent 70%),
+    linear-gradient(180deg, #050805, #020402);
+}
+
+/* "Reduce motion" on the Appearance page. */
+.reduce-motion *,
+.reduce-motion *::before,
+.reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* "Show background decoration" switched off on the Appearance page. Also
+   reaches the preview cards, so they show what the app will look like. */
+.no-decoration,
+.no-decoration [data-theme] {
+  --app-pattern: none !important;
 }
 
 /* A native <select>'s option list is painted from the options' own colours,
@@ -116,12 +747,20 @@ body,
     background-color: var(--color-neutral-900);
     color: var(--color-neutral-100);
   }
+
+  /* Native checkboxes, radios and sliders otherwise come out in the OS's
+     blue. */
+  input[type='checkbox'],
+  input[type='radio'],
+  input[type='range'] {
+    accent-color: var(--accent-500);
+  }
 }
 
 /* The app backdrop the glass sits on. Static on purpose: animating it would
    make every blurred layer re-sample the backdrop on every frame. */
 @utility bg-app {
-  background: var(--app-mesh);
+  background: var(--app-pattern), var(--app-mesh);
 }
 
 /* Components layer, not `@utility`: a plain Tailwind class on the same
@@ -130,6 +769,7 @@ body,
    regardless of the order the two end up in the stylesheet. */
 @layer components {
   .glass {
+    background-image: linear-gradient(var(--glass-fill), var(--glass-fill));
     background-color: var(--glass-bg);
     border: 1px solid var(--glass-border);
     box-shadow:
@@ -145,12 +785,13 @@ body,
   }
 
   .glass-strong {
+    background-image: linear-gradient(var(--glass-fill), var(--glass-fill));
     background-color: var(--glass-strong-bg);
     border: 1px solid var(--glass-border);
     box-shadow:
       inset 0 1px 0 0 var(--glass-highlight),
       var(--glass-strong-shadow);
-    backdrop-filter: blur(24px) saturate(180%);
+    backdrop-filter: blur(var(--glass-blur)) saturate(180%);
   }
 
   .glass-inset {
@@ -161,15 +802,22 @@ body,
   .glass-selected {
     background-color: var(--glass-selected-bg);
     border: 1px solid var(--glass-selected-border);
-    box-shadow: inset 0 1px 0 0 var(--glass-highlight);
+    box-shadow:
+      inset 0 1px 0 0 var(--glass-highlight),
+      var(--glass-selected-shadow);
+
+    & svg {
+      color: var(--glass-accent-icon);
+    }
   }
 
   .glass-btn {
+    background-image: linear-gradient(var(--glass-fill), var(--glass-fill));
     background-color: var(--glass-bg);
     border: 1px solid var(--glass-border);
     box-shadow:
       inset 0 1px 0 0 var(--glass-highlight),
-      0 1px 2px rgb(0 0 0 / 0.05);
+      var(--glass-shadow);
 
     &:hover:not(:disabled) {
       background-color: var(--glass-bg-hover);
@@ -178,16 +826,60 @@ body,
   }
 
   .glass-accent {
-    color: var(--color-white);
-    background-image: linear-gradient(180deg, var(--color-red-500), var(--color-red-600));
-    border: 1px solid rgb(153 27 27 / 0.35);
+    color: var(--glass-accent-text);
+    background-color: var(--glass-accent-bg);
+    border: 1px solid var(--glass-accent-border);
     box-shadow:
-      inset 0 1px 0 0 rgb(255 255 255 / 0.3),
-      0 8px 20px -8px rgb(220 38 38 / 0.6);
+      inset 0 1px 0 0 var(--glass-highlight),
+      var(--glass-accent-shadow);
+
+    /* Components layer, so an icon given its own colour class (a green
+       play, say) still wins over this. */
+    & svg {
+      color: var(--glass-accent-icon);
+    }
 
     &:hover:not(:disabled) {
-      background-image: linear-gradient(180deg, var(--color-red-400), var(--color-red-500));
+      background-color: var(--glass-accent-bg-hover);
     }
+  }
+
+  .glass-raised {
+    background-color: var(--glass-raised-bg);
+    box-shadow: var(--glass-raised-shadow);
+
+    &:hover:not(:disabled) {
+      background-color: var(--glass-raised-bg-hover);
+    }
+  }
+
+  .glass-ghost {
+    color: var(--glass-ghost-text);
+
+    &:hover:not(:disabled) {
+      color: var(--glass-ghost-text-hover);
+      background-color: var(--glass-ghost-bg-hover);
+    }
+  }
+
+  /* A pressed button sinks by a pixel — the one bit of feedback a click on
+     a translucent control otherwise lacks. Only while held, so the
+     transform's stacking context never outlives the click. */
+  :is(.glass-btn, .glass-accent, .glass-raised, .glass-ghost):active:not(:disabled) {
+    translate: 0 1px;
+  }
+
+  /* A placed sticker (Decorations page): a white die-cut edge plus a soft
+     drop shadow, so the art reads as a sticker on any theme. Drawn with
+     filters rather than baked into the SVGs, so the edge stays the same
+     thickness at every sticker size. */
+  .sticker {
+    position: absolute;
+    max-width: none;
+    user-select: none;
+    -webkit-user-drag: none;
+    filter: drop-shadow(1.5px 0 0 #fff) drop-shadow(-1.5px 0 0 #fff) drop-shadow(0 1.5px 0 #fff)
+      drop-shadow(0 -1.5px 0 #fff) drop-shadow(0 3px 4px rgb(0 0 0 / 0.18));
   }
 
   .glass-divider {

@@ -33,6 +33,9 @@ const LEVELS: { value: LogLevel | null; label: string }[] = [
   { value: 'error', label: 'Error' },
 ]
 
+/** The chosen segment of the service and level pickers. */
+const SEGMENT_ON_CLASS = 'glass-raised text-neutral-900 dark:text-neutral-50'
+
 const filtered = computed(() =>
   store.filtered(selectedService.value, selectedLevel.value, search.value),
 )
@@ -53,16 +56,32 @@ function levelClass(level: LogLevel) {
       </div>
 
       <div class="flex shrink-0 items-center gap-2">
+        <!-- Same language as a service's Start/Stop: one neutral button whose
+             icon carries the state — green play to resume, accent-coloured bars to pause. -->
         <button
           type="button"
-          class="rounded-full px-4 py-2 text-sm font-semibold transition"
-          :class="
-            store.paused
-              ? 'glass-btn text-neutral-700 dark:text-neutral-200'
-              : 'border border-red-500/25 bg-red-500/10 text-red-600 hover:bg-red-500/20 dark:border-red-400/25 dark:bg-red-500/15 dark:text-red-400 dark:hover:bg-red-500/25'
-          "
+          class="glass-accent flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition"
           @click="store.togglePause"
         >
+          <svg
+            v-if="store.paused"
+            viewBox="0 0 10 10"
+            fill="currentColor"
+            aria-hidden="true"
+            class="h-2.5 w-2.5 text-emerald-500"
+          >
+            <path d="M1.5 0.8 9 5 1.5 9.2Z" />
+          </svg>
+          <svg
+            v-else
+            viewBox="0 0 10 10"
+            fill="currentColor"
+            aria-hidden="true"
+            class="h-2.5 w-2.5"
+          >
+            <rect x="1.5" y="1" width="2.5" height="8" rx="0.8" />
+            <rect x="6" y="1" width="2.5" height="8" rx="0.8" />
+          </svg>
           {{ store.paused ? 'Resume' : 'Pause' }}
         </button>
         <button
@@ -78,15 +97,13 @@ function levelClass(level: LogLevel) {
     <div class="mt-5 flex flex-wrap items-center gap-2">
       <SearchInput v-model="search" placeholder="Filter log text" class="min-w-55 flex-1" />
 
-      <div class="flex flex-wrap items-center gap-1.5">
+      <!-- A segmented control, like the level picker beside it: the chosen
+           filter is the lifted segment, the rest stay bare until hovered. -->
+      <div class="glass flex flex-wrap items-center gap-0.5 rounded-2xl p-1">
         <button
           type="button"
-          class="rounded-full px-3.5 py-1.5 text-sm font-medium transition"
-          :class="
-            selectedService === null
-              ? 'glass-accent'
-              : 'glass-btn text-neutral-600 dark:text-neutral-300'
-          "
+          class="rounded-full px-3 py-1 text-sm font-medium transition"
+          :class="selectedService === null ? SEGMENT_ON_CLASS : 'glass-ghost'"
           @click="selectedService = null"
         >
           All services
@@ -95,12 +112,8 @@ function levelClass(level: LogLevel) {
           v-for="service in filterableServices"
           :key="service"
           type="button"
-          class="rounded-full px-3.5 py-1.5 text-sm font-medium transition"
-          :class="
-            selectedService === service
-              ? 'glass-accent'
-              : 'glass-btn text-neutral-600 dark:text-neutral-300'
-          "
+          class="rounded-full px-3 py-1 text-sm font-medium transition"
+          :class="selectedService === service ? SEGMENT_ON_CLASS : 'glass-ghost'"
           @click="selectedService = service"
         >
           {{ service }}
@@ -113,11 +126,7 @@ function levelClass(level: LogLevel) {
           :key="level.label"
           type="button"
           class="rounded-full px-3 py-1 text-xs font-semibold transition"
-          :class="
-            selectedLevel === level.value
-              ? 'glass-accent'
-              : 'border border-transparent text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-100'
-          "
+          :class="selectedLevel === level.value ? SEGMENT_ON_CLASS : 'glass-ghost'"
           @click="selectedLevel = level.value"
         >
           {{ level.label }}

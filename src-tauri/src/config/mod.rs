@@ -7,3 +7,4 @@ pub mod device;
 pub mod links;
 pub mod profiles;
 pub mod settings;
+pub mod stickers;
