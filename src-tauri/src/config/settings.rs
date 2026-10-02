@@ -113,6 +113,15 @@ pub enum ThemePreset {
     Forest,
     /// Category "Mens": neon green on black, scanlines.
     Terminal,
+    /// Category "Default": the clearest glass, over an iridescent backdrop.
+    /// Stored as `"fullglass"`.
+    FullGlass,
+    /// Category "Default": Full Glass without the colour — clear glass on
+    /// white. Stored as `"clearglass"`.
+    ClearGlass,
+    /// Category "Default": sky-tinted frosted glass over a dusk sky, always
+    /// with white text. Stored as `"skyglass"`.
+    SkyGlass,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -485,6 +494,9 @@ mod tests {
             ("carbon", ThemePreset::Carbon),
             ("forest", ThemePreset::Forest),
             ("terminal", ThemePreset::Terminal),
+            ("fullglass", ThemePreset::FullGlass),
+            ("clearglass", ThemePreset::ClearGlass),
+            ("skyglass", ThemePreset::SkyGlass),
         ] {
             let json = format!(r#"{{"defaultPort":80,"appearance":{{"theme":"{name}"}}}}"#);
             std::fs::write(&path, json).unwrap();

@@ -11,6 +11,10 @@ export interface ThemeInfo {
   name: string
   category: ThemeCategory
   description: string
+  /** Always drawn with the dark text colours, whatever the light/dark
+   *  choice — for themes whose backdrop is mid-tone, where dark text would
+   *  be as unreadable as light text on white. */
+  forcesDark?: boolean
 }
 
 /** The themes, grouped by category on the page. The colours are in `main.css`, under
@@ -21,6 +25,25 @@ export const THEMES: readonly ThemeInfo[] = [
     name: 'Rezure',
     category: 'Default',
     description: 'Coral red over a warm glass backdrop.',
+  },
+  {
+    id: 'fullglass',
+    name: 'Full Glass',
+    category: 'Default',
+    description: 'Crystal-clear glass over an iridescent backdrop.',
+  },
+  {
+    id: 'clearglass',
+    name: 'Clear Glass',
+    category: 'Default',
+    description: 'Colourless glass on white — pure light and edges.',
+  },
+  {
+    id: 'skyglass',
+    name: 'Sky Glass',
+    category: 'Default',
+    description: 'Frosted, sky-tinted panels over a dusk sky. Always white text.',
+    forcesDark: true,
   },
   {
     id: 'blossom',
@@ -198,8 +221,13 @@ export const useAppearanceStore = defineStore('appearance', () => {
     systemDark.value = e.matches
   })
 
-  const isDark = computed(() =>
-    mode.value === 'system' ? systemDark.value : mode.value === 'dark',
+  /** The theme only works with white text (see `ThemeInfo.forcesDark`); the
+   *  title bar's Light/Dark button is disabled meanwhile. */
+  const isDarkForced = computed(() => THEMES.find((t) => t.id === theme.value)?.forcesDark === true)
+
+  const isDark = computed(
+    () =>
+      isDarkForced.value || (mode.value === 'system' ? systemDark.value : mode.value === 'dark'),
   )
 
   const current = computed<AppearanceSettings>(() => ({
@@ -366,6 +394,7 @@ export const useAppearanceStore = defineStore('appearance', () => {
     reduceMotion,
     isAdjusted,
     isDark,
+    isDarkForced,
     error,
     load,
     setMode,

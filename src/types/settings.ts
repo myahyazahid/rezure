@@ -5,6 +5,9 @@ export type ThemeMode = 'light' | 'dark' | 'system'
 /** Mirrors `config::settings::ThemePreset`; the colours live in `main.css`. */
 export type ThemePreset =
   | 'rezure'
+  | 'fullglass'
+  | 'clearglass'
+  | 'skyglass'
   | 'blossom'
   | 'softpink'
   | 'lavender'

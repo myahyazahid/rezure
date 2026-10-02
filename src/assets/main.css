@@ -716,6 +716,381 @@ body,
     linear-gradient(180deg, #050805, #020402);
 }
 
+/* Full Glass (category Default): as clear as the glass gets. Panels are
+   almost fully transparent and carried by their bright edges and top
+   highlights; floating layers get the strongest blur. The backdrop is
+   vivid and iridescent on purpose, because clear glass is only visible
+   through what is behind it. Regular panels still don't blur (see the note
+   at the top of this file), so the clarity comes from transparency, not
+   frosting. Replaces glass tokens, so the dark block must override every
+   token this one does. */
+[data-theme='fullglass'] {
+  --accent-50: var(--color-sky-50);
+  --accent-100: var(--color-sky-100);
+  --accent-200: var(--color-sky-200);
+  --accent-300: var(--color-sky-300);
+  --accent-400: var(--color-sky-400);
+  --accent-500: var(--color-sky-500);
+  --accent-600: var(--color-sky-600);
+  --accent-700: var(--color-sky-700);
+  --accent-800: var(--color-sky-800);
+  --accent-900: var(--color-sky-900);
+  --accent-950: var(--color-sky-950);
+  --accent-alt: var(--color-violet-400);
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><g fill='none' stroke='%23ffffff' stroke-linecap='round'><path stroke-opacity='0.18' stroke-width='10' d='M-20 120 L120 -20'/><path stroke-opacity='0.35' stroke-width='3' d='M10 150 L150 10'/><path stroke-opacity='0.35' stroke-width='2' d='M120 240 L240 120'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(55% 50% at 0% 0%, rgb(103 232 249 / 0.6), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(196 181 253 / 0.65), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(249 168 212 / 0.4), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(125 211 252 / 0.6), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(167 139 250 / 0.45), transparent 70%),
+    linear-gradient(135deg, #ecfeff, #f5f3ff 50%, #fdf2f8);
+
+  --glass-bg: rgb(255 255 255 / 0.14);
+  --glass-bg-hover: rgb(255 255 255 / 0.3);
+  --glass-border: rgb(255 255 255 / 0.95);
+  --glass-border-hover: rgb(255 255 255);
+  --glass-highlight: rgb(255 255 255);
+  --glass-shadow:
+    0 1px 2px rgb(15 23 42 / 0.04), 0 18px 44px -16px rgb(14 116 144 / 0.25),
+    inset 0 -1px 0 rgb(255 255 255 / 0.35);
+
+  --glass-strong-bg: rgb(255 255 255 / 0.4);
+  --glass-strong-shadow: 0 2px 8px rgb(15 23 42 / 0.05), 0 30px 70px -18px rgb(14 116 144 / 0.35);
+  --glass-blur: 48px;
+
+  --glass-inset-bg: rgb(255 255 255 / 0.18);
+  --glass-inset-border: rgb(255 255 255 / 0.8);
+
+  --glass-selected-bg: rgb(255 255 255 / 0.5);
+  --glass-selected-shadow: 0 1px 2px rgb(15 23 42 / 0.05), 0 6px 18px -6px rgb(14 116 144 / 0.3);
+
+  --glass-accent-bg: rgb(255 255 255 / 0.6);
+  --glass-accent-bg-hover: rgb(255 255 255 / 0.8);
+  --glass-accent-border: rgb(255 255 255 / 0.95);
+
+  --glass-raised-bg: rgb(255 255 255 / 0.6);
+  --glass-raised-bg-hover: rgb(255 255 255 / 0.8);
+
+  --glass-ghost-bg-hover: rgb(255 255 255 / 0.45);
+
+  --glass-divider: rgb(255 255 255 / 0.6);
+  --glass-scrim: rgb(15 23 42 / 0.12);
+}
+
+.dark[data-theme='fullglass'],
+.dark [data-theme='fullglass'] {
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><g fill='none' stroke='%23ffffff' stroke-linecap='round'><path stroke-opacity='0.03' stroke-width='10' d='M-20 120 L120 -20'/><path stroke-opacity='0.06' stroke-width='3' d='M10 150 L150 10'/><path stroke-opacity='0.06' stroke-width='2' d='M120 240 L240 120'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(55% 50% at 0% 0%, rgb(8 145 178 / 0.45), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(124 58 237 / 0.4), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(219 39 119 / 0.2), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(2 132 199 / 0.4), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(109 40 217 / 0.35), transparent 70%),
+    linear-gradient(135deg, #04121a, #0b0816 50%, #12060f);
+
+  --glass-bg: rgb(255 255 255 / 0.03);
+  --glass-bg-hover: rgb(255 255 255 / 0.07);
+  --glass-border: rgb(255 255 255 / 0.2);
+  --glass-border-hover: rgb(255 255 255 / 0.3);
+  --glass-highlight: rgb(255 255 255 / 0.22);
+  --glass-shadow:
+    0 1px 2px rgb(0 0 0 / 0.25), 0 16px 40px -16px rgb(0 0 0 / 0.6),
+    inset 0 -1px 0 rgb(255 255 255 / 0.05);
+
+  --glass-strong-bg: rgb(20 20 32 / 0.45);
+  --glass-strong-shadow: 0 2px 8px rgb(0 0 0 / 0.3), 0 28px 64px -16px rgb(0 0 0 / 0.75);
+  --glass-blur: 48px;
+
+  --glass-inset-bg: rgb(255 255 255 / 0.04);
+  --glass-inset-border: rgb(255 255 255 / 0.14);
+
+  --glass-selected-bg: rgb(255 255 255 / 0.1);
+  --glass-selected-shadow: 0 1px 3px rgb(0 0 0 / 0.35), 0 6px 18px -8px rgb(56 189 248 / 0.3);
+
+  --glass-accent-bg: rgb(255 255 255 / 0.1);
+  --glass-accent-bg-hover: rgb(255 255 255 / 0.16);
+  --glass-accent-border: rgb(255 255 255 / 0.2);
+
+  --glass-raised-bg: rgb(255 255 255 / 0.1);
+  --glass-raised-bg-hover: rgb(255 255 255 / 0.15);
+
+  --glass-ghost-bg-hover: rgb(255 255 255 / 0.08);
+
+  --glass-divider: rgb(255 255 255 / 0.12);
+  --glass-scrim: rgb(0 0 0 / 0.4);
+}
+
+/* Clear Glass (category Default): Full Glass without the colour — clear
+   panes on white, the way real glass looks on paper. With nothing tinted
+   behind it, the glass is drawn entirely by light: bright white edges, top
+   and bottom highlights, a hairline outer edge and soft grey shadows, over a
+   white-to-silver backdrop with light falling across it. The accent is
+   neutral slate. Dark mode is smoked glass on charcoal. Replaces glass
+   tokens, so the dark block must override every token this one does. */
+[data-theme='clearglass'] {
+  --accent-50: var(--color-slate-50);
+  --accent-100: var(--color-slate-100);
+  --accent-200: var(--color-slate-200);
+  --accent-300: var(--color-slate-300);
+  --accent-400: var(--color-slate-400);
+  --accent-500: var(--color-slate-500);
+  --accent-600: var(--color-slate-600);
+  --accent-700: var(--color-slate-700);
+  --accent-800: var(--color-slate-800);
+  --accent-900: var(--color-slate-900);
+  --accent-950: var(--color-slate-950);
+  --accent-alt: var(--color-slate-300);
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='360' height='360'><g fill='none' stroke-linecap='round'><path d='M-20 120 C120 40 240 40 380 110' stroke='%23ffffff' stroke-opacity='0.5' stroke-width='3'/><path d='M-20 290 C100 250 260 330 380 260' stroke='%23ffffff' stroke-opacity='0.5' stroke-width='3'/><path d='M-20 120 C120 40 240 40 380 110' stroke='%2364748b' stroke-opacity='0.05' stroke-width='1' transform='translate(0 4)'/><path d='M-20 290 C100 250 260 330 380 260' stroke='%2364748b' stroke-opacity='0.05' stroke-width='1' transform='translate(0 4)'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(255 255 255 / 0.95), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(226 232 240 / 0.7), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(255 255 255 / 0.6), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(203 213 225 / 0.55), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(241 245 249 / 0.9), transparent 70%),
+    linear-gradient(160deg, #f8fafc, #e9edf2 55%, #dfe4ea);
+
+  --glass-bg: rgb(255 255 255 / 0.28);
+  --glass-bg-hover: rgb(255 255 255 / 0.45);
+  --glass-border: rgb(255 255 255);
+  --glass-border-hover: rgb(255 255 255);
+  --glass-highlight: rgb(255 255 255);
+  --glass-shadow:
+    0 0 0 1px rgb(15 23 42 / 0.05), 0 1px 2px rgb(15 23 42 / 0.06),
+    0 20px 44px -18px rgb(15 23 42 / 0.22), inset 0 -1px 0 rgb(255 255 255 / 0.6);
+
+  --glass-strong-bg: rgb(255 255 255 / 0.45);
+  --glass-strong-shadow:
+    0 0 0 1px rgb(15 23 42 / 0.06), 0 2px 8px rgb(15 23 42 / 0.06),
+    0 30px 70px -18px rgb(15 23 42 / 0.3);
+  --glass-blur: 48px;
+
+  --glass-inset-bg: rgb(255 255 255 / 0.35);
+  --glass-inset-border: rgb(148 163 184 / 0.3);
+
+  --glass-selected-bg: rgb(255 255 255 / 0.65);
+  --glass-selected-shadow:
+    0 0 0 1px rgb(15 23 42 / 0.04), 0 1px 2px rgb(15 23 42 / 0.06),
+    0 8px 18px -8px rgb(15 23 42 / 0.25);
+
+  --glass-accent-bg: rgb(255 255 255 / 0.7);
+  --glass-accent-bg-hover: rgb(255 255 255 / 0.9);
+  --glass-accent-border: rgb(255 255 255);
+
+  --glass-raised-bg: rgb(255 255 255 / 0.75);
+  --glass-raised-bg-hover: rgb(255 255 255 / 0.9);
+
+  --glass-ghost-bg-hover: rgb(255 255 255 / 0.55);
+
+  --glass-divider: rgb(15 23 42 / 0.07);
+  --glass-scrim: rgb(15 23 42 / 0.12);
+}
+
+.dark[data-theme='clearglass'],
+.dark [data-theme='clearglass'] {
+  /* Slate-600 would vanish on charcoal; lift the filled accents. */
+  --accent-500: var(--color-slate-400);
+  --accent-600: var(--color-slate-500);
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='360' height='360'><g fill='none' stroke-linecap='round'><path d='M-20 120 C120 40 240 40 380 110' stroke='%23ffffff' stroke-opacity='0.025' stroke-width='3'/><path d='M-20 290 C100 250 260 330 380 260' stroke='%23ffffff' stroke-opacity='0.025' stroke-width='3'/><path d='M-20 120 C120 40 240 40 380 110' stroke='%23ffffff' stroke-opacity='0.03' stroke-width='1' transform='translate(0 4)'/><path d='M-20 290 C100 250 260 330 380 260' stroke='%23ffffff' stroke-opacity='0.03' stroke-width='1' transform='translate(0 4)'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(55% 50% at 0% 0%, rgb(255 255 255 / 0.1), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(148 163 184 / 0.12), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(255 255 255 / 0.05), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(100 116 139 / 0.14), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(30 41 59 / 0.35), transparent 70%),
+    linear-gradient(160deg, #15171b, #0e0f12 55%, #08090b);
+
+  --glass-bg: rgb(255 255 255 / 0.04);
+  --glass-bg-hover: rgb(255 255 255 / 0.08);
+  --glass-border: rgb(255 255 255 / 0.22);
+  --glass-border-hover: rgb(255 255 255 / 0.32);
+  --glass-highlight: rgb(255 255 255 / 0.28);
+  --glass-shadow:
+    0 1px 2px rgb(0 0 0 / 0.3), 0 18px 40px -16px rgb(0 0 0 / 0.7),
+    inset 0 -1px 0 rgb(255 255 255 / 0.06);
+
+  --glass-strong-bg: rgb(28 30 35 / 0.5);
+  --glass-strong-shadow: 0 2px 8px rgb(0 0 0 / 0.35), 0 28px 64px -16px rgb(0 0 0 / 0.8);
+  --glass-blur: 48px;
+
+  --glass-inset-bg: rgb(255 255 255 / 0.04);
+  --glass-inset-border: rgb(255 255 255 / 0.14);
+
+  --glass-selected-bg: rgb(255 255 255 / 0.11);
+  --glass-selected-shadow: 0 1px 3px rgb(0 0 0 / 0.4), 0 8px 18px -8px rgb(0 0 0 / 0.5);
+
+  --glass-accent-bg: rgb(255 255 255 / 0.12);
+  --glass-accent-bg-hover: rgb(255 255 255 / 0.18);
+  --glass-accent-border: rgb(255 255 255 / 0.22);
+
+  --glass-raised-bg: rgb(255 255 255 / 0.12);
+  --glass-raised-bg-hover: rgb(255 255 255 / 0.17);
+
+  --glass-ghost-bg-hover: rgb(255 255 255 / 0.08);
+
+  --glass-divider: rgb(255 255 255 / 0.1);
+  --glass-scrim: rgb(0 0 0 / 0.45);
+}
+
+/* Sky Glass (category Default): tinted frosted panels over a dusk sky, with
+   white text — a mid-tone theme, neither light nor dark. It is always
+   rendered with the dark text colours (stores/appearance.ts forces `.dark`
+   while it is active), so the same values are declared for both blocks:
+   the light one only shows inside preview cards on a light page. */
+[data-theme='skyglass'] {
+  --accent-50: var(--color-indigo-50);
+  --accent-100: var(--color-indigo-100);
+  --accent-200: var(--color-indigo-100);
+  --accent-300: var(--color-indigo-200);
+  --accent-400: var(--color-indigo-200);
+  --accent-500: var(--color-indigo-300);
+  --accent-600: var(--color-indigo-400);
+  --accent-700: var(--color-indigo-500);
+  --accent-800: var(--color-indigo-600);
+  --accent-900: var(--color-indigo-700);
+  --accent-950: var(--color-indigo-800);
+  --accent-alt: var(--color-pink-300);
+
+  /* Muted text (descriptions, labels) is written as text-neutral-400/500
+     across the app, tuned for white or near-black backdrops. On this
+     mid-tone sky that grey disappears, so the theme lifts those two steps
+     to a translucent white. */
+  --color-neutral-400: rgb(236 240 255 / 0.68);
+  --color-neutral-500: rgb(236 240 255 / 0.78);
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='900' height='600'><defs><filter id='b' x='-50%' y='-50%' width='200%' height='200%'><feGaussianBlur stdDeviation='18'/></filter></defs><g fill='%23ffffff' filter='url(%23b)'><ellipse cx='220' cy='470' rx='150' ry='34' fill-opacity='0.3'/><ellipse cx='380' cy='500' rx='120' ry='24' fill-opacity='0.22'/><ellipse cx='640' cy='150' rx='150' ry='26' fill-opacity='0.16'/><ellipse cx='700' cy='400' rx='110' ry='20' fill-opacity='0.18'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(50% 40% at 0% 92%, rgb(244 170 200 / 0.6), transparent 70%),
+    radial-gradient(45% 40% at 28% 70%, rgb(200 170 230 / 0.45), transparent 70%),
+    radial-gradient(40% 35% at 72% 38%, rgb(255 255 255 / 0.18), transparent 70%),
+    radial-gradient(55% 45% at 100% 0%, rgb(60 90 185 / 0.55), transparent 70%),
+    radial-gradient(45% 40% at 100% 100%, rgb(150 140 215 / 0.4), transparent 70%),
+    linear-gradient(180deg, #5874c4 0%, #7a8fd6 42%, #a39bd8 74%, #c69fc6 100%);
+
+  --glass-bg: rgb(205 212 245 / 0.2);
+  --glass-bg-hover: rgb(215 222 250 / 0.28);
+  --glass-border: rgb(255 255 255 / 0.32);
+  --glass-border-hover: rgb(255 255 255 / 0.48);
+  --glass-highlight: rgb(255 255 255 / 0.38);
+  --glass-shadow:
+    0 1px 2px rgb(20 30 80 / 0.12), 0 22px 50px -22px rgb(30 40 110 / 0.5),
+    inset 0 0 24px rgb(255 255 255 / 0.06);
+
+  --glass-strong-bg: rgb(125 138 205 / 0.45);
+  --glass-strong-shadow: 0 2px 8px rgb(20 30 80 / 0.2), 0 30px 70px -18px rgb(25 30 90 / 0.6);
+  --glass-blur: 40px;
+
+  --glass-inset-bg: rgb(255 255 255 / 0.1);
+  --glass-inset-border: rgb(255 255 255 / 0.24);
+
+  --glass-selected-bg: rgb(255 255 255 / 0.2);
+  --glass-selected-shadow: 0 1px 3px rgb(20 30 80 / 0.2), 0 8px 20px -10px rgb(30 40 110 / 0.5);
+
+  --glass-accent-bg: rgb(255 255 255 / 0.18);
+  --glass-accent-bg-hover: rgb(255 255 255 / 0.26);
+  --glass-accent-border: rgb(255 255 255 / 0.34);
+  --glass-accent-text: var(--color-white);
+  --glass-accent-icon: var(--color-white);
+
+  --glass-raised-bg: rgb(255 255 255 / 0.22);
+  --glass-raised-bg-hover: rgb(255 255 255 / 0.3);
+  --glass-raised-shadow: 0 0 0 1px rgb(255 255 255 / 0.18), 0 1px 3px rgb(20 30 80 / 0.2);
+
+  --glass-ghost-text: rgb(255 255 255 / 0.75);
+  --glass-ghost-text-hover: var(--color-white);
+  --glass-ghost-bg-hover: rgb(255 255 255 / 0.14);
+
+  --glass-divider: rgb(255 255 255 / 0.16);
+  --glass-scrim: rgb(30 35 80 / 0.35);
+  --glass-fill: rgb(90 105 180 / var(--glass-solidity));
+}
+
+.dark[data-theme='skyglass'],
+.dark [data-theme='skyglass'] {
+  --accent-50: var(--color-indigo-50);
+  --accent-100: var(--color-indigo-100);
+  --accent-200: var(--color-indigo-100);
+  --accent-300: var(--color-indigo-200);
+  --accent-400: var(--color-indigo-200);
+  --accent-500: var(--color-indigo-300);
+  --accent-600: var(--color-indigo-400);
+  --accent-700: var(--color-indigo-500);
+  --accent-800: var(--color-indigo-600);
+  --accent-900: var(--color-indigo-700);
+  --accent-950: var(--color-indigo-800);
+  --accent-alt: var(--color-pink-300);
+
+  /* Muted text (descriptions, labels) is written as text-neutral-400/500
+     across the app, tuned for white or near-black backdrops. On this
+     mid-tone sky that grey disappears, so the theme lifts those two steps
+     to a translucent white. */
+  --color-neutral-400: rgb(236 240 255 / 0.68);
+  --color-neutral-500: rgb(236 240 255 / 0.78);
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='900' height='600'><defs><filter id='b' x='-50%' y='-50%' width='200%' height='200%'><feGaussianBlur stdDeviation='18'/></filter></defs><g fill='%23ffffff' filter='url(%23b)'><ellipse cx='220' cy='470' rx='150' ry='34' fill-opacity='0.3'/><ellipse cx='380' cy='500' rx='120' ry='24' fill-opacity='0.22'/><ellipse cx='640' cy='150' rx='150' ry='26' fill-opacity='0.16'/><ellipse cx='700' cy='400' rx='110' ry='20' fill-opacity='0.18'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(50% 40% at 0% 92%, rgb(244 170 200 / 0.6), transparent 70%),
+    radial-gradient(45% 40% at 28% 70%, rgb(200 170 230 / 0.45), transparent 70%),
+    radial-gradient(40% 35% at 72% 38%, rgb(255 255 255 / 0.18), transparent 70%),
+    radial-gradient(55% 45% at 100% 0%, rgb(60 90 185 / 0.55), transparent 70%),
+    radial-gradient(45% 40% at 100% 100%, rgb(150 140 215 / 0.4), transparent 70%),
+    linear-gradient(180deg, #5874c4 0%, #7a8fd6 42%, #a39bd8 74%, #c69fc6 100%);
+
+  --glass-bg: rgb(205 212 245 / 0.2);
+  --glass-bg-hover: rgb(215 222 250 / 0.28);
+  --glass-border: rgb(255 255 255 / 0.32);
+  --glass-border-hover: rgb(255 255 255 / 0.48);
+  --glass-highlight: rgb(255 255 255 / 0.38);
+  --glass-shadow:
+    0 1px 2px rgb(20 30 80 / 0.12), 0 22px 50px -22px rgb(30 40 110 / 0.5),
+    inset 0 0 24px rgb(255 255 255 / 0.06);
+
+  --glass-strong-bg: rgb(125 138 205 / 0.45);
+  --glass-strong-shadow: 0 2px 8px rgb(20 30 80 / 0.2), 0 30px 70px -18px rgb(25 30 90 / 0.6);
+  --glass-blur: 40px;
+
+  --glass-inset-bg: rgb(255 255 255 / 0.1);
+  --glass-inset-border: rgb(255 255 255 / 0.24);
+
+  --glass-selected-bg: rgb(255 255 255 / 0.2);
+  --glass-selected-shadow: 0 1px 3px rgb(20 30 80 / 0.2), 0 8px 20px -10px rgb(30 40 110 / 0.5);
+
+  --glass-accent-bg: rgb(255 255 255 / 0.18);
+  --glass-accent-bg-hover: rgb(255 255 255 / 0.26);
+  --glass-accent-border: rgb(255 255 255 / 0.34);
+  --glass-accent-text: var(--color-white);
+  --glass-accent-icon: var(--color-white);
+
+  --glass-raised-bg: rgb(255 255 255 / 0.22);
+  --glass-raised-bg-hover: rgb(255 255 255 / 0.3);
+  --glass-raised-shadow: 0 0 0 1px rgb(255 255 255 / 0.18), 0 1px 3px rgb(20 30 80 / 0.2);
+
+  --glass-ghost-text: rgb(255 255 255 / 0.75);
+  --glass-ghost-text-hover: var(--color-white);
+  --glass-ghost-bg-hover: rgb(255 255 255 / 0.14);
+
+  --glass-divider: rgb(255 255 255 / 0.16);
+  --glass-scrim: rgb(30 35 80 / 0.35);
+  --glass-fill: rgb(90 105 180 / var(--glass-solidity));
+}
+
+/* The red "Redscale" wordmark in the title bar has no contrast against Sky
+   Glass's blue; a thin light halo keeps it legible without recolouring it. */
+[data-theme='skyglass'] .brand-wordmark {
+  text-shadow:
+    0 0 1px rgb(255 255 255 / 0.9),
+    0 0 6px rgb(255 255 255 / 0.55);
+}
+
 /* "Reduce motion" on the Appearance page. */
 .reduce-motion *,
 .reduce-motion *::before,

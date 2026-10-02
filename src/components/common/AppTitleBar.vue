@@ -30,7 +30,9 @@ onMounted(async () => {
     <div data-tauri-drag-region class="flex min-w-0 flex-1 items-center gap-2">
       <span class="text-[15px] font-bold tracking-tight">Rezure</span>
       <span class="text-xs text-neutral-500">by</span>
-      <span class="text-xs font-semibold text-red-600 dark:text-red-500">Redscale</span>
+      <span class="brand-wordmark text-xs font-semibold text-red-600 dark:text-red-500"
+        >Redscale</span
+      >
       <span
         v-if="version"
         class="glass-inset rounded-md px-1.5 py-0.5 font-mono text-[11px] text-neutral-500 dark:text-neutral-400"
@@ -41,7 +43,11 @@ onMounted(async () => {
 
     <button
       type="button"
-      class="glass-btn flex shrink-0 items-center gap-1.5 rounded-full py-1 pr-3 pl-1 text-xs font-medium transition"
+      class="glass-btn flex shrink-0 items-center gap-1.5 rounded-full py-1 pr-3 pl-1 text-xs font-medium transition disabled:cursor-default disabled:opacity-60"
+      :disabled="appearance.isDarkForced"
+      :title="
+        appearance.isDarkForced ? 'This theme always uses light text on a dark backdrop' : undefined
+      "
       @click="appearance.toggleDark()"
     >
       <span

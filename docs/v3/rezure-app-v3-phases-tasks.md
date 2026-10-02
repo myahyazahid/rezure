@@ -475,14 +475,17 @@ dari tiga kategori (Default, Girls, Mens), dari menu sendiri di sidebar. Tidak a
 
 ### Keputusan yang sudah diambil
 - **Nama kategori:** `Default`, `Girls`, `Mens`. Nama ini ditampilkan apa adanya di UI
-- **Tema ada sebelas:** awalnya tiga (satu per kategori). Atas permintaan maintainer ditambah
+- **Tema ada empat belas:** awalnya tiga (satu per kategori). Atas permintaan maintainer ditambah
   **Soft Pink** (Girls) dan **Navy** (Mens), lalu enam lagi dari rekomendasi yang disetujui
   maintainer: **Lavender Dream**, **Peach**, **Matcha** (Girls) serta **Carbon**, **Forest**,
-  **Terminal** (Mens):
+  **Terminal** (Mens), lalu **Full Glass**, **Clear Glass**, dan **Sky Glass** (Default):
 
   | Kategori | Tema | Aksen | Latar (mesh) & dekorasi |
   |---|---|---|---|
   | Default | **Rezure** | merah coral (yang sekarang) | mesh yang sekarang, tanpa pola |
+  | Default | **Full Glass** | sky/cyan | glass paling bening: panel hampir transparan, tepi dan highlight putih terang, blur `glass-strong` 48px; latar iridescent (aqua, violet, pink, biru langit); kilau cahaya diagonal |
+  | Default | **Clear Glass** | slate netral (tanpa warna) | Full Glass tanpa warna, kaca bening di atas putih: panel dibentuk hanya oleh cahaya (tepi dan highlight putih, garis tepi tipis, bayangan abu lembut); latar putih ke perak; versi dark berupa kaca asap di atas arang; lengkung refraksi cahaya samar |
+  | Default | **Sky Glass** | indigo muda | dari referensi maintainer (gaya kartu kaca di atas foto langit senja): panel kaca bertint biru-lavender, teks putih, latar langit senja biru ke pink, awan lembut. Tema mid-tone, **selalu memakai warna teks mode dark** |
   | Girls | **Blossom** | rose/pink | pink, lavender, peach, pola kelopak tipis |
   | Girls | **Soft Pink** | pink lembut (satu tingkat lebih terang) | glass paling bening: lebih transparan, tepi dan highlight lebih terang, bayangan pink, blur `glass-strong` 40px; latar pink pekat supaya transparansinya terlihat; pola gelembung |
   | Mens | **Midnight** | biru/teal | navy, slate, teal, pola grid tipis |
@@ -587,6 +590,31 @@ dari tiga kategori (Default, Girls, Mens), dari menu sendiri di sidebar. Tidak a
       (glass tetap default). Test Rust memastikan kesebelas nama tema terbaca sebagai dirinya
       sendiri. Galeri dan beberapa tema yang diterapkan ke seluruh app (Carbon light, Terminal dan
       Forest dark) dirender lewat build + headless Chrome; belum dilihat di app sungguhan
+- [x] Tema `fullglass` (Full Glass, kategori Default): versi paling ekstrem dari pendekatan Soft
+      Pink. Mengganti token glass, termasuk `glass-accent`/`glass-raised`/`glass-ghost` supaya
+      tombol ikut bening, dan blok dark meng-override token yang sama. Panel biasa tetap tanpa
+      `backdrop-filter` (lihat catatan di atas `main.css`), jadi kesan beningnya datang dari
+      transparansi, tepi, dan highlight, bukan dari frosting. Dirender di light dan dark lewat
+      build + headless Chrome; belum dilihat di app sungguhan
+- [x] Tema `clearglass` (Clear Glass, kategori Default): permintaan maintainer untuk kaca "bening
+      putih" yang benar-benar seperti kaca. Tanpa warna di belakangnya, kaca hanya terlihat lewat
+      cahaya, jadi bayangan diberi garis tepi tipis (`0 0 0 1px`) dan highlight bawah selain
+      highlight atas. Aksen slate netral; di mode dark aksen 500/600 dinaikkan supaya toggle
+      terlihat di latar arang. Dirender di light dan dark lewat build + headless Chrome; belum
+      dilihat di app sungguhan
+- [x] Tema `skyglass` (Sky Glass, kategori Default), dibuat dari gambar referensi maintainer.
+      Latar langit senja mid-tone tidak cocok dengan teks gelap maupun teks terang mode light, jadi:
+      - `ThemeInfo.forcesDark` di `stores/appearance.ts` memaksa `.dark` selama tema ini aktif
+        (`isDarkForced`). Tombol Light/Dark di title bar dinonaktifkan dan diberi keterangan. Pilihan
+        mode user tetap tersimpan dan berlaku lagi saat ganti tema
+      - Teks redup aplikasi (`text-neutral-400/500`) di tema ini diangkat jadi putih transparan
+        dengan meng-override `--color-neutral-400/500` di dalam `[data-theme='skyglass']`. Ini
+        satu-satunya tema yang menyentuh palet Tailwind, dan sengaja dibatasi ke dua tingkat itu
+      - Ikon aksen dibuat putih, dan wordmark "Redscale" diberi halo terang (`.brand-wordmark`)
+        supaya tetap terbaca di latar biru tanpa mengubah warnanya
+      - Pola awan berupa elips yang di-blur di dalam SVG. Elips dijaga jauh dari tepi tile, karena
+        blur yang melewati tepi terpotong lurus dan terlihat sebagai garis
+      - Dirender lewat build + headless Chrome; belum dilihat di app sungguhan
 - [x] Menu `Appearance` di `AppSidebar.vue` (di bawah Support Developer, ikon palet), route
       `/appearance`, `AppearanceView.vue`
 - [x] Isi halaman: ~~mode (Light / Dark / System)~~ (dihapus belakangan, lihat keputusan), filter kategori (All / Default / Girls / Mens),
