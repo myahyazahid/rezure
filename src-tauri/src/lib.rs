@@ -460,6 +460,7 @@ pub fn run() {
                                     heartbeat_handle.package_info().version.to_string();
                                 let os = sysinfo::System::long_os_version();
                                 let os_version = sysinfo::System::os_version();
+                                let device_name = services::telemetry::device_name();
                                 let db = heartbeat_handle.state::<db::DbState>();
                                 let conn = db.0.lock().unwrap();
                                 if let Err(err) =
@@ -471,6 +472,7 @@ pub fn run() {
                                         &app_version,
                                         os.as_deref(),
                                         os_version.as_deref(),
+                                        device_name.as_deref(),
                                         None,
                                     )
                                 {
@@ -534,6 +536,7 @@ pub fn run() {
                         &device.0,
                         &session.0,
                         &app_version,
+                        None,
                         None,
                         None,
                         Some(&ended_at),

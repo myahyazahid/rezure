@@ -89,6 +89,7 @@ When it's there, it's one of:
   "app_version": "1.0.0",
   "os": "Windows 11 Home Single Language",
   "os_version": "11 (26200)",
+  "device_name": "Yahya",
   "occurred_at": "2026-09-02T06:00:00+00:00",
   "ended_at": null
 }
@@ -97,6 +98,15 @@ When it's there, it's one of:
 `occurred_at` is stamped at *record* time, not send time — a row queued while offline
 and sent later still reports when it actually happened. `os`/`os_version` come from
 `sysinfo::System::long_os_version()` / `os_version()`.
+
+`device_name` is the Windows account name the app runs under, `%USERNAME%` (the `Yahya`
+in `C:\Users\Yahya`), read fresh on each 5-minute heartbeat by
+`services::telemetry::device_name()`. It lets the dashboard's Devices page show a human
+name instead of `dev_xxxxxxxx`. Blank becomes `null`, and anything past the API's 64-char
+limit is cut client-side, since a `422` would get the whole heartbeat dropped (see
+Sending). The closing heartbeat sends `null`, which the backend reads as "keep what you
+have". Like every other field, it's never recorded or sent while `shareUsageData` is
+`false`. Added after 3.0.0, so 3.0.0 and older clients don't send it.
 
 `session_id` is one UUID generated once per launch (`services::telemetry::SessionIdState`,
 in-memory only, never persisted) and reused on every heartbeat for that run.
@@ -124,7 +134,9 @@ mengganggu user" requirement from Fase 2.5.
 ## What's deliberately *not* sent
 
 - No file paths, project names, database names, or anything else from the user's local
-  filesystem/config beyond the fields listed above.
+  filesystem/config beyond the fields listed above. The heartbeat's `device_name` (the
+  Windows account name) is the one deliberate exception, and it's the only thing that
+  identifies the person rather than the install.
 - `event_name` is limited to a service's display name, an error kind, or omitted — never
   free text a user typed (that's what support tickets are for, a separate, explicit,
   user-initiated action documented in `docs/v2/rezure-app-v2-phases-tasks.md`'s Fase 2.1).

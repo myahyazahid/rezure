@@ -61,8 +61,29 @@ struct HeartbeatPayload<'a> {
     app_version: &'a str,
     os: Option<&'a str>,
     os_version: Option<&'a str>,
+    /// The Windows account name (`%USERNAME%`), so the dashboard can tell
+    /// installs apart by a human name instead of a uuid — see `device_name`.
+    device_name: Option<&'a str>,
     occurred_at: String,
     ended_at: Option<&'a str>,
+}
+
+/// The API's `device_name` limit — anything longer is a `422`, which
+/// `send_pending` treats as a verdict on the row and drops, heartbeat and all.
+const DEVICE_NAME_MAX_CHARS: usize = 64;
+
+/// The Windows account name the app runs under — the `Yahya` in
+/// `C:\Users\Yahya`. Read fresh on each heartbeat, so it's never stored
+/// locally beyond the queued payload.
+pub fn device_name() -> Option<String> {
+    normalize_device_name(std::env::var("USERNAME").ok())
+}
+
+/// Blank becomes `None`; anything past the API's limit is cut rather than
+/// sent and rejected.
+fn normalize_device_name(raw: Option<String>) -> Option<String> {
+    let trimmed = raw?.trim().to_string();
+    (!trimmed.is_empty()).then(|| trimmed.chars().take(DEVICE_NAME_MAX_CHARS).collect())
 }
 
 /// One UUID generated at startup, kept in memory only for the life of the
@@ -115,6 +136,7 @@ impl TelemetryClient {
         app_version: &str,
         os: Option<&str>,
         os_version: Option<&str>,
+        device_name: Option<&str>,
         ended_at: Option<&str>,
     ) -> Result<(), AppError> {
         if !share_usage_data {
@@ -126,6 +148,7 @@ impl TelemetryClient {
             app_version,
             os,
             os_version,
+            device_name,
             occurred_at: now_rfc3339(),
             ended_at,
         };
@@ -466,6 +489,7 @@ mod tests {
             "1.0.0",
             Some("Windows 11"),
             Some("23H2"),
+            Some("Yahya"),
             None,
         )
         .unwrap();
@@ -475,5 +499,42 @@ mod tests {
             .unwrap();
         assert!(payload.contains("occurred_at"));
         assert!(payload.contains("session-1"));
+        assert_eq!(queued_payload(&conn)["device_name"], "Yahya");
+    }
+
+    #[test]
+    fn opted_out_queues_no_heartbeat_and_so_no_device_name() {
+        let conn = init_migrations_for_test();
+        TelemetryClient::record_heartbeat(
+            &conn,
+            false,
+            "device-1",
+            "session-1",
+            "1.0.0",
+            None,
+            None,
+            Some("Yahya"),
+            None,
+        )
+        .unwrap();
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM pending_events", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn device_name_is_trimmed_blank_is_dropped_and_long_is_cut_to_the_api_limit() {
+        assert_eq!(
+            normalize_device_name(Some(" Yahya ".to_string())),
+            Some("Yahya".to_string())
+        );
+        assert_eq!(normalize_device_name(Some("   ".to_string())), None);
+        assert_eq!(normalize_device_name(None), None);
+        assert_eq!(
+            normalize_device_name(Some("é".repeat(70))).map(|name| name.chars().count()),
+            Some(DEVICE_NAME_MAX_CHARS)
+        );
     }
 }
