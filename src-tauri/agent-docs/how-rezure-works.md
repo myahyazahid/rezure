@@ -249,6 +249,18 @@ DB_USERNAME=root           # or postgres
 DB_PASSWORD=               # anything: authentication is trust
 ```
 
+**Using more than one of these in one project.** MySQL/MariaDB, SQL Server LocalDB
+and PostgreSQL can all run at the same time (only MySQL and MariaDB take turns,
+by profile). But Laravel's `config/database.php` reads the same `DB_HOST`,
+`DB_PORT`, `DB_USERNAME`, `DB_PASSWORD` and `DB_URL` for every connection, so
+changing `DB_*` moves them all. Keep `DB_*` for the default connection and give
+each other connection its own variables in `config/database.php` (for example
+`PG_HOST`/`PG_PORT`/`PG_DATABASE`, or `MSSQL_HOST='(localdb)\Rezure'` with
+`MSSQL_PORT` empty), then use `DB::connection('pgsql')` or
+`protected $connection = 'pgsql';` on models and migrations. Each server also
+needs its PDO driver: `pdo_mysql` is on by default, `pdo_sqlsrv` is installed from
+PHP Extensions, `pdo_pgsql` has to be turned on there.
+
 ## Node and Composer
 
 - Node versions live in `{{home}}\bin\node\<version>\`. A project can pin its own

@@ -355,6 +355,113 @@ server, the same reason it isn't offered for SQL Server.
 
 ---
 
+## Several database servers at once
+
+MySQL (or MariaDB), SQL Server LocalDB and PostgreSQL are three separate services, each on its
+own address. Any of them can run at the same time, and one project can use more than one.
+
+| Server | Service id | Address | Sign in as |
+|---|---|---|---|
+| MySQL or MariaDB | `mariadb` | `127.0.0.1:3306`, or the active profile's port | `root`, no password (Rezure's own data folder) |
+| SQL Server LocalDB | `sqlserver` | `(localdb)\Rezure`; `127.0.0.1:14330` for tools that only speak TCP | Windows Authentication; over TCP, `rezure` with no password |
+| PostgreSQL | `postgres` | `127.0.0.1:5432` | `root` or `postgres`, no password |
+
+What doesn't run side by side:
+
+- **MySQL and MariaDB take turns.** There's one MySQL-family server at a time, and the active
+  [profile](database-profiles.md) decides which. That has no effect on SQL Server or
+  PostgreSQL.
+- **The Databases page reads one server at a time**, the one picked in the switcher. Picking
+  another only changes what the page lists — nothing is stopped.
+- **A port another program already holds.** Laragon and XAMPP use 3306. A PostgreSQL installed
+  with EDB's installer runs as a Windows service on 5432. The service then won't start, and its
+  card names the program holding the port.
+
+Each server keeps its own memory. Stop the ones you aren't using, or take them off the
+Services page with **Manage services**.
+
+### From PHP
+
+Each server needs its PDO driver loaded in the PHP that serves the project:
+
+| Server | Driver | In Rezure |
+|---|---|---|
+| MySQL / MariaDB | `pdo_mysql` | On by default |
+| SQL Server | `pdo_sqlsrv` | Installed from PHP Extensions, and needs the Microsoft ODBC Driver |
+| PostgreSQL | `pdo_pgsql` | Ships with PHP but is off by default — turn it on in PHP Extensions |
+
+With plain PDO, against Rezure's own servers:
+
+```php
+$mysql = new PDO('mysql:host=127.0.0.1;port=3306;dbname=my_app', 'root', '');
+$pgsql = new PDO('pgsql:host=127.0.0.1;port=5432;dbname=my_app_reports', 'root', '');
+// No user and password: Windows Authentication.
+$mssql = new PDO('sqlsrv:Server=(localdb)\Rezure;Database=my_app_legacy');
+```
+
+### From Laravel
+
+**Laravel's `config/database.php` reads the same variables for every connection** — `mysql`,
+`pgsql` and `sqlsrv` all take `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD` and `DB_URL`.
+One set of `DB_*` values can't describe three servers, so `DB_CONNECTION` and `DB_*` stay for
+the default connection, and every other connection gets variables of its own in
+`config/database.php`:
+
+```php
+'pgsql' => [
+    'driver' => 'pgsql',
+    'url' => env('PG_URL'),
+    'host' => env('PG_HOST', '127.0.0.1'),
+    'port' => env('PG_PORT', '5432'),
+    'database' => env('PG_DATABASE', 'laravel'),
+    'username' => env('PG_USERNAME', 'root'),
+    'password' => env('PG_PASSWORD', ''),
+    // charset, prefix, search_path, sslmode: as Laravel ships them
+],
+
+'sqlsrv' => [
+    'driver' => 'sqlsrv',
+    'url' => env('MSSQL_URL'),
+    'host' => env('MSSQL_HOST', '(localdb)\Rezure'),
+    'port' => env('MSSQL_PORT', ''),         // LocalDB has no port: keep it empty
+    'database' => env('MSSQL_DATABASE', 'laravel'),
+    'username' => env('MSSQL_USERNAME', ''), // empty = Windows Authentication
+    'password' => env('MSSQL_PASSWORD', ''),
+    // charset, prefix, prefix_indexes: as Laravel ships them
+],
+```
+
+```dotenv
+DB_CONNECTION=mysql        # the default connection
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=my_app
+DB_USERNAME=root
+DB_PASSWORD=
+
+PG_DATABASE=my_app_reports
+MSSQL_DATABASE=my_app_legacy
+```
+
+Then name the connection wherever it isn't the default:
+
+```php
+DB::connection('pgsql')->table('reports')->get();
+
+class LegacyOrder extends Model
+{
+    protected $connection = 'sqlsrv';
+}
+```
+
+A migration for another connection sets the same `protected $connection` property, so a single
+`php artisan migrate` creates each table on its own server.
+
+A project's requirements check reads `DB_CONNECTION`, so it checks the default connection
+only. For the others, check their driver on the PHP Extensions page.
+
+---
+
 ## Troubleshooting
 
 **"MariaDB isn't running"** — the page says so with a link to Services, rather than showing
