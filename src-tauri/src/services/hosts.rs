@@ -15,10 +15,9 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use super::projects::scan_projects;
-use crate::utils::command::HiddenWindow;
+use crate::utils::elevation::{self, Elevated};
 use crate::utils::error::AppError;
 use crate::utils::paths;
 use crate::utils::powershell::quote_ps;
@@ -115,40 +114,13 @@ pub fn has_entry(domain: &str) -> bool {
     has_entry_at(domain, &hosts_file_path())
 }
 
-/// The `powershell -Command` one-liner that re-launches `script_path`
-/// elevated.
-///
-/// `-Verb RunAs` throws synchronously if the user declines the UAC prompt —
-/// before `-Wait` would ever start blocking — so that failure mode alone is
-/// reliable to catch here, and is surfaced as exit code 1223.
-///
-/// The script path is wrapped in *embedded* double quotes on top of the
-/// PowerShell string literal: `Start-Process -ArgumentList @(...)` joins the
-/// array elements with plain spaces and quotes none of them itself, so a
-/// path containing spaces (`C:\Users\Jane Doe\...` — every Windows account
-/// whose name has one) would otherwise reach the elevated PowerShell split
-/// across several arguments, leaving `-File` holding only the first
-/// fragment. That fails *before* the script runs, so it leaves no error log
-/// behind — just the generic "hosts file wasn't updated" fallback. Windows
-/// paths cannot contain `"`, so nothing further needs escaping.
-fn elevation_launcher(script_path: &Path) -> String {
-    let script_arg = quote_ps(&format!("\"{}\"", script_path.display()));
-    format!(
-        "try {{ Start-Process powershell -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',{script_arg}) -Verb RunAs -Wait; exit 0 }} catch {{ exit 1223 }}"
-    )
-}
-
 /// The one step that actually needs admin rights: copies `staged` over
 /// `dest` via a UAC-elevated `powershell -File`.
 ///
-/// Deliberately does *not* trust `$p.ExitCode` from `Start-Process -Verb
-/// RunAs -PassThru` as the success signal — that combination is known to
-/// report bogus exit codes (a process launched via `ShellExecuteEx` for
-/// elevation isn't always bound properly for exit-code retrieval). Instead
-/// this waits for the elevated hop to finish either way, then checks
-/// whether `dest` actually ended up matching `staged` — the one thing
-/// that's both reliable to check (a plain file read, no elevation needed)
-/// and the actual thing that was supposed to happen.
+/// Success is judged by whether `dest` actually ended up matching `staged`
+/// — the one thing that's both reliable to check (a plain file read, no
+/// elevation needed) and the actual thing that was supposed to happen. See
+/// `utils::elevation::run_script` for why the elevated exit code isn't.
 fn elevate_copy(staged: &Path, dest: &Path) -> Result<(), AppError> {
     let dir = staging_dir()?;
     fs::create_dir_all(&dir)
@@ -172,20 +144,9 @@ fn elevate_copy(staged: &Path, dest: &Path) -> Result<(), AppError> {
     fs::write(&script_path, script)
         .map_err(|e| AppError::Io(format!("could not write {}: {e}", script_path.display())))?;
 
-    let status = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            &elevation_launcher(&script_path),
-        ])
-        // The UAC prompt this launcher raises is its own elevated window —
-        // hiding this console doesn't hide the consent dialog.
-        .hidden()
-        .status()
+    let outcome = elevation::run_script(&script_path)
         .map_err(|e| AppError::HostsUpdateFailed(e.to_string()))?;
-
-    if status.code() == Some(1223) {
+    if outcome == Elevated::Declined {
         return Err(AppError::HostsUpdateCancelled);
     }
 
@@ -383,18 +344,6 @@ mod tests {
         let path = std::env::temp_dir().join("rezure-test-hosts-does-not-exist");
         let _ = fs::remove_file(&path);
         assert!(!has_entry_at("blog.test", &path));
-    }
-
-    /// A username with a space in it (`C:\Users\Jane Doe\...`) must still
-    /// reach the elevated PowerShell as a single `-File` argument — see
-    /// `elevation_launcher`.
-    #[test]
-    fn launcher_quotes_a_script_path_containing_spaces() {
-        let launcher = elevation_launcher(Path::new(r"C:\Users\Jane Doe\app\apply-hosts.ps1"));
-        assert!(
-            launcher.contains(r#"'"C:\Users\Jane Doe\app\apply-hosts.ps1"'"#),
-            "path must carry its own double quotes inside the argument list: {launcher}"
-        );
     }
 
     /// A UAC prompt can only be answered by a human on the Secure Desktop

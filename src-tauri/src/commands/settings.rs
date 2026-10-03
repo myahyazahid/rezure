@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 use tauri_plugin_autostart::ManagerExt;
 
-use crate::config::settings::{self, Settings, SettingsState};
+use crate::config::settings::{self, AppearanceSettings, Settings, SettingsState};
+use crate::config::stickers::Decorations;
 use crate::services::{binaries, database, projects};
 use crate::utils::error::AppError;
 
@@ -24,6 +25,11 @@ pub struct SettingsPatch {
     pub keep_in_tray_on_close: Option<bool>,
     pub notify_on_crash: Option<bool>,
     pub auto_write_hosts: Option<bool>,
+    /// Replaces the whole appearance block — the Appearance page always
+    /// sends every field, so there is nothing to merge.
+    pub appearance: Option<AppearanceSettings>,
+    /// Replaces the whole sticker arrangement, like `appearance`.
+    pub decorations: Option<Decorations>,
 }
 
 #[tauri::command]
@@ -60,6 +66,12 @@ pub fn update_settings(
     }
     if let Some(auto_write_hosts) = patch.auto_write_hosts {
         current.auto_write_hosts = auto_write_hosts;
+    }
+    if let Some(appearance) = patch.appearance {
+        current.appearance = Some(appearance.sanitized());
+    }
+    if let Some(decorations) = patch.decorations {
+        current.decorations = decorations.sanitized();
     }
     settings::save(&current)?;
     Ok(current.clone())

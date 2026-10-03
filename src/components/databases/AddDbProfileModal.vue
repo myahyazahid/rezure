@@ -55,12 +55,10 @@ async function addManual() {
 
 <template>
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+    class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
     @click.self="emit('close')"
   >
-    <div
-      class="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-neutral-200 bg-white p-6 shadow-2xl dark:border-neutral-700 dark:bg-neutral-900"
-    >
+    <div class="glass-strong max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-2xl p-6">
       <h2 class="text-lg font-bold text-neutral-900 dark:text-neutral-100">Add data directory</h2>
       <p class="mt-1 text-sm text-neutral-500">
         Rezure runs one database server at a time and points it at the directory you pick. Your data
@@ -78,7 +76,7 @@ async function addManual() {
           <div
             v-for="found in store.detected"
             :key="found.datadirPath"
-            class="rounded-xl border border-neutral-200 p-3.5 dark:border-neutral-700"
+            class="glass-inset rounded-xl p-3.5"
           >
             <div class="flex items-start justify-between gap-3">
               <div class="min-w-0">
@@ -103,7 +101,7 @@ async function addManual() {
               </div>
               <button
                 type="button"
-                class="shrink-0 rounded-full bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-500 disabled:opacity-50"
+                class="glass-accent shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition disabled:opacity-50"
                 :disabled="store.adding"
                 @click="adopt(found)"
               >
@@ -120,7 +118,7 @@ async function addManual() {
 
         <button
           type="button"
-          class="mt-5 text-sm font-semibold text-red-600 underline dark:text-red-400"
+          class="mt-5 text-sm font-semibold text-accent-600 underline dark:text-accent-400"
           @click="manual = true"
         >
           Point at a folder myself
@@ -137,7 +135,7 @@ async function addManual() {
               v-model="name"
               type="text"
               placeholder="My data"
-              class="mt-1.5 w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+              class="glass-inset mt-1.5 w-full rounded-lg px-3 py-2 text-sm dark:text-neutral-100"
             />
           </div>
 
@@ -150,11 +148,11 @@ async function addManual() {
                 v-model="datadirPath"
                 type="text"
                 placeholder="C:\path\to\data"
-                class="min-w-0 flex-1 rounded-lg border border-neutral-200 bg-white px-3 py-2 font-mono text-xs dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+                class="glass-inset min-w-0 flex-1 rounded-lg px-3 py-2 font-mono text-xs dark:text-neutral-100"
               />
               <button
                 type="button"
-                class="shrink-0 rounded-lg border border-neutral-200 px-3 py-2 text-sm font-semibold dark:border-neutral-700 dark:text-neutral-200"
+                class="glass-btn shrink-0 rounded-lg px-3 py-2 text-sm font-semibold dark:text-neutral-200"
                 @click="pickFolder"
               >
                 Browse
@@ -174,7 +172,7 @@ async function addManual() {
               type="number"
               min="1"
               max="65535"
-              class="mt-1.5 w-28 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+              class="glass-inset mt-1.5 w-28 rounded-lg px-3 py-2 text-sm dark:text-neutral-100"
             />
           </div>
         </div>
@@ -189,7 +187,7 @@ async function addManual() {
           </button>
           <button
             type="button"
-            class="rounded-full bg-red-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-red-500 disabled:opacity-50"
+            class="glass-accent rounded-full px-4 py-2 text-sm font-semibold transition disabled:opacity-50"
             :disabled="store.adding || !datadirPath.trim()"
             @click="addManual"
           >
@@ -201,7 +199,7 @@ async function addManual() {
       <button
         v-if="!manual"
         type="button"
-        class="mt-6 w-full rounded-full border border-neutral-200 py-2 text-sm font-semibold text-neutral-600 dark:border-neutral-700 dark:text-neutral-300"
+        class="glass-btn mt-6 w-full rounded-full py-2 text-sm font-semibold text-neutral-600 dark:text-neutral-300"
         @click="emit('close')"
       >
         Done

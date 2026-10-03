@@ -2,13 +2,22 @@
 import { computed, ref } from 'vue'
 import type { PortHolder, ServiceInfo } from '@/types/service'
 import { useServicesStore } from '@/stores/services'
+import { useBinariesStore } from '@/stores/binaries'
 import BasePill from '@/components/common/BasePill.vue'
 import ServiceSparkline from '@/components/services/ServiceSparkline.vue'
 import ServiceLogPanel from '@/components/services/ServiceLogPanel.vue'
+import TechIcon from '@/components/common/TechIcon.vue'
+import LicenseConsentModal from '@/components/common/LicenseConsentModal.vue'
+import { useLicensedInstall } from '@/composables/useLicensedInstall'
 
 const props = defineProps<{ service: ServiceInfo }>()
 
 const store = useServicesStore()
+
+/** The toolbar's icon buttons; each adds `glass-ghost`, or `glass-raised`
+ *  while the thing it toggles is open. */
+const ICON_BUTTON_CLASS =
+  'flex h-7 w-7 items-center justify-center rounded-full transition disabled:opacity-40'
 const expanded = ref(false)
 const menuOpen = ref(false)
 /** Force stop asks before acting — it skips the clean shutdown, which for a
@@ -17,8 +26,96 @@ const confirmingForceStop = ref(false)
 
 const isRunning = computed(() => props.service.status === 'running')
 const isPending = computed(() => store.isPending(props.service.id))
-const initial = computed(() => props.service.name.charAt(0).toUpperCase())
 const error = ref<string | null>(null)
+
+/** Every port the service binds — one per worker, plus a web UI's. */
+const ports = computed(() => props.service.ports)
+
+/** Workers sit on consecutive ports and read best as a range; separate
+ *  listeners (Mailpit's SMTP and web UI) are listed side by side. A service
+ *  with no port at all (LocalDB's named pipe) shows how it's reached
+ *  instead. */
+const portLabel = computed(() => {
+  // LocalDB: its pipe address, plus the TCP port Rezure bridges to it for
+  // clients that can't open a pipe.
+  if (props.service.endpoint) {
+    const bridged = ports.value[0]
+    return bridged ? `${props.service.endpoint} · :${bridged}` : props.service.endpoint
+  }
+  const list = ports.value
+  if (props.service.workers && list.length > 1) return `:${list[0]}–${list[list.length - 1]}`
+  return list.map((port) => `:${port}`).join(' ')
+})
+
+const binaries = useBinariesStore()
+
+/** Not installed, but one download away — the card offers Install instead
+ *  of a Start that could only fail. */
+const needsInstall = computed(() => !props.service.installed && props.service.installId !== null)
+
+const installing = computed(
+  () => props.service.installId !== null && binaries.isInstalling(props.service.installId),
+)
+
+const installLabel = computed(() => {
+  const id = props.service.installId
+  const p = id ? binaries.progressFor(id) : null
+  if (!p) return 'Installing…'
+  if (p.stage === 'verifying') return 'Verifying…'
+  if (p.stage === 'extracting') return 'Extracting…'
+  if (p.stage === 'installing') return 'Installing…'
+  return p.totalBytes
+    ? `Downloading… ${Math.min(100, Math.round((p.downloadedBytes / p.totalBytes) * 100))}%`
+    : 'Downloading…'
+})
+
+/** Asks for license consent first when the package is a Microsoft
+ *  installer (LocalDB); installs straight away otherwise. */
+const licensed = useLicensedInstall()
+
+async function onInstall() {
+  const id = props.service.installId
+  if (!id) return
+  error.value = null
+  // Refetches the service list itself, which is what flips this row to
+  // Start.
+  await licensed.request(id)
+  if (licensed.error.value) error.value = licensed.error.value
+}
+
+async function onConsent() {
+  await licensed.confirm()
+  if (licensed.error.value) error.value = licensed.error.value
+}
+
+async function onOpenUi() {
+  error.value = null
+  try {
+    await store.openUi(props.service.id)
+  } catch (e) {
+    error.value = errorMessage(e)
+  }
+}
+
+/** Running, but with some workers down. Still serving — nginx routes
+ *  around the gap and the supervisor brings them back — so this is a
+ *  warning, not an error. */
+const degraded = computed(
+  () =>
+    isRunning.value &&
+    !!props.service.workers &&
+    props.service.workers.running < props.service.workers.total,
+)
+
+/** The first of this service's ports something else is holding — with
+ *  several workers the conflict can be on any one of them. */
+async function findBlocker(): Promise<PortHolder | null> {
+  for (const port of ports.value) {
+    const holder = await store.portHolder(port).catch(() => null)
+    if (holder) return holder
+  }
+  return null
+}
 
 function toggleExpanded() {
   expanded.value = !expanded.value
@@ -46,7 +143,7 @@ async function onPrimaryAction() {
     // A port conflict is the one failure with an obvious next action, so
     // find out who's responsible rather than leaving the message as advice.
     if (error.value.includes('port')) {
-      blocker.value = await store.portHolder(props.service.port).catch(() => null)
+      blocker.value = await findBlocker()
     }
   }
 }
@@ -57,7 +154,7 @@ async function freePortAndStart() {
   freeing.value = true
   error.value = null
   try {
-    await store.freePort(props.service.port)
+    await store.freePort(blocker.value?.port ?? props.service.port)
     blocker.value = null
     await store.start(props.service.id)
   } catch (e) {
@@ -103,39 +200,79 @@ function requestForceStop() {
 </script>
 
 <template>
-  <div
-    class="rounded-2xl border border-neutral-200/80 bg-neutral-100/60 transition hover:border-neutral-300 dark:border-neutral-800 dark:bg-neutral-900/60"
-  >
+  <div class="glass glass-hover rounded-2xl transition">
     <div class="flex items-center gap-3 p-3.5">
       <div
-        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold"
-        :class="
-          isRunning
-            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400'
-            : 'bg-neutral-200/70 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400'
-        "
+        class="glass-inset flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
+        :class="isRunning ? '' : 'opacity-50 grayscale'"
       >
-        {{ initial }}
+        <TechIcon :id="service.id" :size="20" />
       </div>
 
       <div class="min-w-0 flex-1">
         <div class="flex items-center gap-2">
-          <span class="truncate font-semibold text-neutral-900 dark:text-neutral-100">{{
-            service.name
-          }}</span>
+          <span
+            class="truncate font-semibold text-neutral-900 dark:text-neutral-100"
+            :title="service.name"
+            >{{ service.name }}</span
+          >
           <BasePill class="shrink-0">{{ service.category }}</BasePill>
+          <!-- Beside the name rather than among the controls on the right:
+               that column is already full, and one more button there squeezed
+               the name out of the row entirely. -->
+          <button
+            v-if="service.webUrl && isRunning"
+            type="button"
+            :title="`Open ${service.webUrl}`"
+            class="glass-btn flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold text-neutral-700 transition dark:text-neutral-200"
+            @click="onOpenUi"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              aria-hidden="true"
+              class="h-3 w-3"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"
+              />
+            </svg>
+            Open
+          </button>
         </div>
-        <div class="mt-0.5 flex items-center gap-1.5 text-sm">
+        <!-- One line always: a wrapped "· 4/4 workers" made PHP rows taller
+             than their neighbours. What doesn't fit is cut, not overlapped. -->
+        <div class="mt-0.5 flex min-w-0 items-center gap-1.5 text-sm whitespace-nowrap">
           <span
             class="h-1.5 w-1.5 rounded-full"
-            :class="isRunning ? 'bg-emerald-500' : 'bg-neutral-400 dark:bg-neutral-600'"
+            :class="
+              isRunning
+                ? 'bg-emerald-500 shadow-[0_0_6px_1px_rgb(16_185_129/0.6)]'
+                : 'bg-neutral-400 dark:bg-neutral-600'
+            "
           ></span>
           <span
             :class="
               isRunning ? 'font-medium text-emerald-600 dark:text-emerald-400' : 'text-neutral-500'
             "
           >
-            {{ isRunning ? 'Running' : 'Stopped' }}
+            {{ isRunning ? 'Running' : service.installed ? 'Stopped' : 'Not installed' }}
+          </span>
+          <span
+            v-if="isRunning && service.workers"
+            class="truncate text-xs"
+            :class="degraded ? 'text-amber-600 dark:text-amber-400' : 'text-neutral-400'"
+            :title="
+              degraded
+                ? 'Some workers stopped unexpectedly and are being restarted. The rest keep serving.'
+                : undefined
+            "
+          >
+            · {{ service.workers.running }}/{{ service.workers.total }} workers
           </span>
         </div>
         <p v-if="error" class="mt-0.5 text-xs text-red-600 dark:text-red-400">
@@ -143,138 +280,181 @@ function requestForceStop() {
         </p>
       </div>
 
-      <!-- Dropped on narrow windows so the controls never get pushed off-screen. -->
+      <!-- Dropped on narrow windows so the controls never get pushed off-screen,
+           and drawn at half width below `xl` — at the default window size a
+           full-width graph left the name column too narrow to read. -->
       <div
         v-if="isRunning && service.cpuHistory.length"
         class="hidden shrink-0 items-center gap-2 lg:flex"
       >
-        <ServiceSparkline :values="service.cpuHistory" />
+        <ServiceSparkline :values="service.cpuHistory" class="w-16 xl:w-30" />
         <span class="font-mono text-xs whitespace-nowrap text-neutral-500">
           {{ service.cpuPercent }}% cpu
         </span>
       </div>
 
       <BasePill variant="mono" class="shrink-0">{{ service.version }}</BasePill>
-      <BasePill variant="mono" class="shrink-0">:{{ service.port }}</BasePill>
+      <BasePill variant="mono" class="shrink-0">{{ portLabel }}</BasePill>
 
-      <button
-        type="button"
-        class="flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-semibold transition disabled:opacity-50"
-        :class="
-          isRunning
-            ? 'bg-red-100 text-red-600 hover:bg-red-200 dark:bg-red-500/15 dark:text-red-400 dark:hover:bg-red-500/25'
-            : 'bg-red-600 text-white shadow-sm shadow-red-600/30 hover:bg-red-500'
-        "
-        :disabled="isPending"
-        @click="onPrimaryAction"
-      >
-        <svg
-          v-if="isRunning"
-          viewBox="0 0 10 10"
-          fill="currentColor"
-          aria-hidden="true"
-          class="h-2 w-2"
+      <!-- The row's actions as one toolbar: the primary action is the raised
+           segment, the rest stay bare until hovered. Loose bordered buttons
+           side by side read as four separate things competing for a click.
+
+           Start and Stop share one neutral look and differ by their icon's
+           colour (green play, red square), so a list of services reads calm
+           whichever state each one is in. -->
+      <div class="glass-inset flex shrink-0 items-center gap-0.5 rounded-full p-1">
+        <button
+          v-if="needsInstall"
+          type="button"
+          class="glass-accent flex h-7 items-center gap-1.5 rounded-full px-3 text-[13px] font-semibold transition disabled:opacity-60"
+          :disabled="installing"
+          @click="onInstall"
         >
-          <rect width="10" height="10" rx="1.5" />
-        </svg>
-        <svg v-else viewBox="0 0 10 10" fill="currentColor" aria-hidden="true" class="h-2.5 w-2.5">
-          <path d="M1.5 0.8 9 5 1.5 9.2Z" />
-        </svg>
-        {{ isRunning ? 'Stop' : 'Start' }}
-      </button>
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            aria-hidden="true"
+            class="h-3.5 w-3.5"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"
+            />
+          </svg>
+          {{ installing ? installLabel : 'Install' }}
+        </button>
 
-      <button
-        type="button"
-        title="Restart"
-        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-neutral-200 bg-white/60 text-neutral-500 transition hover:bg-white disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400 dark:hover:bg-neutral-800"
-        :disabled="isPending"
-        @click="onRestart"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3L20 9M20 9V4M20 9h-5"
-          />
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3L4 15m0 0v5m0-5h5"
-          />
-        </svg>
-      </button>
+        <button
+          v-else
+          type="button"
+          class="glass-raised flex h-7 items-center gap-1.5 rounded-full px-3 text-[13px] font-semibold text-neutral-700 transition disabled:opacity-50 dark:text-neutral-100"
+          :disabled="isPending"
+          @click="onPrimaryAction"
+        >
+          <svg
+            v-if="isRunning"
+            viewBox="0 0 10 10"
+            fill="currentColor"
+            aria-hidden="true"
+            class="h-2 w-2 text-red-500"
+          >
+            <rect width="10" height="10" rx="1.5" />
+          </svg>
+          <svg
+            v-else
+            viewBox="0 0 10 10"
+            fill="currentColor"
+            aria-hidden="true"
+            class="h-2.5 w-2.5 text-emerald-500"
+          >
+            <path d="M1.5 0.8 9 5 1.5 9.2Z" />
+          </svg>
+          {{ isRunning ? 'Stop' : 'Start' }}
+        </button>
 
-      <!-- Force stop lives behind a menu rather than beside Stop: it's the
-           exception, and putting it one click away keeps it from being hit
-           by accident. Only offered while there's a process to kill. -->
-      <div v-if="isRunning" class="relative shrink-0">
         <button
           type="button"
-          title="More actions"
-          class="flex h-8 w-8 items-center justify-center rounded-full border border-neutral-200 bg-white/60 text-neutral-500 transition hover:bg-white dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400 dark:hover:bg-neutral-800"
-          @click="menuOpen = !menuOpen"
+          title="Restart"
+          :class="[ICON_BUTTON_CLASS, 'glass-ghost']"
+          :disabled="isPending || needsInstall"
+          @click="onRestart"
         >
-          <svg viewBox="0 0 24 24" fill="currentColor" class="h-4 w-4">
-            <circle cx="12" cy="5" r="1.6" />
-            <circle cx="12" cy="12" r="1.6" />
-            <circle cx="12" cy="19" r="1.6" />
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="h-3.5 w-3.5"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3L20 9M20 9V4M20 9h-5"
+            />
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3L4 15m0 0v5m0-5h5"
+            />
           </svg>
         </button>
 
-        <div v-if="menuOpen" class="fixed inset-0 z-10" @click="menuOpen = false" />
-
-        <div
-          v-if="menuOpen"
-          class="absolute right-0 z-20 mt-2 w-56 overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-xl dark:border-neutral-700 dark:bg-neutral-900"
-        >
+        <!-- Force stop lives behind a menu rather than beside Stop: it's the
+             exception, and putting it one click away keeps it from being hit
+             by accident. Only offered while there's a process to kill. -->
+        <div v-if="isRunning" class="relative">
           <button
             type="button"
-            class="flex w-full items-start gap-2.5 px-3.5 py-2.5 text-left transition hover:bg-neutral-50 disabled:opacity-50 dark:hover:bg-neutral-800/60"
-            :disabled="isPending"
-            @click="requestForceStop"
+            title="More actions"
+            :class="[ICON_BUTTON_CLASS, menuOpen ? 'glass-raised' : 'glass-ghost']"
+            @click="menuOpen = !menuOpen"
           >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              class="mt-0.5 h-4 w-4 shrink-0 text-red-600 dark:text-red-400"
-            >
-              <path stroke-linecap="round" d="M18.4 5.6 5.6 18.4M5.6 5.6l12.8 12.8" />
+            <svg viewBox="0 0 24 24" fill="currentColor" class="h-3.5 w-3.5">
+              <circle cx="12" cy="5" r="1.6" />
+              <circle cx="12" cy="12" r="1.6" />
+              <circle cx="12" cy="19" r="1.6" />
             </svg>
-            <span>
-              <span class="block text-sm font-semibold text-red-600 dark:text-red-400">
-                Force stop
-              </span>
-              <span class="block text-xs text-neutral-500">
-                {{
-                  losesStateOnKill
-                    ? 'Kills it immediately — needs crash recovery'
-                    : 'Kills the process immediately'
-                }}
-              </span>
-            </span>
           </button>
-        </div>
-      </div>
 
-      <button
-        type="button"
-        title="Toggle logs"
-        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-neutral-200 bg-white/60 text-neutral-500 transition hover:bg-white dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400 dark:hover:bg-neutral-800"
-        @click="toggleExpanded"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          class="h-4 w-4 transition-transform"
-          :class="expanded ? 'rotate-180' : ''"
+          <div v-if="menuOpen" class="fixed inset-0 z-10" @click="menuOpen = false" />
+
+          <div
+            v-if="menuOpen"
+            class="glass-strong absolute right-0 z-20 mt-2 w-56 overflow-hidden rounded-xl"
+          >
+            <button
+              type="button"
+              class="flex w-full items-start gap-2.5 px-3.5 py-2.5 text-left transition hover:bg-white/50 disabled:opacity-50 dark:hover:bg-white/5"
+              :disabled="isPending"
+              @click="requestForceStop"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                class="mt-0.5 h-4 w-4 shrink-0 text-red-600 dark:text-red-400"
+              >
+                <path stroke-linecap="round" d="M18.4 5.6 5.6 18.4M5.6 5.6l12.8 12.8" />
+              </svg>
+              <span>
+                <span class="block text-sm font-semibold text-red-600 dark:text-red-400">
+                  Force stop
+                </span>
+                <span class="block text-xs text-neutral-500">
+                  {{
+                    losesStateOnKill
+                      ? 'Kills it immediately — needs crash recovery'
+                      : 'Kills the process immediately'
+                  }}
+                </span>
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          title="Toggle logs"
+          :class="[ICON_BUTTON_CLASS, expanded ? 'glass-raised' : 'glass-ghost']"
+          @click="toggleExpanded"
         >
-          <path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
-        </svg>
-      </button>
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="h-3.5 w-3.5 transition-transform"
+            :class="expanded ? 'rotate-180' : ''"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+          </svg>
+        </button>
+      </div>
     </div>
 
     <!-- The way out of a port conflict. Shown only after a start actually
@@ -284,8 +464,8 @@ function requestForceStop() {
       class="mx-3.5 mb-3.5 rounded-xl border p-3.5"
       :class="
         blocker.kind === 'system'
-          ? 'border-neutral-200 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800/40'
-          : 'border-amber-200 bg-amber-50 dark:border-amber-500/25 dark:bg-amber-500/10'
+          ? 'glass-inset'
+          : 'border-amber-300/60 bg-amber-100/50 dark:border-amber-500/25 dark:bg-amber-500/10'
       "
     >
       <p class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
@@ -311,7 +491,7 @@ function requestForceStop() {
       <div v-else class="mt-3 flex flex-wrap items-center gap-2">
         <button
           type="button"
-          class="rounded-full bg-red-600 px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-red-500 disabled:opacity-50"
+          class="glass-accent rounded-full px-4 py-1.5 text-sm font-semibold text-red-600 transition disabled:opacity-50 dark:text-red-400"
           :disabled="freeing || isPending"
           @click="freePortAndStart"
         >
@@ -337,7 +517,7 @@ function requestForceStop() {
          button away. -->
     <div
       v-if="confirmingForceStop"
-      class="mx-3.5 mb-3.5 rounded-xl border border-amber-200 bg-amber-50 p-3.5 dark:border-amber-500/25 dark:bg-amber-500/10"
+      class="mx-3.5 mb-3.5 rounded-xl border border-amber-300/60 bg-amber-100/50 p-3.5 dark:border-amber-500/25 dark:bg-amber-500/10"
     >
       <p class="text-sm font-semibold text-amber-900 dark:text-amber-200">
         Force stop {{ service.name }}?
@@ -349,7 +529,7 @@ function requestForceStop() {
       <div class="mt-3 flex gap-2">
         <button
           type="button"
-          class="rounded-full bg-red-600 px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-red-500 disabled:opacity-50"
+          class="glass-accent rounded-full px-4 py-1.5 text-sm font-semibold text-red-600 transition disabled:opacity-50 dark:text-red-400"
           :disabled="isPending"
           @click="onForceStop"
         >
@@ -366,5 +546,12 @@ function requestForceStop() {
     </div>
 
     <ServiceLogPanel v-if="expanded" :service-id="service.id" />
+
+    <LicenseConsentModal
+      v-if="licensed.pending.value"
+      :pkg="licensed.pending.value"
+      @confirm="onConsent"
+      @close="licensed.cancel"
+    />
   </div>
 </template>

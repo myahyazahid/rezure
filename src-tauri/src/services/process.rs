@@ -7,6 +7,7 @@ use std::io::{BufRead, BufReader, Read};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -19,15 +20,32 @@ use super::database;
 use super::db_engine;
 use super::db_profiles;
 use super::php_ini;
-use super::vhosts::{self, PHP_FASTCGI_PORT};
-use super::{Service, ServiceHandle, ServiceInfo, ServiceManager, ServiceStatus, CPU_HISTORY_LEN};
+use super::php_pool;
+use super::postgres;
+use super::vhosts;
+use super::{
+    Service, ServiceHandle, ServiceInfo, ServiceManager, ServiceStatus, WorkerCount,
+    CPU_HISTORY_LEN,
+};
 use crate::utils::command::HiddenWindow;
+use crate::utils::elevation;
 use crate::utils::error::AppError;
 use crate::utils::paths;
 
 /// Event name the frontend subscribes to via `listen()` for a service's
 /// stdout/stderr, line by line, as it's produced.
 pub const LOG_EVENT: &str = "service://log";
+
+/// How many requests `php-cgi` serves before exiting on its own (default
+/// 500). Set to `0` on every PHP spawn — see `ProcessService::command`.
+const PHP_FCGI_MAX_REQUESTS_ENV: &str = "PHP_FCGI_MAX_REQUESTS";
+
+/// Where Mailpit accepts mail — Mailpit's own default, and the port Laravel
+/// Sail's docs and most tutorials already put in `MAIL_PORT`.
+pub const MAILPIT_SMTP_PORT: u16 = 1025;
+
+/// Mailpit's web UI and API — also its own default.
+pub const MAILPIT_WEB_PORT: u16 = 8025;
 
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -74,31 +92,69 @@ enum Launch {
     /// extracted `conf/nginx.conf` is never touched.
     Nginx,
     /// `php-cgi -b 127.0.0.1:<port>` — a stateless FastCGI TCP responder,
-    /// not the built-in dev server. There's no PHP-FPM on Windows; this is
+    /// not the built-in dev server. One process per worker, each on its own
+    /// port (see `services::php_pool` for why there are several). There's no PHP-FPM on Windows; this is
     /// the standard substitute (what Laragon/XAMPP-style stacks use too).
     /// Only useful behind a reverse proxy that sets `SCRIPT_FILENAME` per
     /// request (i.e. an Nginx vhost) — visiting the port directly does
     /// nothing, unlike the old built-in-server mode.
-    Php,
+    ///
+    /// `None` follows `services::php`'s global active version, like the one
+    /// PHP service that has always existed. `Some(version)` pins this
+    /// instance to a specific version regardless of what's globally active —
+    /// how a project can pin a version distinct from every other project's,
+    /// each getting its own concurrently-running responder. See
+    /// `services::php_pool` for how versions get ports and
+    /// `ServiceManager::sync_php_pool` for how pinned instances are
+    /// registered and torn down as projects change.
+    Php { version: Option<String> },
     /// `mysqld --datadir=<dir> --port=<port>`, where all three of the binary,
     /// the datadir and the port come from whichever profile is active (see
     /// `services::db_profiles`) — resolved at spawn time, not construction,
     /// which is what makes switching profiles take effect on restart. An
     /// empty datadir is bootstrapped first, per engine.
     Database,
+    /// `mailpit --smtp 127.0.0.1:1025 --listen 127.0.0.1:8025` — a local
+    /// mail catcher: projects send to it over SMTP, and every message lands
+    /// in its web UI instead of anyone's inbox. The one service with a
+    /// second listener, which is why [`ProcessService::web_port`] exists.
+    Mailpit,
+    /// `postgres -D <datadir> -p 5432`, running whichever version is active
+    /// (see `services::postgres`) on that major's own data directory, which
+    /// is bootstrapped first when empty. A database like `Database`: waited
+    /// on until it accepts connections, and asked to shut down rather than
+    /// killed.
+    Postgres,
 }
 
 pub struct ProcessService {
-    id: &'static str,
-    name: &'static str,
+    id: String,
+    name: String,
     category: &'static str,
+    /// The port the first worker binds; worker `n` binds `port + n`.
     port: u16,
+    /// How many identical processes this service runs. 1 for everything but
+    /// PHP — see `services::php_pool`.
+    workers: u16,
+    /// A second port the (single) process binds for a web UI, beside `port`.
+    /// Checked before starting like `port` is, and what `ServiceInfo::web_url`
+    /// points at.
+    web_port: Option<u16>,
     launch: Launch,
     log_sink: LogSink,
     crash_sink: CrashSink,
-    child: Mutex<Option<Child>>,
+    /// Set when [`Self::poll_pids`] finds a worker gone on its own; cleared
+    /// by a start that brings every worker back, or by any stop. See
+    /// [`Service::crashed`].
+    crashed: AtomicBool,
+    /// One slot per worker, `None` while that worker isn't running.
+    children: Mutex<Vec<Option<Child>>>,
     sys: Mutex<System>,
     cpu_history: Mutex<Vec<u8>>,
+}
+
+fn empty_slots(workers: u16) -> Mutex<Vec<Option<Child>>> {
+    Mutex::new((0..workers).map(|_| None).collect())
 }
 
 /// `%LOCALAPPDATA%\Rezure\data\<id>` — a service's own working data (PHP's
@@ -117,43 +173,87 @@ fn runtime_dir(id: &str) -> Result<PathBuf, AppError> {
 /// child's lifetime to its parent's. This file is the breadcrumb that lets
 /// `reap_orphan` recognize and clean up exactly that leftover, and nothing
 /// else — see its doc comment for the matching rule.
-fn pid_file_path(id: &str) -> Result<PathBuf, AppError> {
-    Ok(runtime_dir(id)?.join("service.pid"))
+///
+/// One file per worker. The first keeps the plain `service.pid` name every
+/// single-process service has always used, so a leftover from a build that
+/// predates workers is still recognized.
+fn pid_file_path(id: &str, worker: u16) -> Result<PathBuf, AppError> {
+    let file = match worker {
+        0 => "service.pid".to_string(),
+        n => format!("service-{n}.pid"),
+    };
+    Ok(runtime_dir(id)?.join(file))
 }
 
 impl ProcessService {
     pub fn nginx(log_sink: LogSink) -> Result<Self, AppError> {
         binaries::find("nginx")?; // fail fast if the manifest entry is ever missing
         Ok(Self {
-            id: "nginx",
-            name: "Nginx",
+            id: "nginx".to_string(),
+            name: "Nginx".to_string(),
             category: "Web server",
             port: 80,
+            workers: 1,
+            web_port: None,
             launch: Launch::Nginx,
             log_sink,
             crash_sink: no_op_crash_sink(),
-            child: Mutex::new(None),
+            crashed: AtomicBool::new(false),
+            children: empty_slots(1),
             sys: Mutex::new(System::new()),
             cpu_history: Mutex::new(Vec::new()),
         })
     }
 
+    /// The default PHP service — follows `services::php`'s global active
+    /// version and always binds the `php_pool::DEFAULT_BASE_PORT` block.
+    /// Every project that hasn't pinned a version of its own is served by
+    /// this one.
     pub fn php(log_sink: LogSink) -> Result<Self, AppError> {
         if binaries::family_packages("php").is_empty() {
             return Err(AppError::UnknownBinary("php".to_string()));
         }
         Ok(Self {
-            id: "php",
-            name: "PHP",
+            id: "php".to_string(),
+            name: "PHP".to_string(),
             category: "Runtime",
-            port: PHP_FASTCGI_PORT,
-            launch: Launch::Php,
+            port: php_pool::DEFAULT_BASE_PORT,
+            workers: php_pool::WORKERS_PER_VERSION,
+            web_port: None,
+            launch: Launch::Php { version: None },
             log_sink,
             crash_sink: no_op_crash_sink(),
-            child: Mutex::new(None),
+            crashed: AtomicBool::new(false),
+            children: empty_slots(php_pool::WORKERS_PER_VERSION),
             sys: Mutex::new(System::new()),
             cpu_history: Mutex::new(Vec::new()),
         })
+    }
+
+    /// A pooled PHP service pinned to one specific `version`, on its own
+    /// port block starting at `port` — see `services::php_pool`. Unlike the other constructors this
+    /// doesn't fail on a missing install: the caller (`ServiceManager::sync_php_pool`,
+    /// fed from `php_pool::wanted`) only ever asks for a version it has
+    /// already confirmed is installed, so there is nothing left to check
+    /// here that wouldn't just be re-verifying the caller's own input.
+    pub fn php_pinned(version: &str, port: u16, log_sink: LogSink) -> Self {
+        Self {
+            id: php_pool::service_id(version),
+            name: format!("PHP {version}"),
+            category: "Runtime",
+            port,
+            workers: php_pool::WORKERS_PER_VERSION,
+            web_port: None,
+            launch: Launch::Php {
+                version: Some(version.to_string()),
+            },
+            log_sink,
+            crash_sink: no_op_crash_sink(),
+            crashed: AtomicBool::new(false),
+            children: empty_slots(php_pool::WORKERS_PER_VERSION),
+            sys: Mutex::new(System::new()),
+            cpu_history: Mutex::new(Vec::new()),
+        }
     }
 
     /// The database service. Keeps the `mariadb` id it has always had — the
@@ -162,19 +262,65 @@ impl ProcessService {
     pub fn mariadb(log_sink: LogSink) -> Result<Self, AppError> {
         binaries::find("mariadb")?;
         Ok(Self {
-            id: "mariadb",
-            name: "Database",
+            id: "mariadb".to_string(),
+            name: "Database".to_string(),
             category: "Database",
             // Fallback only, for when no profile is resolvable — the real
             // port comes from the active profile via `current_port`.
             port: 3306,
+            workers: 1,
+            web_port: None,
             launch: Launch::Database,
             log_sink,
             crash_sink: no_op_crash_sink(),
-            child: Mutex::new(None),
+            crashed: AtomicBool::new(false),
+            children: empty_slots(1),
             sys: Mutex::new(System::new()),
             cpu_history: Mutex::new(Vec::new()),
         })
+    }
+
+    /// The local mail catcher. Optional — unlike nginx and PHP, nothing else
+    /// depends on it — so it's the one service that can be listed before
+    /// it's installed, with an Install action in place of Start.
+    pub fn mailpit(log_sink: LogSink) -> Result<Self, AppError> {
+        binaries::find("mailpit")?;
+        Ok(Self {
+            id: "mailpit".to_string(),
+            name: "Mailpit".to_string(),
+            category: "Mail",
+            port: MAILPIT_SMTP_PORT,
+            workers: 1,
+            web_port: Some(MAILPIT_WEB_PORT),
+            launch: Launch::Mailpit,
+            log_sink,
+            crash_sink: no_op_crash_sink(),
+            crashed: AtomicBool::new(false),
+            children: empty_slots(1),
+            sys: Mutex::new(System::new()),
+            cpu_history: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// PostgreSQL. Optional like Mailpit: listed before it's installed, with
+    /// an Install action on its card — which installs the newest version
+    /// (`commands::binaries::install_binary`).
+    pub fn postgres(log_sink: LogSink) -> Self {
+        Self {
+            id: postgres::SERVICE_ID.to_string(),
+            name: postgres::SERVICE_NAME.to_string(),
+            category: "Database",
+            port: postgres::PORT,
+            workers: 1,
+            web_port: None,
+            launch: Launch::Postgres,
+            log_sink,
+            crash_sink: no_op_crash_sink(),
+            crashed: AtomicBool::new(false),
+            children: empty_slots(1),
+            sys: Mutex::new(System::new()),
+            cpu_history: Mutex::new(Vec::new()),
+        }
     }
 
     /// Attaches the callback fired when this service is found to have
@@ -187,17 +333,24 @@ impl ProcessService {
         self
     }
 
-    /// The version shown on the service card — for PHP and the database,
-    /// whichever one is active right now, not a fixed manifest entry.
+    /// The version shown on the service card — for the default PHP service
+    /// and the database, whichever one is active right now rather than a
+    /// fixed manifest entry; for a pinned PHP instance, always its own
+    /// pinned version.
     fn version(&self) -> String {
-        match self.launch {
-            Launch::Php => super::php::active_id(),
+        match &self.launch {
+            Launch::Php { version: Some(v) } => v.clone(),
+            Launch::Php { version: None } => super::php::active_id(),
             Launch::Nginx => binaries::find("nginx")
+                .map(|pkg| pkg.version.to_string())
+                .unwrap_or_default(),
+            Launch::Mailpit => binaries::find("mailpit")
                 .map(|pkg| pkg.version.to_string())
                 .unwrap_or_default(),
             Launch::Database => db_profiles::active()
                 .map(|profile| profile.version)
                 .unwrap_or_default(),
+            Launch::Postgres => postgres::active_id(),
         }
     }
 
@@ -225,6 +378,48 @@ impl ProcessService {
         }
     }
 
+    /// The port worker `worker` binds.
+    fn worker_port(&self, worker: u16) -> u16 {
+        self.current_port() + worker
+    }
+
+    /// Every port spawning worker `worker` will bind: its own, plus the web
+    /// UI's for the (only) worker of a service that has one.
+    fn ports_for(&self, worker: u16) -> Vec<u16> {
+        let mut ports = vec![self.worker_port(worker)];
+        if worker == 0 {
+            ports.extend(self.web_port);
+        }
+        ports
+    }
+
+    fn all_ports(&self) -> Vec<u16> {
+        (0..self.workers).flat_map(|w| self.ports_for(w)).collect()
+    }
+
+    /// See `ServiceInfo::install_id`. Only services one download makes
+    /// startable — PHP versions and MySQL-family engines are chosen on their
+    /// own pages, not installed from a service card. PostgreSQL's card
+    /// installs the newest version; picking another is the Switch page's job.
+    fn install_id(&self) -> Option<&'static str> {
+        match self.launch {
+            Launch::Nginx => Some("nginx"),
+            Launch::Mailpit => Some("mailpit"),
+            Launch::Postgres => Some(postgres::SERVICE_ID),
+            Launch::Php { .. } | Launch::Database => None,
+        }
+    }
+
+    /// A database: waited on until it accepts connections, and asked to shut
+    /// down cleanly before anything is killed.
+    fn is_stateful(&self) -> bool {
+        matches!(self.launch, Launch::Database | Launch::Postgres)
+    }
+
+    fn web_url(&self) -> Option<String> {
+        self.web_port.map(|port| format!("http://127.0.0.1:{port}"))
+    }
+
     /// The binary that actually ends up running.
     ///
     /// nginx and MariaDB are one pinned manifest version each. PHP is
@@ -240,15 +435,19 @@ impl ProcessService {
     /// recognize a leftover from a previous run), so the two can never
     /// drift apart.
     fn resolved_exe(&self) -> Result<PathBuf, AppError> {
-        match self.launch {
-            Launch::Php => {
-                let exe = super::php::active_exe()?;
+        match &self.launch {
+            Launch::Php { version } => {
+                let exe = match version {
+                    Some(v) => super::php::exe_for(v)?,
+                    None => super::php::active_exe()?,
+                };
                 Ok(exe
                     .parent()
                     .ok_or_else(|| AppError::Io("php.exe has no parent directory".to_string()))?
                     .join("php-cgi.exe"))
             }
             Launch::Nginx => binaries::exe_path(binaries::find("nginx")?),
+            Launch::Mailpit => binaries::exe_path(binaries::find("mailpit")?),
             // Resolved through the active profile, so a switch to a MySQL
             // profile spawns MySQL's own `mysqld.exe`, not MariaDB's.
             Launch::Database => {
@@ -256,12 +455,14 @@ impl ProcessService {
                     .ok_or_else(|| AppError::BinaryNotInstalled("Database".to_string()))?;
                 db_profiles::resolve_server_exe(&profile)
             }
+            Launch::Postgres => postgres::active_exe(),
         }
     }
 
     /// Builds the `Command` to spawn, preparing any per-service runtime
     /// state (PHP's docroot, MariaDB's data directory) it needs first.
-    fn command(&self) -> Result<Command, AppError> {
+    /// `port` is the worker's own port; only PHP has more than one.
+    fn command(&self, port: u16) -> Result<Command, AppError> {
         let exe = self.resolved_exe()?;
 
         let mut cmd = match &self.launch {
@@ -272,18 +473,25 @@ impl ProcessService {
                     .args(["-p".as_ref(), vhosts::nginx_runtime_dir()?.as_os_str()]);
                 cmd
             }
-            Launch::Php => {
+            Launch::Php { .. } => {
                 let ini_path = php_ini::ensure_php_ini(&exe)?;
                 let mut cmd = Command::new(&exe);
                 cmd.arg("-c")
                     .arg(&ini_path)
                     .arg("-b")
-                    .arg(format!("127.0.0.1:{}", self.port));
+                    .arg(format!("127.0.0.1:{port}"));
                 // `-c` above names a file this start just overwrote, so it is
                 // no place for a user's own settings. The scan directory is
                 // the one PHP reads *after* it and Rezure never writes into,
                 // which is what makes configuring the web PHP possible at all.
-                cmd.env(php_ini::SCAN_DIR_ENV, php_ini::ensure_conf_d()?);
+                // Same environment as every other PHP Rezure spawns.
+                php_ini::apply_process_env(&mut cmd, &exe)?;
+                // php-cgi exits on its own after 500 requests unless told
+                // otherwise — it expects a supervisor like PHP-FPM to replace
+                // it, which Windows doesn't have. A busy project (webhooks,
+                // Livewire polling) crosses that in minutes, and every
+                // request after is a 502. 0 means "never recycle".
+                cmd.env(PHP_FCGI_MAX_REQUESTS_ENV, "0");
                 cmd
             }
             Launch::Database => {
@@ -322,6 +530,59 @@ impl ProcessService {
                     .arg("--console");
                 cmd
             }
+            Launch::Mailpit => {
+                // A file rather than Mailpit's default temporary database, so
+                // caught mail survives a restart of the service or the app —
+                // the reset link from ten minutes ago is still there.
+                let dir = runtime_dir(&self.id)?;
+                fs::create_dir_all(&dir).map_err(|e| AppError::ProcessBootstrapFailed {
+                    name: self.name.clone(),
+                    reason: format!("could not create {}: {e}", dir.display()),
+                })?;
+                let mut cmd = Command::new(&exe);
+                cmd.arg("--smtp")
+                    .arg(format!("127.0.0.1:{port}"))
+                    .arg("--listen")
+                    .arg(format!(
+                        "127.0.0.1:{}",
+                        self.web_port.unwrap_or(MAILPIT_WEB_PORT)
+                    ))
+                    .arg("--database")
+                    .arg(dir.join("mailpit.db"))
+                    // A project's `.env` often carries SMTP credentials meant
+                    // for a real provider. Accepting any (or none) is what lets
+                    // it send here unchanged apart from host and port — the
+                    // mail never leaves this machine either way.
+                    .arg("--smtp-auth-accept-any")
+                    .arg("--smtp-auth-allow-insecure")
+                    // Rezure pins and updates the binary itself; Mailpit's own
+                    // "new version available" banner would point the user at a
+                    // download Rezure doesn't manage.
+                    .arg("--disable-version-check");
+                cmd
+            }
+            Launch::Postgres => {
+                // Refused before anything is written: started elevated,
+                // PostgreSQL exits at once, and that would only read as "the
+                // server exited during startup".
+                if elevation::is_elevated() {
+                    return Err(AppError::PostgresElevated);
+                }
+                let data_dir = postgres::data_dir(&postgres::active_id())?;
+                if db_engine::needs_bootstrap(&data_dir) {
+                    postgres::bootstrap(&exe, &data_dir)?;
+                }
+                let mut cmd = Command::new(&exe);
+                cmd.arg("-D")
+                    .arg(&data_dir)
+                    .arg("-p")
+                    .arg(port.to_string())
+                    // Loopback only, like the MariaDB service: `trust`
+                    // authentication is safe only because nothing off this
+                    // machine can connect.
+                    .args(["-c", "listen_addresses=127.0.0.1"]);
+                cmd
+            }
         };
 
         // Piped, not inherited: a GUI-subsystem build has no console handles
@@ -344,7 +605,9 @@ impl ProcessService {
     fn bind_addr(&self) -> &'static str {
         match self.launch {
             Launch::Nginx => "0.0.0.0",
-            Launch::Php | Launch::Database => "127.0.0.1",
+            Launch::Php { .. } | Launch::Database | Launch::Mailpit | Launch::Postgres => {
+                "127.0.0.1"
+            }
         }
     }
 
@@ -353,52 +616,102 @@ impl ProcessService {
     /// killed) — no shutdown signal needed, it just runs out of input.
     fn spawn_log_readers(&self, child: &mut Child) {
         if let Some(stdout) = child.stdout.take() {
-            spawn_log_reader(self.log_sink.clone(), self.id, LogStream::Stdout, stdout);
+            spawn_log_reader(
+                self.log_sink.clone(),
+                self.id.clone(),
+                LogStream::Stdout,
+                stdout,
+            );
         }
         if let Some(stderr) = child.stderr.take() {
-            spawn_log_reader(self.log_sink.clone(), self.id, LogStream::Stderr, stderr);
+            spawn_log_reader(
+                self.log_sink.clone(),
+                self.id.clone(),
+                LogStream::Stderr,
+                stderr,
+            );
         }
     }
 
-    /// Checks whether the tracked child is still alive, reaping it (and
-    /// returning `None`) if it has exited.
+    /// The PIDs of every worker still alive, reaping (and clearing the slot
+    /// of) any that has exited.
     ///
-    /// `stop()`/`force_stop()` always take the child out of this `Mutex`
-    /// themselves before waiting on it, so by the time this can observe
+    /// `stop()`/`force_stop()` always take the children out of this `Mutex`
+    /// themselves before waiting on them, so by the time this can observe
     /// `try_wait()` reporting an exit, the process was never handed to
     /// either of them — the one way that happens is the process dying on
-    /// its own, which is exactly what `crash_sink` is for.
-    fn poll_pid(&self) -> Option<u32> {
-        let mut child_guard = self.child.lock().unwrap();
-        match child_guard.as_mut().map(|child| child.try_wait()) {
-            Some(Ok(None)) => child_guard.as_ref().map(|child| child.id()),
-            Some(Ok(Some(_status))) => {
-                *child_guard = None;
-                drop(child_guard);
-                (self.crash_sink)(self.id);
-                None
-            }
-            Some(Err(_)) | None => {
-                *child_guard = None;
-                None
+    /// its own. That marks the service crashed, so the supervisor brings
+    /// the worker back; `crash_sink` (the user-facing notification) only
+    /// fires once *no* worker is left, since with some still up the service
+    /// is degraded, not down, and nginx is already routing around the gap.
+    fn poll_pids(&self) -> Vec<u32> {
+        let mut children = self.children.lock().unwrap();
+        let mut live = Vec::new();
+        let mut exited = 0;
+        for slot in children.iter_mut() {
+            let Some(child) = slot.as_mut() else {
+                continue;
+            };
+            match child.try_wait() {
+                Ok(None) => live.push(child.id()),
+                Ok(Some(_status)) => {
+                    *slot = None;
+                    exited += 1;
+                }
+                Err(_) => *slot = None,
             }
         }
+        drop(children);
+
+        if exited > 0 {
+            self.crashed.store(true, Ordering::SeqCst);
+            if live.is_empty() {
+                (self.crash_sink)(&self.id);
+            } else {
+                log::warn!(
+                    "{}: {exited} worker(s) exited unexpectedly, {} still serving",
+                    self.id,
+                    live.len()
+                );
+            }
+        }
+        live
     }
 
-    /// Refreshes `pid`'s CPU usage via the service's own long-lived
-    /// `System`, appending the sample to the sparkline history. A single
+    /// Which worker slots are empty right now, after reaping any that exited.
+    fn missing_workers(&self) -> Vec<u16> {
+        self.poll_pids();
+        self.children
+            .lock()
+            .unwrap()
+            .iter()
+            .zip(0..)
+            .filter(|(slot, _)| slot.is_none())
+            .map(|(_, worker)| worker)
+            .collect()
+    }
+
+    /// Refreshes the workers' CPU usage via the service's own long-lived
+    /// `System`, appending their sum to the sparkline history. A single
     /// refresh with no prior baseline reads as 0% — expected right after a
     /// fresh start, and self-corrects on the next call.
-    fn sample_cpu(&self, pid: u32) -> Option<u8> {
-        let pid = Pid::from_u32(pid);
+    fn sample_cpu(&self, pids: &[u32]) -> Option<u8> {
+        let pids: Vec<Pid> = pids.iter().map(|pid| Pid::from_u32(*pid)).collect();
         let cpu = {
             let mut sys = self.sys.lock().unwrap();
             sys.refresh_processes_specifics(
-                ProcessesToUpdate::Some(&[pid]),
+                ProcessesToUpdate::Some(&pids),
                 true,
                 ProcessRefreshKind::nothing().with_cpu(),
             );
-            sys.process(pid).map(|p| p.cpu_usage())?
+            let samples: Vec<f32> = pids
+                .iter()
+                .filter_map(|pid| sys.process(*pid).map(|p| p.cpu_usage()))
+                .collect();
+            if samples.is_empty() {
+                return None;
+            }
+            samples.iter().sum::<f32>()
         };
 
         let sample = cpu.round().clamp(0.0, 100.0) as u8;
@@ -414,14 +727,14 @@ impl ProcessService {
 
 fn spawn_log_reader(
     sink: LogSink,
-    service_id: &'static str,
+    service_id: String,
     stream: LogStream,
     reader: impl Read + Send + 'static,
 ) {
     std::thread::spawn(move || {
         for line in BufReader::new(reader).lines() {
             let Ok(line) = line else { break };
-            sink(service_id, stream, &line);
+            sink(&service_id, stream, &line);
         }
     });
 }
@@ -521,7 +834,10 @@ const READY_TIMEOUT: Duration = Duration::from_secs(45);
 ///
 /// Returns the process's own last words when it didn't come up, so the
 /// caller can say *why* rather than just that it didn't.
-fn wait_until_accepting(child: &mut Child, port: u16) -> Result<(), String> {
+///
+/// `ready` is the check itself — a TCP connect for MySQL, `pg_isready` for
+/// PostgreSQL, which takes connections on its port before it can serve them.
+fn wait_until_accepting(child: &mut Child, ready: impl Fn() -> bool) -> Result<(), String> {
     let deadline = Instant::now() + READY_TIMEOUT;
 
     while Instant::now() < deadline {
@@ -536,7 +852,7 @@ fn wait_until_accepting(child: &mut Child, port: u16) -> Result<(), String> {
             Ok(None) => {}
         }
 
-        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+        if ready() {
             return Ok(());
         }
         std::thread::sleep(Duration::from_millis(200));
@@ -563,18 +879,17 @@ fn wait_for_exit(child: &mut Child, timeout: Duration) -> bool {
 
 impl Service for ProcessService {
     fn id(&self) -> &str {
-        self.id
+        &self.id
     }
 
     fn info(&self) -> ServiceInfo {
-        let pid = self.poll_pid();
+        let pids = self.poll_pids();
 
-        let cpu_percent = match pid {
-            Some(pid) => self.sample_cpu(pid),
-            None => {
-                self.cpu_history.lock().unwrap().clear();
-                None
-            }
+        let cpu_percent = if pids.is_empty() {
+            self.cpu_history.lock().unwrap().clear();
+            None
+        } else {
+            self.sample_cpu(&pids)
         };
 
         // Best-effort: an empty version just leaves the badge blank, which
@@ -585,20 +900,38 @@ impl Service for ProcessService {
             id: self.id.to_string(),
             name: self.display_name(),
             category: self.category.to_string(),
-            status: if pid.is_some() {
-                ServiceStatus::Running
-            } else {
+            // Running while any worker is: a partly-down PHP still serves
+            // every request, just with less headroom — `workers` says how
+            // much.
+            status: if pids.is_empty() {
                 ServiceStatus::Stopped
+            } else {
+                ServiceStatus::Running
             },
             version,
             port: self.current_port(),
             cpu_percent,
             cpu_history: self.cpu_history.lock().unwrap().clone(),
+            workers: (self.workers > 1).then_some(WorkerCount {
+                running: pids.len() as u16,
+                total: self.workers,
+            }),
+            ports: self.all_ports(),
+            installed: self.resolved_exe().is_ok_and(|exe| exe.is_file()),
+            install_id: self.install_id().map(str::to_string),
+            web_url: self.web_url(),
+            endpoint: None,
         }
     }
 
+    /// Starts every worker that isn't running. On a stopped service that's
+    /// all of them; on one where only some workers died, it's just those —
+    /// the survivors keep serving untouched, which is what lets the
+    /// supervisor heal a lost PHP worker without dropping requests in flight
+    /// on the others.
     fn start(&self) -> Result<ServiceInfo, AppError> {
-        if self.poll_pid().is_some() {
+        let missing = self.missing_workers();
+        if missing.is_empty() {
             return Ok(self.info());
         }
 
@@ -608,43 +941,55 @@ impl Service for ProcessService {
             return Err(AppError::BinaryNotInstalled(self.name.to_string()));
         }
 
-        self.reap_orphan()?;
-        ensure_port_available(self.bind_addr(), self.current_port(), self.name)?;
-
-        let mut cmd = self.command()?;
-        let mut child = cmd.spawn().map_err(|e| AppError::ProcessSpawnFailed {
-            name: self.name.to_string(),
-            reason: e.to_string(),
-        })?;
-
-        if let Ok(path) = pid_file_path(self.id) {
-            let _ = fs::write(&path, child.id().to_string());
+        // Only the workers about to be spawned are checked: the ones already
+        // running hold their ports legitimately. Every port is checked
+        // before anything is spawned, so a conflict on the last worker's
+        // port doesn't leave the first ones started for nothing.
+        for &worker in &missing {
+            self.reap_orphan(worker)?;
         }
-
-        self.spawn_log_readers(&mut child);
-
-        // Only the database is waited on. nginx and `php-cgi` either bind or
-        // die immediately, while a database does its riskiest work — opening
-        // somebody's datadir — after the process already exists, so "spawned"
-        // and "working" are genuinely different answers for it alone.
-        if matches!(self.launch, Launch::Database) {
-            if let Err(reason) = wait_until_accepting(&mut child, self.current_port()) {
-                // It never came up, so nothing should be tracking it as
-                // running — and a half-started server must not be left
-                // holding the datadir.
-                kill_process_tree(child.id());
-                let _ = child.wait();
-                if let Ok(path) = pid_file_path(self.id) {
-                    let _ = fs::remove_file(&path);
-                }
-                return Err(AppError::ProcessSpawnFailed {
-                    name: self.display_name(),
-                    reason,
-                });
+        for &worker in &missing {
+            for port in self.ports_for(worker) {
+                ensure_port_available(self.bind_addr(), port, &self.name)?;
             }
         }
 
-        *self.child.lock().unwrap() = Some(child);
+        let mut spawned: Vec<(u16, Child)> = Vec::new();
+        for &worker in &missing {
+            match self.spawn_worker(worker) {
+                Ok(child) => spawned.push((worker, child)),
+                Err(err) => {
+                    self.discard(spawned);
+                    return Err(err);
+                }
+            }
+        }
+
+        // Only a database is waited on. nginx and `php-cgi` either bind or
+        // die immediately, while a database does its riskiest work — opening
+        // somebody's datadir — after the process already exists, so "spawned"
+        // and "working" are genuinely different answers for it alone.
+        if self.is_stateful() {
+            if let Some((_, child)) = spawned.first_mut() {
+                if let Err(reason) = wait_until_accepting(child, self.readiness()) {
+                    // It never came up, so nothing should be tracking it as
+                    // running — and a half-started server must not be left
+                    // holding the datadir.
+                    self.discard(spawned);
+                    return Err(AppError::ProcessSpawnFailed {
+                        name: self.display_name(),
+                        reason,
+                    });
+                }
+            }
+        }
+
+        let mut children = self.children.lock().unwrap();
+        for (worker, child) in spawned {
+            children[usize::from(worker)] = Some(child);
+        }
+        drop(children);
+        self.crashed.store(false, Ordering::SeqCst);
         Ok(self.info())
     }
 
@@ -672,23 +1017,38 @@ impl Service for ProcessService {
     fn force_stop(&self) -> Result<ServiceInfo, AppError> {
         self.shut_down(false)
     }
+
+    fn crashed(&self) -> bool {
+        // Polling here is what lets a crash be noticed with no window open:
+        // otherwise only `info()` looks, and only when the UI asks.
+        self.poll_pids();
+        self.crashed.load(Ordering::SeqCst)
+    }
+
+    /// PHP only. nginx is left to the user for now, and a database never:
+    /// restarting one that just died can loop it through crash recovery
+    /// against somebody's real datadir.
+    fn restarts_on_crash(&self) -> bool {
+        matches!(self.launch, Launch::Php { .. })
+    }
 }
 
 impl ProcessService {
     /// The one stop path. `graceful` decides whether the process is asked to
     /// close itself first or simply killed.
     fn shut_down(&self, graceful: bool) -> Result<ServiceInfo, AppError> {
-        let mut child_guard = self.child.lock().unwrap();
-        if let Some(mut child) = child_guard.take() {
+        // A deliberate stop settles whatever crash came before it — the user
+        // has made a call, and the supervisor must not overrule it.
+        self.crashed.store(false, Ordering::SeqCst);
+        let mut children = self.children.lock().unwrap();
+        for mut child in children.iter_mut().filter_map(Option::take) {
             let stopped_cleanly = graceful
-                && matches!(self.launch, Launch::Database)
-                && self
-                    .resolved_exe()
-                    .is_ok_and(|exe| request_graceful_shutdown(&exe, self.current_port()))
+                && self.is_stateful()
+                && self.request_shutdown()
                 && wait_for_exit(&mut child, GRACEFUL_SHUTDOWN_TIMEOUT);
 
             if !stopped_cleanly {
-                if graceful && matches!(self.launch, Launch::Database) {
+                if graceful && self.is_stateful() {
                     log::warn!(
                         "{} did not shut down cleanly in {}s — force-killing it",
                         self.id,
@@ -699,12 +1059,76 @@ impl ProcessService {
             }
             let _ = child.wait();
         }
-        drop(child_guard);
-        if let Ok(path) = pid_file_path(self.id) {
-            let _ = fs::remove_file(&path);
+        drop(children);
+        for worker in 0..self.workers {
+            if let Ok(path) = pid_file_path(&self.id, worker) {
+                let _ = fs::remove_file(&path);
+            }
         }
         self.cpu_history.lock().unwrap().clear();
         Ok(self.info())
+    }
+
+    /// How [`wait_until_accepting`] tells a just-spawned database is ready.
+    fn readiness(&self) -> Box<dyn Fn() -> bool> {
+        let port = self.current_port();
+        match self.launch {
+            Launch::Postgres => {
+                let exe = self.resolved_exe();
+                Box::new(move || exe.as_ref().is_ok_and(|exe| postgres::is_ready(exe, port)))
+            }
+            _ => Box::new(move || std::net::TcpStream::connect(("127.0.0.1", port)).is_ok()),
+        }
+    }
+
+    /// Asks a running database to shut down cleanly; whether the request was
+    /// accepted. `false` for every other service, which has nothing to flush.
+    fn request_shutdown(&self) -> bool {
+        let Ok(exe) = self.resolved_exe() else {
+            return false;
+        };
+        match self.launch {
+            Launch::Database => request_graceful_shutdown(&exe, self.current_port()),
+            // The active version's data directory — which is the running
+            // one's, because switching versions stops the service first
+            // (`postgres::switch`).
+            Launch::Postgres => postgres::data_dir(&postgres::active_id())
+                .is_ok_and(|dir| postgres::request_shutdown(&exe, &dir)),
+            _ => false,
+        }
+    }
+
+    /// Spawns one worker on its own port and records its PID.
+    fn spawn_worker(&self, worker: u16) -> Result<Child, AppError> {
+        let mut cmd = self.command(self.worker_port(worker))?;
+        let mut child = cmd.spawn().map_err(|e| AppError::ProcessSpawnFailed {
+            name: self.name.to_string(),
+            reason: e.to_string(),
+        })?;
+
+        // A pooled PHP service's folder (`data/php-<version>`) is never created
+        // by anything else, and without it this write fails silently — which
+        // leaves `reap_orphan` blind to that instance after a crash.
+        if let Ok(path) = pid_file_path(&self.id, worker) {
+            if let Some(dir) = path.parent() {
+                let _ = fs::create_dir_all(dir);
+            }
+            let _ = fs::write(&path, child.id().to_string());
+        }
+
+        self.spawn_log_readers(&mut child);
+        Ok(child)
+    }
+
+    /// Kills workers a start spawned but won't keep, and forgets their PIDs.
+    fn discard(&self, spawned: Vec<(u16, Child)>) {
+        for (worker, mut child) in spawned {
+            kill_process_tree(child.id());
+            let _ = child.wait();
+            if let Ok(path) = pid_file_path(&self.id, worker) {
+                let _ = fs::remove_file(&path);
+            }
+        }
     }
 }
 
@@ -716,8 +1140,8 @@ impl ProcessService {
     /// by an unrelated process is left completely alone, since a stale
     /// record is the only thing this can verify — it's never treated as
     /// license to kill whatever happens to be using the port.
-    fn reap_orphan(&self) -> Result<(), AppError> {
-        let pid_path = pid_file_path(self.id)?;
+    fn reap_orphan(&self, worker: u16) -> Result<(), AppError> {
+        let pid_path = pid_file_path(&self.id, worker)?;
         let Ok(recorded) = fs::read_to_string(&pid_path) else {
             return Ok(());
         };
@@ -799,6 +1223,14 @@ pub fn real_services(app: AppHandle) -> ServiceManager {
     });
 
     let crash_sink: CrashSink = Arc::new(move |service_id| {
+        // Reported whether or not the user wants a notification — that
+        // setting is about interrupting them, not about the crash counting.
+        // On its own thread because this can fire from inside `list()`,
+        // whose caller may be holding the database lock `record` needs.
+        let telemetry_app = app.clone();
+        let crashed = service_id.to_string();
+        std::thread::spawn(move || super::telemetry::record_crash(&telemetry_app, &crashed));
+
         // Looked up lazily (rather than at construction) since
         // `SettingsState` isn't managed yet at the point `real_services` is
         // called from `lib.rs`'s `setup()` — by the time a crash can
@@ -809,11 +1241,16 @@ pub fn real_services(app: AppHandle) -> ServiceManager {
         if !settings.0.lock().unwrap().notify_on_crash {
             return;
         }
-        let name = match service_id {
-            "nginx" => "Nginx",
-            "php" => "PHP",
-            "mariadb" => "Database",
-            other => other,
+        let name: String = match service_id {
+            "nginx" => "Nginx".to_string(),
+            "php" => "PHP".to_string(),
+            "mariadb" => "Database".to_string(),
+            "mailpit" => "Mailpit".to_string(),
+            postgres::SERVICE_ID => postgres::SERVICE_NAME.to_string(),
+            other => match other.strip_prefix("php-") {
+                Some(version) => format!("PHP {version}"),
+                None => other.to_string(),
+            },
         };
         use tauri_plugin_notification::NotificationExt;
         if let Err(err) = app
@@ -827,10 +1264,23 @@ pub fn real_services(app: AppHandle) -> ServiceManager {
         }
     });
 
+    // Kept for the PHP pool factory below — every pinned instance gets the
+    // same log/crash wiring as the default "php" service.
+    let php_pool_sink = sink.clone();
+    let php_pool_crash_sink = crash_sink.clone();
+
+    // Registration order is only the order the Services page lists them in:
+    // nothing starts or stops in this order (Start all runs them
+    // concurrently), and pinned `php-<version>` pools are appended after.
     let services: Vec<ServiceHandle> = vec![
         Arc::new(
             ProcessService::nginx(sink.clone())
                 .expect("nginx must be in binaries::MANIFEST")
+                .with_crash_sink(crash_sink.clone()),
+        ),
+        Arc::new(
+            ProcessService::mariadb(sink.clone())
+                .expect("mariadb must be in binaries::MANIFEST")
                 .with_crash_sink(crash_sink.clone()),
         ),
         Arc::new(
@@ -839,12 +1289,24 @@ pub fn real_services(app: AppHandle) -> ServiceManager {
                 .with_crash_sink(crash_sink.clone()),
         ),
         Arc::new(
-            ProcessService::mariadb(sink)
-                .expect("mariadb must be in binaries::MANIFEST")
-                .with_crash_sink(crash_sink),
+            ProcessService::mailpit(sink.clone())
+                .expect("mailpit must be in binaries::MANIFEST")
+                .with_crash_sink(crash_sink.clone()),
         ),
+        // Not a `ProcessService`: LocalDB runs its own process, which Rezure
+        // starts and stops through `SqlLocalDB.exe` — see its module docs.
+        Arc::new(super::mssql_localdb::LocalDbService),
+        Arc::new(ProcessService::postgres(sink).with_crash_sink(crash_sink)),
     ];
-    ServiceManager::new(services)
+
+    let php_factory: super::PhpPoolFactory = Arc::new(move |version, port| {
+        Arc::new(
+            ProcessService::php_pinned(version, port, php_pool_sink.clone())
+                .with_crash_sink(php_pool_crash_sink.clone()),
+        )
+    });
+
+    ServiceManager::new(services).with_php_factory(php_factory)
 }
 
 #[cfg(test)]
@@ -856,6 +1318,209 @@ mod tests {
         assert!(ProcessService::nginx(no_op_sink()).is_ok());
         assert!(ProcessService::php(no_op_sink()).is_ok());
         assert!(ProcessService::mariadb(no_op_sink()).is_ok());
+        assert!(ProcessService::mailpit(no_op_sink()).is_ok());
+    }
+
+    /// The real thing, against whichever PostgreSQL is active: bootstrap (on
+    /// a first start), start, sign in as `root`, then a clean stop — the
+    /// server removes its `postmaster.pid` only on a shutdown it finished
+    /// itself, never when killed. Run with
+    /// `cargo test --lib services::process::tests::postgres_starts_and_stops_cleanly -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn postgres_starts_and_stops_cleanly() {
+        let service = ProcessService::postgres(Arc::new(|_, _, line| println!("  | {line}")));
+        let info = service.start().unwrap();
+        assert_eq!(info.status, ServiceStatus::Running);
+
+        let psql = postgres::active_tool(postgres::CLIENT_EXE).unwrap();
+        let output = Command::new(psql)
+            .args(["-X", "-w", "-A", "-t", "-h", "127.0.0.1", "-p", "5432"])
+            .args(["-U", postgres::APP_ROLE, "-d", postgres::MAINTENANCE_DB])
+            .args(["-c", "SELECT current_user || ' ' || pg_encoding_to_char(encoding) FROM pg_database WHERE datname = 'postgres'"])
+            .output()
+            .unwrap();
+        let answer = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        println!("signed in as: {answer}");
+        assert_eq!(
+            answer,
+            "root UTF8",
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let data_dir = postgres::data_dir(&postgres::active_id()).unwrap();
+        assert!(data_dir.join("postmaster.pid").is_file());
+        let stopped = std::time::Instant::now();
+        let info = service.stop().unwrap();
+        println!("stopped in {:?}", stopped.elapsed());
+        assert_eq!(info.status, ServiceStatus::Stopped);
+        assert!(
+            !data_dir.join("postmaster.pid").exists(),
+            "a clean shutdown removes postmaster.pid; a kill leaves it"
+        );
+    }
+
+    /// Switching versions with the server running moves it across: a clean
+    /// stop on the old major's data, a start on the new one's. Needs two
+    /// versions installed. Run with
+    /// `cargo test --lib services::process::tests::postgres_switch_moves_a_running_server -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn postgres_switch_moves_a_running_server() {
+        let versions = postgres::list();
+        assert!(versions.len() >= 2, "install two PostgreSQL versions first");
+        let (from, to) = (versions[0].version.clone(), versions[1].version.clone());
+        postgres::set_active(&from).unwrap();
+
+        let manager = ServiceManager::new(vec![
+            Arc::new(ProcessService::postgres(no_op_sink())) as ServiceHandle
+        ]);
+        let service = manager.find(postgres::SERVICE_ID).unwrap();
+        service.start().unwrap();
+        let old_data = postgres::data_dir(&from).unwrap();
+        assert!(old_data.join("postmaster.pid").is_file());
+
+        assert!(postgres::switch(&manager, &to).unwrap(), "it was running");
+        let info = service.info();
+        println!("{from} -> {}: {:?}", info.version, info.status);
+        assert_eq!(
+            (info.version.as_str(), info.status),
+            (to.as_str(), ServiceStatus::Running)
+        );
+        assert!(
+            !old_data.join("postmaster.pid").exists(),
+            "the old server shut down cleanly"
+        );
+        assert!(postgres::data_dir(&to)
+            .unwrap()
+            .join("postmaster.pid")
+            .is_file());
+
+        service.stop().unwrap();
+        postgres::set_active(&from).unwrap();
+    }
+
+    /// A database like MariaDB — waited on, shut down cleanly — but one its
+    /// own card can install, on PostgreSQL's own port.
+    #[test]
+    fn postgres_is_a_database_its_card_can_install() {
+        let service = ProcessService::postgres(no_op_sink());
+        let info = service.info();
+        assert_eq!(info.id, postgres::SERVICE_ID);
+        assert_eq!(info.category, "Database");
+        assert_eq!(info.port, postgres::PORT);
+        assert_eq!(info.install_id.as_deref(), Some(postgres::SERVICE_ID));
+        assert!(service.is_stateful());
+        assert!(!service.restarts_on_crash());
+        assert_eq!(service.bind_addr(), "127.0.0.1");
+    }
+
+    /// Both listeners are reported, so a conflict on the web UI's port is
+    /// traced as readily as one on SMTP's, and the UI's address is handed
+    /// out for the Open button.
+    #[test]
+    fn mailpit_reports_both_ports_its_web_ui_and_how_to_install_it() {
+        let info = ProcessService::mailpit(no_op_sink()).unwrap().info();
+
+        assert_eq!(info.id, "mailpit");
+        assert_eq!(info.port, MAILPIT_SMTP_PORT);
+        assert_eq!(info.ports, vec![MAILPIT_SMTP_PORT, MAILPIT_WEB_PORT]);
+        assert_eq!(info.web_url.as_deref(), Some("http://127.0.0.1:8025"));
+        assert_eq!(info.install_id.as_deref(), Some("mailpit"));
+        assert_eq!(info.workers, None);
+    }
+
+    #[test]
+    fn only_services_one_download_makes_startable_offer_an_install() {
+        assert_eq!(
+            ProcessService::nginx(no_op_sink())
+                .unwrap()
+                .info()
+                .install_id
+                .as_deref(),
+            Some("nginx")
+        );
+        assert_eq!(
+            ProcessService::php(no_op_sink()).unwrap().info().install_id,
+            None
+        );
+        assert_eq!(
+            ProcessService::mariadb(no_op_sink())
+                .unwrap()
+                .info()
+                .install_id,
+            None
+        );
+    }
+
+    #[test]
+    fn a_php_services_ports_are_its_workers_ports() {
+        let info = ProcessService::php(no_op_sink()).unwrap().info();
+        let expected: Vec<u16> = php_pool::worker_ports(php_pool::DEFAULT_BASE_PORT).collect();
+        assert_eq!(info.ports, expected);
+        assert_eq!(info.web_url, None);
+    }
+
+    /// A pooled instance never fails to construct — the caller already
+    /// confirmed the version is installed — and reports its own pinned
+    /// version and port rather than whatever's globally active.
+    #[test]
+    fn a_pinned_php_instance_reports_its_own_version_and_port() {
+        let service = ProcessService::php_pinned("8.3.0", php_pool::BASE_PORT, no_op_sink());
+        let info = service.info();
+
+        assert_eq!(info.id, "php-8.3.0");
+        assert_eq!(info.name, "PHP 8.3.0");
+        assert_eq!(info.version, "8.3.0");
+        assert_eq!(info.port, php_pool::BASE_PORT);
+        assert_eq!(info.status, ServiceStatus::Stopped);
+    }
+
+    #[test]
+    fn php_reports_its_worker_count_and_single_process_services_dont() {
+        let php = ProcessService::php(no_op_sink()).unwrap().info();
+        assert_eq!(php.port, php_pool::DEFAULT_BASE_PORT);
+        assert_eq!(
+            php.workers,
+            Some(WorkerCount {
+                running: 0,
+                total: php_pool::WORKERS_PER_VERSION
+            })
+        );
+
+        assert_eq!(
+            ProcessService::nginx(no_op_sink()).unwrap().info().workers,
+            None
+        );
+        assert_eq!(
+            ProcessService::mariadb(no_op_sink())
+                .unwrap()
+                .info()
+                .workers,
+            None
+        );
+    }
+
+    #[test]
+    fn each_worker_binds_the_next_port_in_its_block() {
+        let service = ProcessService::php_pinned("8.3.0", php_pool::BASE_PORT, no_op_sink());
+        let ports: Vec<u16> = (0..service.workers)
+            .map(|w| service.worker_port(w))
+            .collect();
+        let expected: Vec<u16> = php_pool::worker_ports(php_pool::BASE_PORT).collect();
+        assert_eq!(ports, expected);
+    }
+
+    /// The first worker keeps the file name every build before workers
+    /// wrote, so an orphan left by one is still recognized and reaped.
+    #[test]
+    fn the_first_workers_pid_file_keeps_the_legacy_name() {
+        let first = pid_file_path("php", 0).unwrap();
+        assert!(first.ends_with("service.pid"));
+        let second = pid_file_path("php", 1).unwrap();
+        assert!(second.ends_with("service-1.pid"));
+        assert_eq!(first.parent(), second.parent());
     }
 
     #[test]
@@ -928,23 +1593,23 @@ mod tests {
     #[test]
     fn reap_orphan_is_a_no_op_when_theres_no_recorded_pid() {
         let service = ProcessService::mariadb(no_op_sink()).unwrap();
-        let pid_path = pid_file_path(service.id).unwrap();
+        let pid_path = pid_file_path(&service.id, 0).unwrap();
         let _ = fs::remove_file(&pid_path);
 
-        assert!(service.reap_orphan().is_ok());
+        assert!(service.reap_orphan(0).is_ok());
     }
 
     #[test]
     fn reap_orphan_leaves_a_live_pid_alone_when_its_not_this_services_binary() {
         let service = ProcessService::nginx(no_op_sink()).unwrap();
-        let pid_path = pid_file_path(service.id).unwrap();
+        let pid_path = pid_file_path(&service.id, 0).unwrap();
         fs::create_dir_all(pid_path.parent().unwrap()).unwrap();
         // The current test process is guaranteed alive, but it's the test
         // binary, not nginx.exe — reap_orphan must recognize the mismatch
         // and leave it running rather than killing an unrelated process.
         fs::write(&pid_path, std::process::id().to_string()).unwrap();
 
-        service.reap_orphan().unwrap();
+        service.reap_orphan(0).unwrap();
 
         assert!(
             !pid_path.exists(),
@@ -1101,13 +1766,15 @@ mod tests {
             installed.len()
         );
 
-        // Rezure itself holds this port whenever PHP is running, and this
+        // Rezure itself holds these ports whenever PHP is running, and this
         // test needs to spawn its own — say so plainly instead of failing
         // later with a bare PortInUse.
-        assert!(
-            std::net::TcpListener::bind(("127.0.0.1", PHP_FASTCGI_PORT)).is_ok(),
-            "port {PHP_FASTCGI_PORT} is busy — stop PHP in Rezure before running this test"
-        );
+        for port in php_pool::worker_ports(php_pool::DEFAULT_BASE_PORT) {
+            assert!(
+                std::net::TcpListener::bind(("127.0.0.1", port)).is_ok(),
+                "port {port} is busy — stop PHP in Rezure before running this test"
+            );
+        }
 
         let original_active = php::active_id();
         let service = ProcessService::php(no_op_sink()).unwrap();
@@ -1140,6 +1807,165 @@ mod tests {
 
         service.stop().unwrap();
         php::set_active(&original_active).unwrap();
+    }
+
+    /// Real Mailpit, end to end: starts on both ports, accepts a message over
+    /// plain SMTP exactly as a Laravel app would send one (with credentials
+    /// it has no reason to know), and shows it through its own API. Runs
+    /// under its own id and spare ports, so it can't touch a Mailpit that
+    /// Rezure itself is running. Needs Mailpit installed. Run with:
+    /// `cargo test --lib services::process::tests::a_real_mailpit_catches_a_message -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn a_real_mailpit_catches_a_message() {
+        use std::io::Write as _;
+
+        let mut service = ProcessService::mailpit(no_op_sink()).unwrap();
+        service.id = "mailpit-catch-test".to_string();
+        service.port = 11025;
+        service.web_port = Some(18025);
+        let _ = fs::remove_dir_all(runtime_dir(&service.id).unwrap());
+
+        let started = service.start().expect("mailpit must be installed");
+        assert_eq!(started.status, ServiceStatus::Running);
+        std::thread::sleep(Duration::from_millis(800));
+
+        let mut smtp = std::net::TcpStream::connect(("127.0.0.1", 11025)).unwrap();
+        smtp.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut reader = BufReader::new(smtp.try_clone().unwrap());
+        let mut line = String::new();
+        let mut expect = |reader: &mut BufReader<std::net::TcpStream>, code: &str| {
+            // Multi-line replies ("250-...") end with a "250 " line.
+            loop {
+                line.clear();
+                reader.read_line(&mut line).unwrap();
+                assert!(line.starts_with(code), "expected {code}, got: {line}");
+                if line.as_bytes().get(3) == Some(&b' ') {
+                    break;
+                }
+            }
+        };
+        expect(&mut reader, "220");
+        for (command, code) in [
+            ("EHLO rezure.test\r\n", "250"),
+            // "user" / "secret" in base64 — any credentials must be accepted.
+            ("AUTH PLAIN AHVzZXIAc2VjcmV0\r\n", "235"),
+            ("MAIL FROM:<app@rezure.test>\r\n", "250"),
+            ("RCPT TO:<someone@example.com>\r\n", "250"),
+            ("DATA\r\n", "354"),
+            (
+                "Subject: Reset your password\r\n\r\nClick the link.\r\n.\r\n",
+                "250",
+            ),
+            ("QUIT\r\n", "221"),
+        ] {
+            smtp.write_all(command.as_bytes()).unwrap();
+            expect(&mut reader, code);
+        }
+
+        let body = Command::new("curl")
+            .args(["-s", "http://127.0.0.1:18025/api/v1/messages"])
+            .output()
+            .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+            .unwrap();
+        println!("{body}");
+
+        service.stop().unwrap();
+        let db_written = runtime_dir(&service.id)
+            .unwrap()
+            .join("mailpit.db")
+            .is_file();
+        let _ = fs::remove_dir_all(runtime_dir(&service.id).unwrap());
+
+        assert!(
+            body.contains("Reset your password"),
+            "the message should be listed"
+        );
+        assert!(db_written, "mail should persist in Rezure's data folder");
+    }
+
+    /// Every worker really binds its own port, a worker killed from outside
+    /// marks the service crashed without taking it down, and a start brings
+    /// back only that worker — the survivors keep their PIDs. This is the
+    /// supervisor's heal path, against real `php-cgi` processes.
+    ///
+    /// Runs under its own service id and a port block no real instance uses,
+    /// so it can't reap or collide with a PHP that Rezure itself is running.
+    /// Run with:
+    /// `cargo test --lib services::process::tests::a_dead_php_worker_is_healed_without_touching_the_rest -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn a_dead_php_worker_is_healed_without_touching_the_rest() {
+        use crate::services::php;
+
+        let version = php::active_id();
+        assert!(!version.is_empty(), "needs at least one PHP installed");
+        let base = php_pool::BASE_PORT + 80 * php_pool::PORT_BLOCK;
+        let mut service = ProcessService::php_pinned(&version, base, no_op_sink());
+        service.id = "php-worker-heal-test".to_string();
+
+        let started = service.start().expect("php-cgi must start");
+        assert_eq!(started.status, ServiceStatus::Running);
+        assert_eq!(
+            started.workers,
+            Some(WorkerCount {
+                running: php_pool::WORKERS_PER_VERSION,
+                total: php_pool::WORKERS_PER_VERSION
+            })
+        );
+        std::thread::sleep(Duration::from_millis(400));
+        for port in php_pool::worker_ports(base) {
+            assert!(
+                std::net::TcpStream::connect(("127.0.0.1", port)).is_ok(),
+                "no worker is listening on {port}"
+            );
+        }
+
+        let pids = |service: &ProcessService| -> Vec<Option<u32>> {
+            service
+                .children
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|slot| slot.as_ref().map(Child::id))
+                .collect()
+        };
+        let before = pids(&service);
+        let victim = before[1].unwrap();
+        kill_process_tree(victim);
+        std::thread::sleep(Duration::from_millis(400));
+
+        assert!(
+            service.crashed(),
+            "a lost worker must mark the service crashed"
+        );
+        let degraded = service.info();
+        assert_eq!(
+            degraded.status,
+            ServiceStatus::Running,
+            "the rest still serve"
+        );
+        assert_eq!(
+            degraded.workers.map(|w| w.running),
+            Some(php_pool::WORKERS_PER_VERSION - 1)
+        );
+
+        service.start().expect("healing start must succeed");
+        assert!(!service.crashed());
+        let after = pids(&service);
+        println!("before: {before:?}\nafter:  {after:?}");
+        for (worker, (old, new)) in before.iter().zip(&after).enumerate() {
+            if worker == 1 {
+                assert_ne!(old, new, "the dead worker must have been replaced");
+                assert!(new.is_some());
+            } else {
+                assert_eq!(old, new, "worker {worker} must not have been restarted");
+            }
+        }
+
+        let stopped = service.stop().unwrap();
+        assert_eq!(stopped.status, ServiceStatus::Stopped);
+        let _ = fs::remove_dir_all(runtime_dir(&service.id).unwrap());
     }
 
     /// Path of whatever `php-cgi.exe` is running right now, straight from
@@ -1178,7 +2004,10 @@ mod tests {
         )
         .unwrap();
 
-        sync_vhosts().expect("project must be detected and its vhost written");
+        sync_vhosts(&std::collections::HashMap::new(), |_wanted| {
+            std::collections::BTreeMap::new()
+        })
+        .expect("project must be detected and its vhost written");
 
         let php = ProcessService::php(no_op_sink()).unwrap();
         let nginx = ProcessService::nginx(no_op_sink()).unwrap();

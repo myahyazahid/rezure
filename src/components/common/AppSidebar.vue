@@ -7,6 +7,7 @@ import { useDatabasesStore } from '@/stores/databases'
 import { usePhpStore } from '@/stores/php'
 import { useLogsStore } from '@/stores/logs'
 import { useChangelogStore } from '@/stores/changelog'
+import { useUpdateStore } from '@/stores/update'
 import { useUptime } from '@/composables/useUptime'
 
 const route = useRoute()
@@ -16,18 +17,25 @@ const databasesStore = useDatabasesStore()
 const phpStore = usePhpStore()
 const logsStore = useLogsStore()
 const changelogStore = useChangelogStore()
+const updateStore = useUpdateStore()
 const { label: uptimeLabel } = useUptime()
 
 // Fetched here (not just on the Changelog page itself) so the "new release"
 // badge can show without the user having visited it yet.
 onMounted(() => {
   changelogStore.fetchAll()
+  updateStore.checkForUpdate()
 })
 
 const hasUnseenChangelog = computed(() => {
   const newest = changelogStore.entries[0]?.version
   return !!newest && newest !== changelogStore.lastSeenVersion
 })
+
+// A binary update and a "new" changelog entry are independent signals (one
+// can exist without the other), but the nav row only has room for one dot —
+// it lights up if either is true.
+const hasChangelogAlert = computed(() => hasUnseenChangelog.value || updateStore.available !== null)
 
 const navItems = computed(() => [
   {
@@ -59,6 +67,13 @@ const navItems = computed(() => [
     variant: 'default' as const,
   },
   {
+    to: '/php-extensions',
+    icon: 'puzzle' as const,
+    label: 'PHP Extensions',
+    badge: '',
+    variant: 'default' as const,
+  },
+  {
     to: '/logs',
     icon: 'logs' as const,
     label: 'Logs',
@@ -80,8 +95,29 @@ const navItems = computed(() => [
     to: '/changelog',
     icon: 'changelog' as const,
     label: 'Changelog',
-    badge: hasUnseenChangelog.value ? '•' : '',
+    badge: hasChangelogAlert.value ? '•' : '',
     variant: 'alert' as const,
+  },
+  {
+    to: '/donate',
+    icon: 'heart' as const,
+    label: 'Support Developer',
+    badge: '',
+    variant: 'default' as const,
+  },
+  {
+    to: '/appearance',
+    icon: 'palette' as const,
+    label: 'Appearance',
+    badge: '',
+    variant: 'default' as const,
+  },
+  {
+    to: '/decorations',
+    icon: 'sticker' as const,
+    label: 'Decorations',
+    badge: '',
+    variant: 'default' as const,
   },
   // Last on purpose: the daily work (services, projects, databases) comes
   // first, and settings are visited rarely enough to sit out of the way.
@@ -110,27 +146,30 @@ const ringOffset = computed(() => {
 </script>
 
 <template>
-  <aside
-    class="flex w-64 shrink-0 flex-col gap-3 border-r border-neutral-200/70 p-4 dark:border-neutral-800"
-  >
-    <nav class="flex flex-col gap-2">
+  <aside class="glass flex w-60 shrink-0 flex-col gap-3 rounded-3xl p-3">
+    <!-- Scrolls rather than clips when the window is at its minimum height;
+         at the default size every item fits. -->
+    <nav class="flex min-h-0 flex-col gap-0.5 overflow-y-auto [scrollbar-width:thin]">
+      <!-- Inactive items are bare so the panel reads as one sheet of glass;
+           the transparent border keeps rows from shifting when one becomes
+           active and picks up a real edge. -->
       <RouterLink
         v-for="item in navItems"
         :key="item.to"
         :to="item.to"
-        class="flex items-center gap-3 rounded-2xl border px-3 py-2.5 transition"
+        class="flex items-center gap-3 rounded-xl px-2.5 py-1.5 transition"
         :class="
           isActive(item.to)
-            ? 'border-red-200 bg-red-50 dark:border-red-500/30 dark:bg-red-500/10'
-            : 'border-neutral-200 bg-white/70 hover:border-neutral-300 dark:border-neutral-800 dark:bg-neutral-900/60 dark:hover:border-neutral-700'
+            ? 'glass-selected'
+            : 'border border-transparent hover:bg-white/50 dark:hover:bg-white/5'
         "
       >
         <span
-          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition"
+          class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition"
           :class="
             isActive(item.to)
-              ? 'bg-red-600 text-white shadow-sm shadow-red-600/30'
-              : 'bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400'
+              ? 'glass-accent'
+              : 'glass-inset text-neutral-500 dark:text-neutral-400'
           "
         >
           <svg
@@ -182,6 +221,20 @@ const ringOffset = computed(() => {
             <path stroke-linecap="round" stroke-linejoin="round" d="M4 8h13l-3-3M20 16H7l3 3" />
           </svg>
           <svg
+            v-else-if="item.icon === 'puzzle'"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="h-4 w-4"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M9 4h3a1 1 0 0 1 1 1v1.5a1.5 1.5 0 0 0 3 0V5a1 1 0 0 1 1-1h1a2 2 0 0 1 2 2v1a1 1 0 0 1-1 1h-1.5a1.5 1.5 0 0 0 0 3H19a1 1 0 0 1 1 1v3a2 2 0 0 1-2 2h-1a1 1 0 0 1-1-1v-1.5a1.5 1.5 0 0 0-3 0V17a1 1 0 0 1-1 1H8a2 2 0 0 1-2-2v-1a1 1 0 0 1 1-1h1.5a1.5 1.5 0 0 0 0-3H7a1 1 0 0 1-1-1V7a2 2 0 0 1 2-2h1Z"
+            />
+          </svg>
+          <svg
             v-else-if="item.icon === 'logs'"
             viewBox="0 0 24 24"
             fill="none"
@@ -217,6 +270,56 @@ const ringOffset = computed(() => {
               stroke-linecap="round"
               stroke-linejoin="round"
               d="M12 8v4l3 3m6-3a9 9 0 1 1-9-9 9 9 0 0 1 9 9Z"
+            />
+          </svg>
+          <svg
+            v-else-if="item.icon === 'heart'"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="h-4 w-4"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M12 21s-6.716-4.35-9.428-8.06C1.02 10.94 1.5 7.5 4.5 5.9c2.2-1.17 4.53-.4 5.9 1.4l1.6 2.1 1.6-2.1c1.37-1.8 3.7-2.57 5.9-1.4 3 1.6 3.48 5.04 1.93 7.04C18.716 16.65 12 21 12 21Z"
+            />
+          </svg>
+          <svg
+            v-else-if="item.icon === 'palette'"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="h-4 w-4"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M12 21a9 9 0 1 1 9-9c0 1.66-1.34 3-3 3h-1.5a1.5 1.5 0 0 0-1.06 2.56A1.5 1.5 0 0 1 14.38 21H12Z"
+            />
+            <circle cx="7.5" cy="11.5" r="1" fill="currentColor" stroke="none" />
+            <circle cx="10.5" cy="7.5" r="1" fill="currentColor" stroke="none" />
+            <circle cx="15" cy="8.5" r="1" fill="currentColor" stroke="none" />
+          </svg>
+          <svg
+            v-else-if="item.icon === 'sticker'"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="h-4 w-4"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M12 3.5c.5 3.6 2 5.6 5.5 6.2-3.5.6-5 2.6-5.5 6.2-.5-3.6-2-5.6-5.5-6.2 3.5-.6 5-2.6 5.5-6.2Z"
+            />
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M18.5 15.5c.2 1.4.8 2.1 2 2.3-1.2.2-1.8.9-2 2.3-.2-1.4-.8-2.1-2-2.3 1.2-.2 1.8-.9 2-2.3Z"
             />
           </svg>
           <svg
@@ -258,7 +361,7 @@ const ringOffset = computed(() => {
           class="rounded-full px-2 py-0.5 text-xs font-medium"
           :class="
             isActive(item.to)
-              ? 'bg-white/80 text-red-600 dark:bg-neutral-900/60 dark:text-red-400'
+              ? 'bg-accent-500/10 text-accent-600 dark:bg-accent-500/20 dark:text-accent-300'
               : 'text-neutral-500 dark:text-neutral-400'
           "
         >
@@ -267,12 +370,10 @@ const ringOffset = computed(() => {
       </RouterLink>
     </nav>
 
-    <div
-      class="mt-auto rounded-2xl border border-neutral-200 bg-white/70 p-4 dark:border-neutral-800 dark:bg-neutral-900/60"
-    >
+    <div class="glass-inset mt-auto shrink-0 rounded-2xl p-3">
       <div class="flex items-center gap-3">
-        <div class="relative h-11 w-11 shrink-0">
-          <svg viewBox="0 0 40 40" class="h-11 w-11 -rotate-90">
+        <div class="relative h-10 w-10 shrink-0">
+          <svg viewBox="0 0 40 40" class="h-10 w-10 -rotate-90">
             <circle
               cx="20"
               cy="20"
@@ -280,7 +381,7 @@ const ringOffset = computed(() => {
               fill="none"
               stroke="currentColor"
               stroke-width="4"
-              class="text-neutral-200 dark:text-neutral-800"
+              class="text-neutral-900/10 dark:text-white/10"
             />
             <circle
               cx="20"
@@ -305,9 +406,7 @@ const ringOffset = computed(() => {
         </div>
       </div>
 
-      <div
-        class="mt-3 flex items-center justify-between border-t border-neutral-200 pt-3 text-xs dark:border-neutral-800"
-      >
+      <div class="glass-divider mt-2.5 flex items-center justify-between border-t pt-2.5 text-xs">
         <span class="text-neutral-500">Uptime</span>
         <span class="font-semibold">{{ uptimeLabel }}</span>
       </div>

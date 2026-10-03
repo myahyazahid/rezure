@@ -1,7 +1,7 @@
 mod commands;
 mod config;
 mod db;
-mod services;
+pub mod services;
 mod utils;
 
 use tauri::menu::{Menu, MenuItem};
@@ -24,6 +24,7 @@ pub fn run() {
         tauri::Builder::default()
             .plugin(tauri_plugin_opener::init())
             .plugin(tauri_plugin_dialog::init())
+            .plugin(tauri_plugin_updater::Builder::new().build())
             .plugin(tauri_plugin_autostart::init(
                 MacosLauncher::LaunchAgent,
                 None,
@@ -31,12 +32,18 @@ pub fn run() {
             .plugin(tauri_plugin_notification::init())
             .invoke_handler(tauri::generate_handler![
                 commands::services::list_services,
+                commands::services::list_managed_services,
+                commands::services::set_service_shown,
                 commands::services::start_service,
                 commands::services::stop_service,
                 commands::services::force_stop_service,
                 commands::services::port_holder,
                 commands::services::free_port,
                 commands::services::restart_service,
+                commands::services::open_service_ui,
+                commands::share::share_project,
+                commands::share::stop_sharing,
+                commands::share::sharing_status,
                 commands::php::list_php_versions,
                 commands::php::set_active_php_version,
                 commands::php::list_php_catalog,
@@ -48,8 +55,13 @@ pub fn run() {
                 commands::php::php_config_dir,
                 commands::php::open_php_config_dir,
                 commands::php::diagnose_project,
+                commands::php::check_php_tls,
+                commands::php::ca_bundle_status,
+                commands::php::update_ca_bundle,
                 commands::php::php_extensions,
                 commands::php::install_php_extension,
+                commands::php::list_bundled_php_extensions,
+                commands::php::set_bundled_php_extension,
                 commands::php::php_path_status,
                 commands::php::enable_php_path,
                 commands::php::disable_php_path,
@@ -58,22 +70,40 @@ pub fn run() {
                 commands::projects::list_project_templates,
                 commands::projects::create_project,
                 commands::projects::www_root,
-                commands::projects::composer_installed,
-                commands::projects::install_composer,
                 commands::projects::open_project_site,
                 commands::projects::open_project_folder,
                 commands::projects::open_project_terminal,
                 commands::projects::preview_project_link,
                 commands::projects::link_project,
                 commands::projects::unlink_project,
+                commands::projects::set_project_php_version,
+                commands::projects::set_project_node_version,
                 commands::binaries::list_binaries,
                 commands::binaries::install_binary,
+                commands::binaries::list_mariadb_catalog,
+                commands::binaries::install_mariadb_version,
+                commands::binaries::list_mariadb_versions,
+                commands::composer::composer_installed,
+                commands::composer::install_composer,
+                commands::composer::list_composer_versions,
+                commands::composer::set_active_composer_version,
+                commands::composer::list_composer_catalog,
+                commands::composer::install_composer_version,
+                commands::node::list_node_versions,
+                commands::node::set_active_node_version,
+                commands::node::list_node_catalog,
+                commands::node::install_node_version,
+                commands::postgres::list_postgres_versions,
+                commands::postgres::set_active_postgres_version,
+                commands::postgres::list_postgres_catalog,
+                commands::postgres::install_postgres_version,
                 commands::database::list_databases,
                 commands::database::database_server_info,
                 commands::database::list_collations,
                 commands::database::create_database,
                 commands::database::drop_database,
                 commands::database::export_database,
+                commands::database::cancel_export,
                 commands::database::import_sql,
                 commands::database::open_dumps_folder,
                 commands::database::list_db_clients,
@@ -87,12 +117,22 @@ pub fn run() {
                 commands::db_profiles::add_db_profile,
                 commands::db_profiles::remove_db_profile,
                 commands::db_profiles::switch_db_profile,
+                commands::connections::list_db_connections,
+                commands::connections::test_db_connection,
+                commands::connections::add_db_connection,
+                commands::connections::remove_db_connection,
+                commands::connections::set_db_connection_password,
+                commands::connections::use_db_connection,
+                commands::connections::use_local_db_profile,
                 commands::support::inspect_attachment,
                 commands::support::submit_ticket,
                 commands::support::fetch_ticket_history,
                 commands::changelog::fetch_changelog,
+                commands::changelog::fetch_upgrade_notice,
                 commands::changelog::last_seen_changelog_version,
                 commands::changelog::mark_changelog_seen,
+                commands::donate::fetch_donate_config,
+                commands::donate::open_external_link,
             ])
             .setup(|app| {
                 if cfg!(debug_assertions) {
@@ -179,6 +219,12 @@ pub fn run() {
                 // Ungated because this reads a handful of small files and shells
                 // out to nothing, and because an install that already ran the gated
                 // repairs on an earlier build would otherwise never be fixed.
+                //
+                // The CA bundle is seeded first, from the installer's copy, so
+                // the same pass can point every version's ini at it — a
+                // version installed before any bundle existed was written
+                // without `curl.cainfo`, and nothing else would ever add it.
+                services::ca_bundle::seed_bundled(app.handle());
                 {
                     let mut repaired = 0;
                     for runtime in services::php::installed() {
@@ -189,6 +235,12 @@ pub fn run() {
                                 "could not repair php.ini in {}: {err}",
                                 runtime.dir.display()
                             ),
+                        }
+                        if let Err(err) = services::php_ini::repair_ca_directives(&runtime.dir) {
+                            log::warn!(
+                                "could not point {} at the CA bundle: {err}",
+                                runtime.dir.display()
+                            );
                         }
                     }
                     if repaired > 0 {
@@ -203,9 +255,22 @@ pub fn run() {
                 // enough to do synchronously here.
                 services::binaries::seed_bundled(app.handle());
 
+                // LocalDB may have been installed outside Rezure (Visual
+                // Studio brings it along), or by Rezure in a session that
+                // closed before the connection was saved. A folder scan, so
+                // cheap enough for every start.
+                services::connections::ensure_localdb();
+                // TablePlus, DBeaver and HeidiSQL reach LocalDB through this.
+                services::localdb_bridge::start();
+                // Same for Rezure's own PostgreSQL, once a version is on disk.
+                services::connections::ensure_postgres();
+
                 // Needs a live `AppHandle` (to emit `service://log` events),
                 // which only exists once the app is actually starting up.
                 app.manage(services::real_services(app.handle().clone()));
+                // Brings PHP back after a crash without waiting on the UI —
+                // see `services::supervisor`.
+                services::supervisor::spawn(app.handle().clone());
 
                 let settings = config::settings::load();
                 // Best-effort: the version may no longer be installed, in which
@@ -213,6 +278,19 @@ pub fn run() {
                 // nothing here needs to treat that as an error.
                 if let Some(version) = &settings.active_php_version {
                     let _ = services::php::set_active(version);
+                }
+                // Same restore, for Node.js — best-effort for the same
+                // reason: `services::node::set_active` rejects a version
+                // that's no longer on disk, and `services::node`'s own
+                // fallback picks the newest installed one instead.
+                if let Some(version) = &settings.active_node_version {
+                    let _ = services::node::set_active(version);
+                }
+                // And PostgreSQL. Before anything can start the service, so it
+                // comes up on the version — and the data directory — it was
+                // last on.
+                if let Some(version) = &settings.active_postgres_version {
+                    let _ = services::postgres::set_active(version);
                 }
                 // Restoring the choice is only half of it: `services::php`'s
                 // `set_active` moves in-memory state, while the junction on the
@@ -334,12 +412,28 @@ pub fn run() {
                             &device_id,
                             "app_opened",
                             None,
+                            None,
                             &app_version,
                         ) {
                             log::warn!("could not record app_opened event: {err}");
                         }
 
                         app.manage(db::DbState::new(conn));
+
+                        // Registers the pooled PHP services for pinned projects
+                        // right away. Otherwise they only appear once the
+                        // Projects page is opened, and "Start all" on the
+                        // Services page silently skips them — every pinned
+                        // project then answers 502.
+                        commands::projects::sync_vhosts_and_reload(
+                            &app.state::<services::ServiceManager>(),
+                            &app.state::<db::DbState>(),
+                            "on startup",
+                        );
+
+                        // AGENTS.md & co. in the Rezure home, so AI coding
+                        // agents know Rezure (not Laragon) serves the projects.
+                        services::agent_docs::start(app.handle().clone());
 
                         // Heartbeat recorder — queues a "still open" ping every 5
                         // minutes (and once immediately, since `interval`'s first
@@ -452,6 +546,16 @@ pub fn run() {
             if let Some(manager) = app_handle.try_state::<services::ServiceManager>() {
                 manager.stop_all();
             }
+
+            // Tunnels are child processes Rezure owns but no service manages,
+            // so nothing above reaps them: without this an `ssh.exe` per
+            // connection survives the app, still holding a forwarded port.
+            services::tunnel::close_all();
+
+            // Same reasoning as the SSH tunnels above: a shared project's
+            // `cloudflared.exe` is a child process no `Service` tracks,
+            // so it needs its own explicit teardown here too.
+            services::share::close_all();
         }
     });
 }

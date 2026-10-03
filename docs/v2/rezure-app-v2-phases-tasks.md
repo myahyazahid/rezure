@@ -106,7 +106,6 @@ Breakdown fase dan task untuk menambahkan kemampuan pengiriman telemetry di sisi
 - [x] Cache hasil fetch secara lokal (SQLite/file) supaya tetap bisa dibuka saat offline
 - [x] Tambahkan badge notifikasi kecil di menu jika ada entry baru yang belum dibaca (bandingkan versi terakhir dibaca vs data terbaru dari API)
 - [x] Handle graceful saat API tidak bisa diakses (tampilkan data cache terakhir, jangan error mengganggu)
-
 ---
 
 ## Dependency ke Proyek Lain

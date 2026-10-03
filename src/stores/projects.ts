@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { LinkPreview, ProjectInfo, ProjectTemplate } from '@/types/project'
 import type { ProjectDiagnosis } from '@/types/php'
+import { useServicesStore } from '@/stores/services'
 
 function errorMessage(e: unknown): string {
   if (typeof e === 'string') return e
@@ -29,6 +30,17 @@ export const useProjectsStore = defineStore('projects', () => {
   const linking = ref(false)
   const linkError = ref<string | null>(null)
 
+  /** Project id -> public `https://*.trycloudflare.com` URL, for whichever
+   *  projects currently have an active Share tunnel. */
+  const shareUrls = ref<Record<string, string>>({})
+  /** The project whose share is currently starting — the first click also
+   *  downloads cloudflared, so this can take a few seconds. */
+  const sharingFor = ref<string | null>(null)
+  const shareError = ref<string | null>(null)
+  /** The project whose Share details (URL, copy, stop) modal is open, or
+   *  null. One at a time, same shape as `doctorFor` below. */
+  const shareModalFor = ref<string | null>(null)
+
   const allHostsReady = computed(
     () => projects.value.length > 0 && projects.value.every((p) => p.hasHostsEntry),
   )
@@ -43,6 +55,9 @@ export const useProjectsStore = defineStore('projects', () => {
 
   async function fetchAll() {
     projects.value = await invoke<ProjectInfo[]>('list_projects')
+    // `list_projects` is also what registers/removes the pooled PHP service
+    // for each pinned version, so the services list is stale until refetched.
+    await useServicesStore().fetchAll()
   }
 
   /**
@@ -172,6 +187,144 @@ export const useProjectsStore = defineStore('projects', () => {
     }
   }
 
+  const phpVersionError = ref<string | null>(null)
+  /** The project whose PHP version picker is open, or null — one at a time,
+   *  same shape as `doctorFor`/`shareModalFor` above. */
+  const phpVersionModalFor = ref<string | null>(null)
+  const settingPhpVersion = ref(false)
+
+  /**
+   * Pins (or, with `version: null`, clears back to the global default) the
+   * PHP version this project is served by. Distinct projects on distinct
+   * pinned versions each get their own concurrently-running `php-cgi` — see
+   * `services::php_pool` on the Rust side. Refetches the list so the card
+   * reflects the new port/version immediately.
+   */
+  async function setPhpVersion(id: string, version: string | null) {
+    settingPhpVersion.value = true
+    phpVersionError.value = null
+    try {
+      await invoke('set_project_php_version', { id, version })
+      await fetchAll()
+      phpVersionModalFor.value = null
+      return true
+    } catch (e) {
+      phpVersionError.value = errorMessage(e)
+      return false
+    } finally {
+      settingPhpVersion.value = false
+    }
+  }
+
+  function openPhpVersionModal(id: string) {
+    phpVersionError.value = null
+    phpVersionModalFor.value = id
+  }
+
+  function closePhpVersionModal() {
+    phpVersionModalFor.value = null
+    phpVersionError.value = null
+  }
+
+  const nodeVersionError = ref<string | null>(null)
+  /** The project whose Node.js version picker is open, or null — same shape
+   *  as `phpVersionModalFor` above. */
+  const nodeVersionModalFor = ref<string | null>(null)
+  const settingNodeVersion = ref(false)
+
+  /**
+   * Pins (or, with `version: null`, clears back to the global default) the
+   * Node.js version a terminal opened for this project resolves `node`/
+   * `npm`/`npx` as. Unlike `setPhpVersion`, this never starts or restarts
+   * anything — it only takes effect the next time a terminal is opened for
+   * this project, so there's nothing else to refresh here.
+   */
+  async function setNodeVersion(id: string, version: string | null) {
+    settingNodeVersion.value = true
+    nodeVersionError.value = null
+    try {
+      await invoke('set_project_node_version', { id, version })
+      await fetchAll()
+      nodeVersionModalFor.value = null
+      return true
+    } catch (e) {
+      nodeVersionError.value = errorMessage(e)
+      return false
+    } finally {
+      settingNodeVersion.value = false
+    }
+  }
+
+  function openNodeVersionModal(id: string) {
+    nodeVersionError.value = null
+    nodeVersionModalFor.value = id
+  }
+
+  function closeNodeVersionModal() {
+    nodeVersionModalFor.value = null
+    nodeVersionError.value = null
+  }
+
+  /**
+   * Starts sharing a project publicly via a Cloudflare Quick Tunnel, or
+   * reuses one already running for it. The first call for a fresh install
+   * also downloads cloudflared, so this can take a few seconds — `sharingFor`
+   * is what a card uses to show a spinner instead of looking stuck. Opens
+   * the share modal immediately, before the result is known, so the modal
+   * itself carries the loading state rather than the click just looking
+   * like nothing happened for several seconds.
+   */
+  async function shareProject(id: string) {
+    sharingFor.value = id
+    shareError.value = null
+    shareModalFor.value = id
+    try {
+      const url = await invoke<string>('share_project', { id })
+      shareUrls.value = { ...shareUrls.value, [id]: url }
+    } catch (e) {
+      shareError.value = errorMessage(e)
+    } finally {
+      sharingFor.value = null
+    }
+  }
+
+  /** Stops a project's share tunnel, if it has one. */
+  async function stopSharing(id: string) {
+    await invoke('stop_sharing', { id })
+    const remaining = { ...shareUrls.value }
+    delete remaining[id]
+    shareUrls.value = remaining
+    if (shareModalFor.value === id) shareModalFor.value = null
+  }
+
+  function openShareModal(id: string) {
+    shareError.value = null
+    shareModalFor.value = id
+  }
+
+  function closeShareModal() {
+    shareModalFor.value = null
+    shareError.value = null
+  }
+
+  /**
+   * Repopulates `shareUrls` from whatever's actually still running —
+   * without this, reloading the Projects page while a share is active would
+   * show it as "not shared" even though `cloudflared.exe` is still up.
+   */
+  async function restoreShareStatus() {
+    const entries = await Promise.all(
+      projects.value.map(
+        async (p) => [p.id, await invoke<string | null>('sharing_status', { id: p.id })] as const,
+      ),
+    )
+    const active: Record<string, string> = {}
+    for (const [id, url] of entries) {
+      if (url) active[id] = url
+    }
+    shareUrls.value = active
+  }
+
   return {
     projects,
     linking,
@@ -179,6 +332,18 @@ export const useProjectsStore = defineStore('projects', () => {
     previewLink,
     linkProject,
     unlinkProject,
+    phpVersionError,
+    phpVersionModalFor,
+    settingPhpVersion,
+    setPhpVersion,
+    openPhpVersionModal,
+    closePhpVersionModal,
+    nodeVersionError,
+    nodeVersionModalFor,
+    settingNodeVersion,
+    setNodeVersion,
+    openNodeVersionModal,
+    closeNodeVersionModal,
     syncingHosts,
     hostsError,
     openError,
@@ -200,5 +365,14 @@ export const useProjectsStore = defineStore('projects', () => {
     openTerminal,
     fetchTemplateInfo,
     createProject,
+    shareUrls,
+    sharingFor,
+    shareError,
+    shareModalFor,
+    shareProject,
+    stopSharing,
+    openShareModal,
+    closeShareModal,
+    restoreShareStatus,
   }
 })

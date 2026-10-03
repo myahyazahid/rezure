@@ -9,6 +9,12 @@ pub enum AppError {
     #[error("php version not installed: {0}")]
     PhpVersionNotFound(String),
 
+    #[error("node version not installed: {0}")]
+    NodeVersionNotFound(String),
+
+    #[error("no {runtime} version {version} in the catalog")]
+    CatalogVersionNotFound { runtime: String, version: String },
+
     #[error("PHP {0} is already installed")]
     PhpVersionAlreadyInstalled(String),
 
@@ -17,6 +23,9 @@ pub enum AppError {
 
     #[error("{id} isn't available for PHP {php_version} yet")]
     ExtensionUnavailable { id: String, php_version: String },
+
+    #[error("unknown PHP extension: {0}")]
+    UnknownExtension(String),
 
     #[error("download failed: {0}")]
     Download(String),
@@ -36,6 +45,12 @@ pub enum AppError {
 
     #[error("{0} isn't installed yet — download it from the Binaries panel first")]
     BinaryNotInstalled(String),
+
+    #[error("{0} isn't running — start it first")]
+    ServiceNotRunning(String),
+
+    #[error("{0} has no web interface to open")]
+    NoWebUi(String),
 
     #[error("failed to start {name}: {reason}")]
     ProcessSpawnFailed { name: String, reason: String },
@@ -79,8 +94,27 @@ pub enum AppError {
     )]
     InvalidDatabaseName { name: String, kind: String },
 
-    #[error("MariaDB: {0}")]
+    // No engine name in the prefix: the same path now also talks to remote
+    // MySQL servers, and labelling their errors "MariaDB" sent people
+    // looking in the wrong place.
+    #[error("{0}")]
     DatabaseQueryFailed(String),
+
+    #[error("SSH tunnel failed: {0}")]
+    TunnelFailed(String),
+
+    #[error("export of \"{0}\" was cancelled")]
+    ExportCancelled(String),
+
+    #[error("couldn't share this project: {0}")]
+    ShareFailed(String),
+
+    #[error("can't reach {host}:{port} — {reason}")]
+    ServerUnreachable {
+        host: String,
+        port: u16,
+        reason: String,
+    },
 
     #[error("no such SQL client: {0}")]
     UnknownDbClient(String),
@@ -142,11 +176,57 @@ pub enum AppError {
     #[error("{path} can't be attached — {reason}")]
     AttachmentRejected { path: String, reason: String },
 
+    #[error("connection not found: {0}")]
+    ConnectionNotFound(String),
+
+    #[error("{endpoint} is already saved as the \"{name}\" connection")]
+    ConnectionAlreadyExists { endpoint: String, name: String },
+
+    #[error(
+        "\"{name}\" is read-only — turn that off in the connection's settings if you really mean to write to it"
+    )]
+    ConnectionReadOnly { name: String },
+
+    #[error("{0}")]
+    InvalidConnection(String),
+
+    #[error("Windows Credential Manager refused the password: {0}")]
+    CredentialStore(String),
+
     #[error("couldn't send the ticket: {0}")]
     TicketSubmitFailed(String),
 
     #[error("couldn't load your ticket history: {0}")]
     TicketHistoryFailed(String),
+
+    #[error(
+        "{0} is installed under Microsoft's license — accept it first to let Rezure install it"
+    )]
+    LicenseNotAccepted(String),
+
+    #[error(
+        "installing {0} was cancelled — click Yes on the admin prompt to let Windows install it"
+    )]
+    InstallerCancelled(String),
+
+    #[error("{name} didn't install: {reason}")]
+    InstallerFailed { name: String, reason: String },
+
+    #[error(
+        "the Microsoft ODBC Driver for SQL Server isn't installed — install it from PHP Extensions (or the Databases page) first"
+    )]
+    OdbcDriverMissing,
+
+    #[error("{0}")]
+    UnsupportedOnSqlServer(String),
+
+    #[error("PostgreSQL version not installed: {0}")]
+    PostgresVersionNotFound(String),
+
+    #[error(
+        "PostgreSQL refuses to run with administrator rights, and Rezure was started as administrator — close it and open it normally, then start PostgreSQL again"
+    )]
+    PostgresElevated,
 }
 
 /// Serialized as its `Display` message (the `#[error("...")]` text) rather
@@ -158,5 +238,98 @@ impl Serialize for AppError {
         S: serde::Serializer,
     {
         serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl AppError {
+    /// The kind of failure, as a stable identifier (the variant's name) —
+    /// what telemetry's `error.report` events carry. Never the message:
+    /// messages hold paths, project names and hostnames from the user's
+    /// machine, and the dashboard groups errors by this exact string, so it
+    /// mustn't vary with them either.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::ServiceNotFound { .. } => "ServiceNotFound",
+            Self::PhpVersionNotFound { .. } => "PhpVersionNotFound",
+            Self::NodeVersionNotFound { .. } => "NodeVersionNotFound",
+            Self::CatalogVersionNotFound { .. } => "CatalogVersionNotFound",
+            Self::PhpVersionAlreadyInstalled { .. } => "PhpVersionAlreadyInstalled",
+            Self::UnknownBinary { .. } => "UnknownBinary",
+            Self::ExtensionUnavailable { .. } => "ExtensionUnavailable",
+            Self::UnknownExtension { .. } => "UnknownExtension",
+            Self::Download { .. } => "Download",
+            Self::ChecksumMismatch { .. } => "ChecksumMismatch",
+            Self::Extract { .. } => "Extract",
+            Self::Io { .. } => "Io",
+            Self::BinaryNotInstalled { .. } => "BinaryNotInstalled",
+            Self::ServiceNotRunning { .. } => "ServiceNotRunning",
+            Self::NoWebUi { .. } => "NoWebUi",
+            Self::ProcessSpawnFailed { .. } => "ProcessSpawnFailed",
+            Self::ProcessBootstrapFailed { .. } => "ProcessBootstrapFailed",
+            Self::PortInUse { .. } => "PortInUse",
+            Self::HostsUpdateCancelled => "HostsUpdateCancelled",
+            Self::HostsUpdateFailed { .. } => "HostsUpdateFailed",
+            Self::UnknownTemplate { .. } => "UnknownTemplate",
+            Self::InvalidProjectName { .. } => "InvalidProjectName",
+            Self::ProjectAlreadyExists { .. } => "ProjectAlreadyExists",
+            Self::ScaffoldFailed { .. } => "ScaffoldFailed",
+            Self::ProjectNotFound { .. } => "ProjectNotFound",
+            Self::OpenFailed { .. } => "OpenFailed",
+            Self::InvalidDatabaseName { .. } => "InvalidDatabaseName",
+            Self::DatabaseQueryFailed { .. } => "DatabaseQueryFailed",
+            Self::TunnelFailed { .. } => "TunnelFailed",
+            Self::ExportCancelled { .. } => "ExportCancelled",
+            Self::ShareFailed { .. } => "ShareFailed",
+            Self::ServerUnreachable { .. } => "ServerUnreachable",
+            Self::UnknownDbClient { .. } => "UnknownDbClient",
+            Self::Settings { .. } => "Settings",
+            Self::Database { .. } => "Database",
+            Self::ProfileNotFound { .. } => "ProfileNotFound",
+            Self::ProfileUndeletable { .. } => "ProfileUndeletable",
+            Self::DatadirAlreadyRegistered { .. } => "DatadirAlreadyRegistered",
+            Self::NotADatadir { .. } => "NotADatadir",
+            Self::EngineBinaryMissing { .. } => "EngineBinaryMissing",
+            Self::EngineMismatch { .. } => "EngineMismatch",
+            Self::DatadirInUse { .. } => "DatadirInUse",
+            Self::SwitchRolledBack { .. } => "SwitchRolledBack",
+            Self::PortHolderProtected { .. } => "PortHolderProtected",
+            Self::UnusableProjectPath { .. } => "UnusableProjectPath",
+            Self::ProjectAlreadyLinked { .. } => "ProjectAlreadyLinked",
+            Self::PortInUseBy { .. } => "PortInUseBy",
+            Self::AttachmentRejected { .. } => "AttachmentRejected",
+            Self::ConnectionNotFound { .. } => "ConnectionNotFound",
+            Self::ConnectionAlreadyExists { .. } => "ConnectionAlreadyExists",
+            Self::ConnectionReadOnly { .. } => "ConnectionReadOnly",
+            Self::InvalidConnection { .. } => "InvalidConnection",
+            Self::CredentialStore { .. } => "CredentialStore",
+            Self::TicketSubmitFailed { .. } => "TicketSubmitFailed",
+            Self::TicketHistoryFailed { .. } => "TicketHistoryFailed",
+            Self::LicenseNotAccepted { .. } => "LicenseNotAccepted",
+            Self::InstallerCancelled { .. } => "InstallerCancelled",
+            Self::InstallerFailed { .. } => "InstallerFailed",
+            Self::OdbcDriverMissing => "OdbcDriverMissing",
+            Self::UnsupportedOnSqlServer { .. } => "UnsupportedOnSqlServer",
+            Self::PostgresVersionNotFound { .. } => "PostgresVersionNotFound",
+            Self::PostgresElevated => "PostgresElevated",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn code_is_the_variant_name_and_never_the_message() {
+        let err = AppError::PortInUse {
+            port: 80,
+            name: r"C:\Users\someone\secret-project".to_string(),
+        };
+        assert_eq!(err.code(), "PortInUse");
+        assert_eq!(AppError::Io(r"C:\Users\someone".to_string()).code(), "Io");
+        assert_eq!(
+            AppError::HostsUpdateCancelled.code(),
+            "HostsUpdateCancelled"
+        );
     }
 }

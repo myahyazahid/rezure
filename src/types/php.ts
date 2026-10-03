@@ -65,6 +65,89 @@ export interface ProjectDiagnosis {
   extensions: ExtensionCheck[]
   /** The names that actually need acting on. */
   missing: string[]
+  /** The project's `.env` mails a local SMTP server — what Mailpit is for.
+   *  Null for `log`, a real provider, or no `.env`. */
+  mail: MailSetup | null
+  /** The project's `.env` says `DB_CONNECTION=sqlsrv`. Null otherwise. */
+  sqlServer: SqlServerSetup | null
+  /** The project's `.env` says `DB_CONNECTION=pgsql`. Null otherwise. */
+  postgres: PostgresSetup | null
+}
+
+/** A project's PostgreSQL settings, checked against Rezure's own server —
+ *  mirrors `services::doctor::PostgresSetup`. */
+export interface PostgresSetup {
+  /** `DB_HOST` as written, or Laravel's default. */
+  host: string
+  /** `DB_HOST` is this machine, so Rezure's PostgreSQL is what it reaches. */
+  usesLocal: boolean
+  /** `DB_PORT`, or Laravel's default 5432. */
+  port: number
+  /** `DB_USERNAME`, or Laravel's default `root`. */
+  username: string
+  /** The username is `postgres` or `root`, the roles Rezure's server has. */
+  knownRole: boolean
+  /** `pdo_pgsql` is loaded in the serving PHP. */
+  driverLoaded: boolean
+  postgresInstalled: boolean
+  postgresRunning: boolean
+}
+
+/** A project's SQL Server settings, checked against this machine. */
+export interface SqlServerSetup {
+  /** `DB_HOST` as written. */
+  host: string
+  /** `DB_HOST` is Rezure's LocalDB, `(localdb)\Rezure`. */
+  usesLocaldb: boolean
+  /** LocalDB has no TCP port, but Laravel appends `DB_PORT` (or 1433) unless
+   *  it's set to nothing. */
+  portConflicts: boolean
+  /** Both the config line and the env var turn on trust_server_certificate. */
+  trustConfigured: boolean
+  /** `pdo_sqlsrv` is loaded in the serving PHP. */
+  driverLoaded: boolean
+  /** The ODBC driver Windows has registered, if any. */
+  odbcDriver: string | null
+  /** That driver is 18+, which encrypts by default. */
+  encryptsByDefault: boolean
+  localdbInstalled: boolean
+  localdbRunning: boolean
+}
+
+/** A project's local-SMTP mail settings, checked against Mailpit. */
+export interface MailSetup {
+  /** `MAIL_HOST` as written. */
+  host: string
+  port: number | null
+  /** False for `mailpit`, Laravel Sail's Docker hostname. */
+  hostReachable: boolean
+  /** Whether `MAIL_PORT` is Mailpit's SMTP port. */
+  portMatches: boolean
+  mailpitInstalled: boolean
+  mailpitRunning: boolean
+}
+
+/** What an HTTPS request from the active PHP ran into. `untrusted` is the
+ *  cURL error 60 case; `unreachable` never got as far as a certificate, so
+ *  it says nothing about the bundle. */
+export type TlsOutcome = 'verified' | 'untrusted' | 'unreachable' | 'unavailable'
+
+/** The requirements check's HTTPS half — about the PHP, not the project. */
+export interface TlsCheck {
+  /** Whether Rezure's CA bundle is on disk — the fix, when one is needed. */
+  bundleInstalled: boolean
+  outcome: TlsOutcome
+  /** cURL's own message, for anything but `verified`. */
+  detail: string | null
+}
+
+/** The CA bundle PHP verifies HTTPS against. */
+export interface CaBundleStatus {
+  installed: boolean
+  path: string
+  /** `YYYY-MM-DD` of the Mozilla data inside; null for a bundle that isn't
+   *  from curl.se. */
+  mozillaDate: string | null
 }
 
 /** A PECL extension Rezure can install into a PHP version. */
@@ -76,5 +159,28 @@ export interface ExtensionStatus {
   /** Already in this version's ext/ folder. */
   installed: boolean
   /** A verified build exists for this PHP branch. */
+  available: boolean
+  /** Needs the Microsoft ODBC Driver for SQL Server to connect (sqlsrv,
+   *  pdo_sqlsrv). PHP loads the DLL without it; only connecting fails. */
+  requiresOdbc: boolean
+}
+
+/** One extension the official PHP zip already ships in `ext/`, and whether
+ *  it's turned on for one specific PHP version. Distinct from
+ *  {@link ExtensionStatus}, which is about PECL extensions the zip doesn't
+ *  ship at all. */
+export interface BundledExtension {
+  id: string
+  label: string
+  category: string
+  description: string
+  /** Whether Rezure will write `extension=<id>` for this version right now. */
+  enabled: boolean
+  /** Whether `enabled` is Rezure's own default rather than a user choice. */
+  defaultOn: boolean
+  /** Environment-dependent or debug-only — shown with a warning instead of
+   *  as an ordinary toggle. */
+  debugOnly: boolean
+  /** The DLL isn't in this version's ext/ build at all. */
   available: boolean
 }

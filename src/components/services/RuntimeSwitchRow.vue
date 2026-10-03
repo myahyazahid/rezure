@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import BasePill from '@/components/common/BasePill.vue'
+import TechIcon from '@/components/common/TechIcon.vue'
 import type { InstallProgress } from '@/types/binary'
 
 export interface RuntimeVersionEntry {
   id: string
   version: string
   installed: boolean
+  /** A short secondary label shown next to the version, e.g. Node's
+   *  bundled "npm 10.9.0". */
+  detail?: string | null
 }
 
 const props = withDefaults(
@@ -31,11 +35,22 @@ const props = withDefaults(
   { installingId: null, progress: null, disabled: false, busy: false },
 )
 
-const emit = defineEmits<{ select: [id: string]; install: [id: string] }>()
+const emit = defineEmits<{ select: [id: string] }>()
 
 const open = ref(false)
 
 const installing = computed(() => props.installingId !== null)
+
+/** Only installed entries are ever listed here now — the dropdown is
+ *  switch-only, and "Install version" (the page-level button) is the one
+ *  place a new version gets added. */
+const installedVersions = computed(() => props.versions.filter((v) => v.installed))
+
+const activeDetail = computed(
+  () =>
+    props.versions.find((v) => v.id === props.activeVersion || v.version === props.activeVersion)
+      ?.detail ?? null,
+)
 
 /** Null while the download hasn't reported a total — a large binary sends
  *  its first bytes before the server's content length is known. */
@@ -59,30 +74,22 @@ const stageLabel = computed(() => {
 })
 
 function pick(entry: RuntimeVersionEntry) {
-  if (entry.installed) {
-    emit('select', entry.id)
-    open.value = false
-  } else {
-    emit('install', entry.id)
-  }
+  emit('select', entry.id)
+  open.value = false
 }
 </script>
 
 <template>
   <div
-    class="px-4 py-3.5 transition"
-    :class="disabled ? 'opacity-50' : 'hover:bg-neutral-100/70 dark:hover:bg-neutral-800/40'"
+    class="px-4 py-3.5 transition first:rounded-t-2xl last:rounded-b-2xl"
+    :class="disabled ? 'opacity-50' : 'hover:bg-white/50 dark:hover:bg-white/5'"
   >
     <div class="flex items-center gap-3">
       <span
-        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold"
-        :class="
-          !disabled && installedCount > 0
-            ? 'bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400'
-            : 'bg-neutral-200/70 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400'
-        "
+        class="glass-inset flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
+        :class="disabled || installedCount === 0 ? 'opacity-50 grayscale' : ''"
       >
-        {{ icon }}
+        <TechIcon :id="icon" :size="20" />
       </span>
 
       <div class="min-w-0 flex-1">
@@ -97,7 +104,7 @@ function pick(entry: RuntimeVersionEntry) {
             class="font-mono"
             :class="
               installing
-                ? 'text-red-600 dark:text-red-400'
+                ? 'text-accent-600 dark:text-accent-400'
                 : !disabled && activeVersion
                   ? 'text-emerald-600 dark:text-emerald-400'
                   : 'text-neutral-500'
@@ -109,7 +116,7 @@ function pick(entry: RuntimeVersionEntry) {
                 : disabled
                   ? 'not available yet'
                   : activeVersion
-                    ? `active ${activeVersion}`
+                    ? `active ${activeVersion}${activeDetail ? ` · ${activeDetail}` : ''}`
                     : 'not installed'
             }}
           </span>
@@ -121,8 +128,13 @@ function pick(entry: RuntimeVersionEntry) {
       <div v-if="!disabled" class="relative shrink-0">
         <button
           type="button"
-          class="flex items-center gap-1.5 rounded-full border border-neutral-200 bg-white/70 px-3 py-1.5 font-mono text-sm font-semibold text-neutral-700 transition hover:bg-white disabled:cursor-wait disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
-          :disabled="busy"
+          class="glass-btn flex items-center gap-1.5 rounded-full px-3 py-1.5 font-mono text-sm font-semibold text-neutral-700 transition disabled:cursor-not-allowed disabled:opacity-50 dark:text-neutral-200"
+          :disabled="busy || installedVersions.length === 0"
+          :title="
+            installedVersions.length === 0
+              ? 'Nothing installed — use “Install version” above'
+              : undefined
+          "
           @click="open = !open"
         >
           {{ activeVersion ?? '—' }}
@@ -140,50 +152,30 @@ function pick(entry: RuntimeVersionEntry) {
 
         <template v-if="open">
           <div class="fixed inset-0 z-10" @click="open = false"></div>
-          <div
-            class="absolute top-full right-0 z-20 mt-2 w-48 rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
-          >
+          <div class="glass-strong absolute top-full right-0 z-20 mt-2 w-56 rounded-xl p-1">
+            <p v-if="installedVersions.length === 0" class="px-2.5 py-1.5 text-xs text-neutral-400">
+              Nothing installed yet
+            </p>
             <button
-              v-for="(entry, i) in versions"
+              v-for="(entry, i) in installedVersions"
               :key="entry.id"
               type="button"
-              class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left font-mono text-sm transition disabled:cursor-wait"
-              :class="
-                entry.installed
-                  ? 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
-                  : 'text-neutral-400 hover:bg-neutral-100 dark:text-neutral-500 dark:hover:bg-neutral-800'
-              "
-              :disabled="installingId === entry.id"
+              class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left font-mono text-sm transition hover:bg-white/50 dark:hover:bg-white/5"
               @click="pick(entry)"
             >
               <span
                 class="h-1.5 w-1.5 shrink-0 rounded-full"
                 :class="
                   entry.id === activeVersion || entry.version === activeVersion
-                    ? 'bg-red-500'
+                    ? 'bg-accent-500'
                     : 'bg-transparent'
                 "
               ></span>
-              <span class="flex-1 truncate">{{ entry.version }}</span>
+              <span class="flex-1 truncate">
+                {{ entry.version }}
+                <span v-if="entry.detail" class="text-xs text-neutral-400">{{ entry.detail }}</span>
+              </span>
               <span v-if="i === 0" class="text-[10px] text-neutral-400">latest</span>
-              <span v-if="installingId === entry.id" class="text-[10px] text-neutral-400"
-                >installing…</span
-              >
-              <svg
-                v-else-if="!entry.installed"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                class="h-3.5 w-3.5 shrink-0"
-                aria-label="Download"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"
-                />
-              </svg>
             </button>
           </div>
         </template>
@@ -192,10 +184,10 @@ function pick(entry: RuntimeVersionEntry) {
 
     <div
       v-if="installing"
-      class="mt-3 h-1.5 overflow-hidden rounded-full bg-neutral-200/70 dark:bg-neutral-800"
+      class="mt-3 h-1.5 overflow-hidden rounded-full bg-neutral-900/10 dark:bg-white/10"
     >
       <div
-        class="h-full rounded-full bg-red-500 transition-all"
+        class="h-full rounded-full bg-linear-to-r from-accent-500 to-accent-alt transition-all"
         :class="percent === null ? 'w-1/3 animate-pulse' : ''"
         :style="percent !== null ? { width: `${percent}%` } : undefined"
       ></div>

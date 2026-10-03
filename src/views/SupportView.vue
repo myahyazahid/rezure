@@ -69,7 +69,7 @@ function formatSize(bytes: number): string {
 
     <div
       v-if="store.submitted"
-      class="mt-6 rounded-2xl border border-green-200 bg-green-50 p-5 dark:border-green-900 dark:bg-green-950/40"
+      class="mt-6 rounded-2xl border border-green-300/60 bg-green-100/50 p-5 dark:border-green-900 dark:bg-green-950/40"
     >
       <p class="font-semibold text-green-800 dark:text-green-300">Ticket sent</p>
       <p class="mt-1 text-sm text-green-700 dark:text-green-400">
@@ -85,9 +85,7 @@ function formatSize(bytes: number): string {
     </div>
 
     <template v-else>
-      <div
-        class="mt-6 rounded-2xl border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900/60"
-      >
+      <div class="glass mt-6 rounded-2xl p-5">
         <div class="grid gap-4 sm:grid-cols-2">
           <div>
             <label class="block text-sm font-semibold text-neutral-700 dark:text-neutral-200">
@@ -95,7 +93,7 @@ function formatSize(bytes: number): string {
             </label>
             <select
               :value="store.category"
-              class="mt-1.5 w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+              class="glass-inset mt-1.5 w-full rounded-lg px-3 py-2 text-sm dark:text-neutral-100"
               @change="
                 store.setCategory(($event.target as HTMLSelectElement).value as TicketCategory)
               "
@@ -114,7 +112,7 @@ function formatSize(bytes: number): string {
               type="text"
               maxlength="150"
               placeholder="Short summary"
-              class="mt-1.5 w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+              class="glass-inset mt-1.5 w-full rounded-lg px-3 py-2 text-sm dark:text-neutral-100"
               @input="store.setTitle(($event.target as HTMLInputElement).value)"
             />
           </div>
@@ -129,7 +127,7 @@ function formatSize(bytes: number): string {
             rows="5"
             maxlength="5000"
             placeholder="What happened, what you expected, steps to reproduce…"
-            class="mt-1.5 w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+            class="glass-inset mt-1.5 w-full rounded-lg px-3 py-2 text-sm dark:text-neutral-100"
             @input="store.setDescription(($event.target as HTMLTextAreaElement).value)"
           />
         </div>
@@ -139,7 +137,7 @@ function formatSize(bytes: number): string {
             id="include-system-info"
             type="checkbox"
             :checked="store.includeSystemInfo"
-            class="h-4 w-4 rounded border-neutral-300"
+            class="h-4 w-4 rounded border-neutral-900/20 dark:border-white/20"
             @change="store.setIncludeSystemInfo(($event.target as HTMLInputElement).checked)"
           />
           <label for="include-system-info" class="text-sm text-neutral-600 dark:text-neutral-300">
@@ -148,23 +146,22 @@ function formatSize(bytes: number): string {
         </div>
       </div>
 
-      <div
-        class="mt-4 rounded-2xl border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900/60"
-      >
+      <div class="glass mt-4 rounded-2xl p-5">
         <div class="flex items-center justify-between">
           <p class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Attachments</p>
           <div class="flex gap-2">
             <button
               type="button"
-              class="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-semibold text-neutral-600 transition hover:border-red-400 hover:text-red-600 dark:border-neutral-700 dark:text-neutral-300"
+              class="glass-btn rounded-full px-3 py-1.5 text-xs font-semibold text-neutral-600 transition hover:text-accent-600 dark:text-neutral-300"
+              :disabled="!store.logText && store.attachmentSlotsLeft <= 0"
               @click="attachLatestLog"
             >
               Attach latest log
             </button>
             <button
               type="button"
-              class="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-semibold text-neutral-600 transition hover:border-red-400 hover:text-red-600 dark:border-neutral-700 dark:text-neutral-300"
-              :disabled="store.attachments.length >= 5"
+              class="glass-btn rounded-full px-3 py-1.5 text-xs font-semibold text-neutral-600 transition hover:text-accent-600 dark:text-neutral-300"
+              :disabled="store.attachmentSlotsLeft <= 0"
               @click="pickAttachments"
             >
               Browse…
@@ -187,7 +184,7 @@ function formatSize(bytes: number): string {
           <li
             v-for="a in store.attachments"
             :key="a.path"
-            class="flex items-center justify-between rounded-lg bg-neutral-50 px-3 py-1.5 text-xs dark:bg-neutral-800/60"
+            class="glass-inset flex items-center justify-between rounded-lg px-3 py-1.5 text-xs"
           >
             <span class="truncate text-neutral-700 dark:text-neutral-200">{{ a.name }}</span>
             <span class="ml-2 flex shrink-0 items-center gap-2">
@@ -219,7 +216,7 @@ function formatSize(bytes: number): string {
         <button
           v-if="store.submitError"
           type="button"
-          class="rounded-full border border-neutral-200 px-5 py-2 text-sm font-semibold text-neutral-600 dark:border-neutral-700 dark:text-neutral-300"
+          class="glass-btn rounded-full px-5 py-2 text-sm font-semibold text-neutral-600 dark:text-neutral-300"
           :disabled="store.submitting"
           @click="store.submit()"
         >
@@ -228,10 +225,24 @@ function formatSize(bytes: number): string {
         <button
           v-else
           type="button"
-          class="rounded-full bg-red-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-red-500 disabled:opacity-50"
+          class="glass-accent flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition disabled:opacity-50"
           :disabled="!canSubmit"
           @click="store.submit()"
         >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            aria-hidden="true"
+            class="h-4 w-4"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M21 3 10 14M21 3l-7 18-4-7-7-4 18-7Z"
+            />
+          </svg>
           {{ store.submitting ? 'Sending…' : 'Send ticket' }}
         </button>
       </div>
@@ -248,10 +259,7 @@ function formatSize(bytes: number): string {
       >
         Nothing sent yet.
       </p>
-      <ul
-        v-else
-        class="mt-3 divide-y divide-neutral-200/80 rounded-2xl border border-neutral-200 bg-white dark:divide-neutral-800 dark:border-neutral-800 dark:bg-neutral-900/60"
-      >
+      <ul v-else class="glass mt-3 divide-y divide-neutral-900/8 rounded-2xl dark:divide-white/8">
         <li
           v-for="(item, i) in store.history"
           :key="i"
@@ -270,10 +278,10 @@ function formatSize(bytes: number): string {
             class="shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold"
             :class="
               item.status === 'resolved'
-                ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
+                ? 'border border-transparent bg-green-500/15 text-green-700 dark:bg-green-900/40 dark:text-green-300'
                 : item.status === 'in_progress'
-                  ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
-                  : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+                  ? 'border border-transparent bg-amber-500/15 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+                  : 'glass-inset text-neutral-600 dark:text-neutral-300'
             "
           >
             {{ STATUS_LABEL[item.status] }}

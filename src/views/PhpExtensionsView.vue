@@ -1,0 +1,324 @@
+<script setup lang="ts">
+import { computed, onActivated, ref, watch } from 'vue'
+import { RouterLink } from 'vue-router'
+import { usePhpStore } from '@/stores/php'
+import { useServicesStore } from '@/stores/services'
+import { useBinariesStore } from '@/stores/binaries'
+import type { BundledExtension, ExtensionStatus } from '@/types/php'
+import SearchInput from '@/components/common/SearchInput.vue'
+import LicenseConsentModal from '@/components/common/LicenseConsentModal.vue'
+import { useLicensedInstall } from '@/composables/useLicensedInstall'
+
+const store = usePhpStore()
+const servicesStore = useServicesStore()
+const binariesStore = useBinariesStore()
+const licensed = useLicensedInstall()
+
+const search = ref('')
+/** Which installed version's extensions this page is showing — defaults to
+ *  the active one, but several can run at once (per-project pins), so it's
+ *  pickable rather than always following the Switch page's active version. */
+const selectedVersion = ref<string | null>(null)
+const versionMenuOpen = ref(false)
+
+function pickVersion(version: string) {
+  selectedVersion.value = version
+  versionMenuOpen.value = false
+}
+
+function loadFor(version: string | null) {
+  if (!version) return
+  store.fetchBundledExtensions(version)
+  // What can be downloaded for this version — `redis` and the SQL Server
+  // drivers aren't in the zip, so their rows offer an Install instead.
+  store.fetchExtensions(version)
+}
+
+watch(selectedVersion, loadFor)
+
+// Kept-alive view: fires on first mount and on every return to the page,
+// same as `SwitchView`'s own PHP fetches — a version installed or pinned
+// elsewhere should show up without needing a second visit to notice it.
+onActivated(() => {
+  if (!selectedVersion.value) selectedVersion.value = store.active?.version ?? null
+  loadFor(selectedVersion.value)
+  binariesStore.fetchAll()
+})
+
+/** The downloadable side of an extension, when it's one Rezure can fetch. */
+function downloadable(ext: BundledExtension): ExtensionStatus | null {
+  return store.extensions.find((pecl) => pecl.id === ext.id) ?? null
+}
+
+async function installExtension(ext: BundledExtension) {
+  const version = selectedVersion.value
+  if (!version) return
+  if (await store.installExtension(ext.id, version)) {
+    await store.fetchBundledExtensions(version)
+  }
+}
+
+/** The Microsoft ODBC Driver, which the SQL Server extensions need to
+ *  connect — PHP loads them happily without it, then every connect fails. */
+const odbc = computed(() => binariesStore.binaries.find((b) => b.id === 'msodbcsql') ?? null)
+
+/** A SQL Server extension is on for this version, but Windows has no ODBC
+ *  Driver for it to talk through. */
+const odbcMissing = computed(
+  () =>
+    odbc.value !== null &&
+    !odbc.value.installed &&
+    store.bundledExtensions.some(
+      (ext) => ext.enabled && ext.available && downloadable(ext)?.requiresOdbc,
+    ),
+)
+
+// The active version can only be known once `store.versions` has loaded,
+// which may resolve after this page already activated — this catches that
+// without ever overriding a version the user picked from the dropdown.
+watch(
+  () => store.active?.version ?? null,
+  (version) => {
+    if (!selectedVersion.value && version) selectedVersion.value = version
+  },
+)
+
+/** A service actually running this version right now — either the default
+ *  `php` service when it's the active one, or a pinned pooled instance
+ *  (`services::php_pool`). A toggle here only ever writes state; this is
+ *  what decides whether the "restart to apply" note is worth showing. */
+const runningThisVersion = computed(
+  () =>
+    selectedVersion.value !== null &&
+    servicesStore.services.some(
+      (s) => s.version === selectedVersion.value && s.status === 'running',
+    ),
+)
+
+const filtered = computed(() => {
+  const query = search.value.trim().toLowerCase()
+  if (!query) return store.bundledExtensions
+  return store.bundledExtensions.filter(
+    (ext) => ext.label.toLowerCase().includes(query) || ext.id.toLowerCase().includes(query),
+  )
+})
+
+/** Grouped so the page reads as a handful of short sections instead of one
+ *  long alphabetical wall — categories and, within one, extensions both
+ *  sorted for a stable order across re-renders. */
+const groups = computed(() => {
+  const byCategory = new Map<string, BundledExtension[]>()
+  for (const ext of filtered.value) {
+    const list = byCategory.get(ext.category) ?? []
+    list.push(ext)
+    byCategory.set(ext.category, list)
+  }
+  return [...byCategory.entries()]
+    .map(
+      ([category, exts]) =>
+        [category, [...exts].sort((a, b) => a.label.localeCompare(b.label))] as const,
+    )
+    .sort(([a], [b]) => a.localeCompare(b))
+})
+
+async function toggle(ext: BundledExtension) {
+  if (!selectedVersion.value || !ext.available) return
+  await store.setBundledExtension(selectedVersion.value, ext.id, !ext.enabled)
+}
+</script>
+
+<template>
+  <section>
+    <div class="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <h1 class="text-[28px] leading-tight font-bold tracking-tight">PHP Extensions</h1>
+        <p class="mt-1 text-sm text-neutral-500">
+          Turn on extensions this PHP zip already ships in <code class="font-mono">ext/</code>, or
+          install the few it doesn't (Redis, SQL Server) — no hand-edited
+          <code class="font-mono">.ini</code> fragment.
+        </p>
+      </div>
+
+      <div v-if="store.versions.length > 1" class="relative shrink-0">
+        <button
+          type="button"
+          class="glass-btn flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold text-neutral-700 transition dark:text-neutral-200"
+          @click="versionMenuOpen = !versionMenuOpen"
+        >
+          PHP {{ selectedVersion }}
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="h-3.5 w-3.5 shrink-0 transition-transform"
+            :class="versionMenuOpen ? 'rotate-180' : ''"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6" />
+          </svg>
+        </button>
+
+        <template v-if="versionMenuOpen">
+          <div class="fixed inset-0 z-10" @click="versionMenuOpen = false"></div>
+          <div class="glass-strong absolute top-full right-0 z-20 mt-2 w-40 rounded-xl p-1">
+            <button
+              v-for="v in store.versions"
+              :key="v.id"
+              type="button"
+              class="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm transition hover:bg-white/50 dark:hover:bg-white/5"
+              @click="pickVersion(v.version)"
+            >
+              <span
+                class="h-1.5 w-1.5 shrink-0 rounded-full"
+                :class="v.version === selectedVersion ? 'bg-accent-500' : 'bg-transparent'"
+              />
+              <span class="flex-1 truncate">PHP {{ v.version }}</span>
+            </button>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <p v-if="store.error" class="mt-3 text-sm text-red-600 dark:text-red-400">
+      {{ store.error }}
+    </p>
+
+    <p
+      v-if="store.versions.length === 0"
+      class="glass mt-6 rounded-2xl p-6 text-center text-sm text-neutral-500"
+    >
+      No PHP version installed yet — install one from
+      <RouterLink to="/switch" class="font-semibold text-accent-600 hover:underline"
+        >Switch</RouterLink
+      >
+      first.
+    </p>
+
+    <template v-else>
+      <p
+        v-if="runningThisVersion"
+        class="mt-4 rounded-xl bg-amber-100/50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+      >
+        PHP {{ selectedVersion }} is running right now — restart it (Dashboard → PHP) for a toggle
+        here to reach requests it's already serving.
+      </p>
+
+      <!-- The DLL alone does nothing for SQL Server: without the driver it
+           talks through, the failure only shows up on the first connect. -->
+      <div
+        v-if="odbcMissing"
+        class="mt-4 flex flex-wrap items-center gap-3 rounded-xl bg-amber-100/50 px-3 py-2.5 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+      >
+        <span class="min-w-0 flex-1">
+          The SQL Server extensions need the
+          <strong class="font-semibold">Microsoft ODBC Driver for SQL Server</strong>. PHP loads
+          them without it, but every connection fails until it's installed.
+        </span>
+        <button
+          type="button"
+          class="glass-accent shrink-0 rounded-full px-3.5 py-1.5 text-xs font-semibold transition disabled:opacity-50"
+          :disabled="binariesStore.isInstalling('msodbcsql')"
+          @click="licensed.request('msodbcsql')"
+        >
+          {{ binariesStore.isInstalling('msodbcsql') ? 'Installing…' : 'Install ODBC Driver' }}
+        </button>
+      </div>
+      <p v-if="licensed.error.value" class="mt-2 text-sm text-red-600 dark:text-red-400">
+        {{ licensed.error.value }}
+      </p>
+
+      <SearchInput v-model="search" placeholder="Filter extensions" class="mt-4 max-w-sm" />
+
+      <div class="mt-4 flex flex-col gap-3">
+        <div v-for="[category, exts] in groups" :key="category">
+          <p class="mb-1.5 text-xs font-semibold tracking-wide text-neutral-400 uppercase">
+            {{ category }}
+          </p>
+          <div
+            class="glass flex flex-col divide-y divide-neutral-900/8 rounded-2xl dark:divide-white/8"
+          >
+            <div
+              v-for="ext in exts"
+              :key="ext.id"
+              class="flex items-center gap-3 px-3.5 py-2.5"
+              :class="{ 'opacity-50': !ext.available && !downloadable(ext)?.available }"
+            >
+              <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <span class="text-sm font-medium text-neutral-800 dark:text-neutral-200">
+                    {{ ext.label }}
+                  </span>
+                  <code class="text-[11px] text-neutral-400">{{ ext.id }}</code>
+                  <span
+                    v-if="ext.debugOnly"
+                    class="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
+                    title="Environment-dependent or debug-only — not an ordinary extension."
+                  >
+                    special
+                  </span>
+                  <span
+                    v-if="!ext.available && !downloadable(ext)"
+                    class="glass-inset rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-neutral-500 dark:text-neutral-400"
+                  >
+                    not in this build
+                  </span>
+                  <!-- Downloadable, but not for this PHP branch (yet). -->
+                  <span
+                    v-else-if="!ext.available && !downloadable(ext)?.available"
+                    class="glass-inset rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-neutral-500 dark:text-neutral-400"
+                  >
+                    not available for PHP {{ selectedVersion }} yet
+                  </span>
+                </div>
+                <p class="mt-0.5 truncate text-xs text-neutral-500">{{ ext.description }}</p>
+              </div>
+
+              <!-- Not in the zip, but one verified download away: the row offers
+                   that instead of a toggle with nothing behind it. -->
+              <button
+                v-if="!ext.available && downloadable(ext)?.available"
+                type="button"
+                class="glass-accent shrink-0 rounded-full px-3 py-1 text-xs font-semibold transition disabled:opacity-50"
+                :disabled="store.installingExtension !== null"
+                @click="installExtension(ext)"
+              >
+                {{
+                  store.installingExtension === ext.id
+                    ? 'Installing…'
+                    : `Install ${downloadable(ext)?.version}`
+                }}
+              </button>
+              <button
+                v-else
+                type="button"
+                role="switch"
+                :aria-checked="ext.enabled"
+                :aria-label="ext.label"
+                class="relative h-5 w-9 shrink-0 rounded-full transition disabled:opacity-40"
+                :class="ext.enabled ? 'bg-accent-600' : 'bg-neutral-900/15 dark:bg-white/15'"
+                :disabled="!ext.available || store.togglingExtension !== null"
+                @click="toggle(ext)"
+              >
+                <span
+                  class="absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition"
+                  :class="ext.enabled ? 'left-4.5' : 'left-0.5'"
+                />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <p v-if="groups.length === 0" class="text-sm text-neutral-500">
+          No extension matches "{{ search }}".
+        </p>
+      </div>
+    </template>
+
+    <LicenseConsentModal
+      v-if="licensed.pending.value"
+      :pkg="licensed.pending.value"
+      @confirm="licensed.confirm"
+      @close="licensed.cancel"
+    />
+  </section>
+</template>

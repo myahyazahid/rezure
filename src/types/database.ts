@@ -1,3 +1,5 @@
+import type { ServerKind } from './dbConnection'
+
 export interface DatabaseInfo {
   name: string
   collation: string
@@ -6,7 +8,8 @@ export interface DatabaseInfo {
    *  estimate for InnoDB, not an exact byte count. */
   sizeBytes: number
   /** Domain of the project this database appears to belong to, matched by
-   *  name on the Rust side. `null` when nothing matches. */
+   *  name on the Rust side. `null` when nothing matches, and always null for
+   *  a remote server, where local project folders say nothing about it. */
   usedBy: string | null
 }
 
@@ -15,8 +18,34 @@ export interface DatabaseServerInfo {
   port: number
   user: string
   hasPassword: boolean
-  /** Connection string ready to paste into a client. */
+  /** Connection string ready to paste into a client. Never carries the
+   *  password, even for a remote connection that has one. */
   dsn: string
+  /** True when this is a remote connection rather than the local server. */
+  remote: boolean
+  /** Name of the active connection or profile, to state beside the endpoint. */
+  label: string
+  /** True when writes — create, drop, import — are refused for this target. */
+  readOnly: boolean
+  kind: ServerKind
+  /** False where Export can't work — a SQL Server Rezure doesn't run, whose
+   *  BACKUP would land on that server's own disk. */
+  exportSupported: boolean
+  /** What Import accepts, without the dot: `sql`, plus `bak` on LocalDB. */
+  importExtensions: string[]
+}
+
+/** Emitted on `database://export-progress` while `exportDatabase` runs. See
+ *  `services::database::ExportProgress` on the Rust side. */
+export interface ExportProgress {
+  name: string
+  bytesWritten: number
+  /** A `.sql` dump is text written from the schema's raw storage size, so
+   *  the two rarely match exactly — this is an estimate to divide by, not a
+   *  promise the file will stop growing there. `null` when the size
+   *  couldn't be read, in which case there's nothing to show a percentage
+   *  against. */
+  estimatedTotalBytes: number | null
 }
 
 export interface DbClientInfo {

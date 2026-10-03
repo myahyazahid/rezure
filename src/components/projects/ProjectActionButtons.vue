@@ -1,23 +1,61 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useProjectsStore } from '@/stores/projects'
 
-const props = defineProps<{ projectId: string; domain: string; path: string }>()
+const props = defineProps<{
+  projectId: string
+  domain: string
+  path: string
+  phpVersion: string | null
+  nodeVersion: string | null
+}>()
 
 const store = useProjectsStore()
 
 const ICON_BUTTON_CLASS =
-  'flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-neutral-200 bg-white text-neutral-500 transition hover:border-neutral-300 hover:text-neutral-800 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400 dark:hover:text-neutral-100'
+  'flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition'
+
+/** An icon button whose feature is switched on (a live share, a pinned
+ *  version) stays tinted in the accent colour, so the state is visible without a click. */
+const ON_CLASS =
+  'bg-accent-500/12 text-accent-600 hover:bg-accent-500/20 dark:bg-accent-500/20 dark:text-accent-300 dark:hover:bg-accent-500/30'
+
+// A fixed-size icon button in every state (idle / starting / active) rather
+// than growing into a URL chip when active: this sits in a list row whose
+// Actions column has a fixed width (see ProjectsView.vue), and a chip wide
+// enough for a `trycloudflare.com` URL plus copy/stop buttons overflowed
+// past it into the Domain/Stack columns. The URL itself lives in
+// ProjectShareModal, opened from here instead.
+const isActive = computed(() => Boolean(store.shareUrls[props.projectId]))
+const isStarting = computed(() => store.sharingFor === props.projectId)
+
+function onShareClick() {
+  if (isStarting.value) return
+  if (isActive.value) {
+    store.openShareModal(props.projectId)
+  } else {
+    store.shareProject(props.projectId)
+  }
+}
 </script>
 
 <template>
-  <div class="flex shrink-0 items-center gap-1.5">
+  <!-- One toolbar, like a service row's: Open is the raised primary action and
+       the rest stay bare until hovered, instead of seven bordered bubbles. -->
+  <div class="glass-inset flex shrink-0 items-center gap-0.5 rounded-full p-1">
     <button
       type="button"
-      class="flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-red-600 px-3.5 text-sm font-semibold text-white transition hover:bg-red-500"
+      class="glass-accent flex h-7 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-semibold transition"
       :title="`Open http://${props.domain}`"
       @click="store.openSite(props.projectId)"
     >
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        class="h-3.5 w-3.5"
+      >
         <circle cx="12" cy="12" r="9" />
         <path
           stroke-linecap="round"
@@ -27,13 +65,59 @@ const ICON_BUTTON_CLASS =
       Open
     </button>
 
+    <!-- Neutral like the other icon buttons while idle, filled with the accent once a
+         share is live — the same on/off language as the PHP/Node pin
+         buttons, so an active tunnel is visible without opening the modal. -->
     <button
       type="button"
-      :class="ICON_BUTTON_CLASS"
+      :class="[
+        ICON_BUTTON_CLASS,
+        'disabled:cursor-wait disabled:opacity-70',
+        isActive ? ON_CLASS : 'glass-ghost',
+      ]"
+      :disabled="isStarting"
+      :title="
+        isStarting
+          ? 'Starting share…'
+          : isActive
+            ? 'This project is shared publicly — click for the link'
+            : 'Share this project publicly (Cloudflare Quick Tunnel)'
+      "
+      @click="onShareClick"
+    >
+      <span
+        v-if="isStarting"
+        class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent"
+      />
+      <svg
+        v-else
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        class="h-3.5 w-3.5"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="M12 3v12M12 3l-4 4M12 3l4 4M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"
+        />
+      </svg>
+    </button>
+
+    <button
+      type="button"
+      :class="[ICON_BUTTON_CLASS, 'glass-ghost']"
       :title="`Open ${props.path} in Explorer`"
       @click="store.openFolder(props.projectId)"
     >
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        class="h-3.5 w-3.5"
+      >
         <path
           stroke-linecap="round"
           stroke-linejoin="round"
@@ -47,11 +131,17 @@ const ICON_BUTTON_CLASS =
          yet. -->
     <button
       type="button"
-      :class="ICON_BUTTON_CLASS"
+      :class="[ICON_BUTTON_CLASS, 'glass-ghost']"
       title="Check this project's PHP extension requirements"
       @click="store.runDoctor(props.projectId)"
     >
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        class="h-3.5 w-3.5"
+      >
         <path
           stroke-linecap="round"
           stroke-linejoin="round"
@@ -61,13 +151,78 @@ const ICON_BUTTON_CLASS =
       </svg>
     </button>
 
+    <!-- Pins this project to its own PHP version, distinct from the global
+         Switch — filled (not just outlined) once pinned, so a project
+         running on its own version is visible without opening the modal. -->
     <button
       type="button"
-      :class="ICON_BUTTON_CLASS"
+      :class="[ICON_BUTTON_CLASS, props.phpVersion ? ON_CLASS : 'glass-ghost']"
+      :title="
+        props.phpVersion
+          ? `Pinned to PHP ${props.phpVersion} — click to change`
+          : 'Pin this project to its own PHP version'
+      "
+      @click="store.openPhpVersionModal(props.projectId)"
+    >
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        class="h-3.5 w-3.5"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="M8 4 4 12l4 8M16 4l4 8-4 8M14 4l-4 16"
+        />
+      </svg>
+    </button>
+
+    <!-- Pins this project to its own Node.js version, same shape and
+         behavior as the PHP pin button above — filled once pinned. Unlike
+         the PHP pin, this doesn't start anything of its own; it only
+         changes what a terminal opened from this card resolves node/npm/npx
+         as (see ProjectNodeVersionModal.vue). -->
+    <button
+      type="button"
+      :class="[ICON_BUTTON_CLASS, props.nodeVersion ? ON_CLASS : 'glass-ghost']"
+      :title="
+        props.nodeVersion
+          ? `Pinned to Node.js ${props.nodeVersion} — click to change`
+          : 'Pin this project to its own Node.js version'
+      "
+      @click="store.openNodeVersionModal(props.projectId)"
+    >
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        class="h-3.5 w-3.5"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="M12 2.5 20.5 7.5V16.5L12 21.5 3.5 16.5V7.5Z"
+        />
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v8M12 8 8 10.3M12 8l4 2.3" />
+      </svg>
+    </button>
+
+    <button
+      type="button"
+      :class="[ICON_BUTTON_CLASS, 'glass-ghost']"
       title="Open a terminal in this folder"
       @click="store.openTerminal(props.projectId)"
     >
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        class="h-3.5 w-3.5"
+      >
         <rect x="3" y="4" width="18" height="16" rx="2" />
         <path stroke-linecap="round" stroke-linejoin="round" d="m7 9 3 3-3 3M13 15h4" />
       </svg>

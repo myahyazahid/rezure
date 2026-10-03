@@ -23,16 +23,41 @@ fn reload_nginx_if_running(manager: &ServiceManager) {
 }
 
 /// Brings the vhost files up to date with what's on disk and, when that
-/// actually changed something, makes a running nginx pick it up.
+/// actually changed something, makes a running nginx pick it up. Also
+/// reconciles the pooled PHP services (`ServiceManager::sync_php_pool`)
+/// against whatever versions the current projects pin — unconditionally,
+/// since that's cheap and idempotent even when nothing else changed.
 ///
-/// The `changed` check is what lets this be safe to call from
-/// `list_projects`, which runs on every visit to the Projects page: without
-/// it, simply opening that page would cycle nginx's workers.
+/// Reads each project's PHP version override from SQLite first — a
+/// filesystem scan alone can't know it (see `db::projects::fetch_php_versions`),
+/// and skipping this step would make every pin silently a no-op: every vhost
+/// would keep resolving to the global default port regardless of what it's
+/// pinned to.
+///
+/// `vhosts::sync_vhosts` is handed `ServiceManager::sync_php_pool` itself as
+/// its port resolver, rather than this function computing ports separately —
+/// `ServiceManager` is the only thing that knows which port an
+/// already-registered pooled service is really bound to, so routing every
+/// vhost write through it is what keeps a pinned project's port from ever
+/// drifting out from under its own running `php-cgi` (see
+/// `php_pool::assign_ports`'s doc comment for the bug this fixes).
+///
+/// The `changed` check on the *vhost* reload is what lets this be safe to
+/// call from `list_projects`, which runs on every visit to the Projects
+/// page: without it, simply opening that page would cycle nginx's workers.
 ///
 /// Best-effort throughout — a vhost hiccup should leave a warning in the log,
 /// not fail the command the user actually asked for.
-fn sync_vhosts_and_reload(manager: &ServiceManager, context: &str) {
-    match vhosts::sync_vhosts() {
+pub(crate) fn sync_vhosts_and_reload(manager: &ServiceManager, db_state: &DbState, context: &str) {
+    let php_versions = {
+        let conn = db_state.0.lock().unwrap();
+        db::projects::fetch_php_versions(&conn).unwrap_or_else(|err| {
+            log::warn!("failed to load PHP version overrides {context}: {err}");
+            Default::default()
+        })
+    };
+
+    match vhosts::sync_vhosts(&php_versions, |wanted| manager.sync_php_pool(wanted)) {
         Ok(sync) => {
             if sync.changed {
                 reload_nginx_if_running(manager);
@@ -52,7 +77,7 @@ pub fn list_projects(
     // A folder dropped into `www` by hand shows up in this scan and nowhere
     // else, so this is the only place its vhost gets written — and without
     // the reload nginx would keep 404ing it until its next restart.
-    sync_vhosts_and_reload(&manager, "while listing projects");
+    sync_vhosts_and_reload(&manager, &db_state, "while listing projects");
 
     // Best-effort, same reasoning: a SQLite hiccup shouldn't stop the list
     // from loading, just leave it without history for this call.
@@ -76,8 +101,80 @@ pub fn list_projects(
         }
         Err(err) => log::warn!("failed to load project history: {err}"),
     }
+    match db::projects::fetch_php_versions(&conn) {
+        Ok(versions) => {
+            for project in &mut detected {
+                if let Some(version) = versions.get(&project.id) {
+                    project.php_version = version.clone();
+                }
+            }
+        }
+        Err(err) => log::warn!("failed to load project PHP version overrides: {err}"),
+    }
+    match db::projects::fetch_node_versions(&conn) {
+        Ok(versions) => {
+            for project in &mut detected {
+                if let Some(version) = versions.get(&project.id) {
+                    project.node_version = version.clone();
+                }
+            }
+        }
+        Err(err) => log::warn!("failed to load project Node.js version overrides: {err}"),
+    }
 
     Ok(detected)
+}
+
+/// Pins (or, with `version: null`, clears back to the global default) the
+/// PHP version this one project is served by — see `services::php_pool` for
+/// what that makes possible. Re-syncs the vhosts (and, through it, the PHP
+/// pool) immediately, so the change is live without the user needing to
+/// revisit the Projects page first.
+#[tauri::command]
+pub fn set_project_php_version(
+    id: String,
+    version: Option<String>,
+    db_state: State<'_, DbState>,
+    manager: State<'_, ServiceManager>,
+) -> Result<(), AppError> {
+    let conn = db_state.0.lock().unwrap();
+    db::projects::set_php_version(&conn, &id, version.as_deref())?;
+    drop(conn);
+    sync_vhosts_and_reload(&manager, &db_state, "after setting a project's PHP version");
+    Ok(())
+}
+
+/// Pins (or, with `version: null`, clears back to the global default) the
+/// Node.js version `open_project_terminal` resolves for this one project.
+///
+/// No vhost/nginx resync here, unlike [`set_project_php_version`] — Node
+/// isn't proxied through nginx in this app, so a plain SQLite write is the
+/// whole change; the next "Open terminal" click reads it fresh.
+#[tauri::command]
+pub fn set_project_node_version(
+    id: String,
+    version: Option<String>,
+    db_state: State<'_, DbState>,
+) -> Result<(), AppError> {
+    let conn = db_state.0.lock().unwrap();
+    db::projects::set_node_version(&conn, &id, version.as_deref())?;
+    Ok(())
+}
+
+/// This project's PHP and Node.js version overrides, for
+/// `launcher::open_terminal`. Best-effort: a SQLite hiccup degrades to "no
+/// pin" (the global active version), not a terminal that fails to open.
+fn terminal_pins(db_state: &State<'_, DbState>, id: &str) -> (Option<String>, Option<String>) {
+    let conn = db_state.0.lock().unwrap();
+    let php = db::projects::php_version_for(&conn, id).unwrap_or_else(|err| {
+        log::warn!("failed to load {id}'s PHP version override: {err}");
+        None
+    });
+    let node = db::projects::node_version_for(&conn, id).unwrap_or_else(|err| {
+        log::warn!("failed to load {id}'s Node.js version override: {err}");
+        None
+    });
+    (php, node)
 }
 
 /// Writes every detected project's domain into the OS hosts file, prompting
@@ -94,8 +191,11 @@ pub fn list_projects(
 /// the other leaves the user on a connection-refused page having done
 /// everything the UI asked of them.
 #[tauri::command]
-pub async fn sync_hosts(manager: State<'_, ServiceManager>) -> Result<bool, AppError> {
-    sync_vhosts_and_reload(&manager, "while syncing hosts");
+pub async fn sync_hosts(
+    manager: State<'_, ServiceManager>,
+    db_state: State<'_, DbState>,
+) -> Result<bool, AppError> {
+    sync_vhosts_and_reload(&manager, &db_state, "while syncing hosts");
 
     tokio::task::spawn_blocking(hosts::sync_hosts_entries)
         .await
@@ -122,21 +222,12 @@ pub async fn create_project(
     name: String,
     template: String,
     manager: State<'_, ServiceManager>,
+    db_state: State<'_, DbState>,
 ) -> Result<(), AppError> {
     scaffold::create_project(&name, &template).await?;
     // The new project needs a vhost before it can serve.
-    sync_vhosts_and_reload(&manager, "after creating a project");
+    sync_vhosts_and_reload(&manager, &db_state, "after creating a project");
     Ok(())
-}
-
-#[tauri::command]
-pub fn composer_installed() -> bool {
-    scaffold::composer_installed()
-}
-
-#[tauri::command]
-pub async fn install_composer() -> Result<(), AppError> {
-    scaffold::install_composer().await
 }
 
 /// Best-effort history write — the open itself already succeeded by the
@@ -167,10 +258,13 @@ pub fn open_project_folder(id: String, db_state: State<'_, DbState>) -> Result<(
     Ok(())
 }
 
-/// Opens a terminal in the project folder.
+/// Opens a terminal in the project folder, with this project's effective PHP
+/// and Node.js versions (its own pins, or the global active ones) put first
+/// on the new terminal's `PATH` — see `services::launcher::open_terminal`.
 #[tauri::command]
 pub fn open_project_terminal(id: String, db_state: State<'_, DbState>) -> Result<(), AppError> {
-    launcher::open_terminal(&id)?;
+    let (php_pin, node_pin) = terminal_pins(&db_state, &id);
+    launcher::open_terminal(&id, php_pin.as_deref(), node_pin.as_deref())?;
     mark_opened(&db_state, &id);
     Ok(())
 }
@@ -191,18 +285,23 @@ pub fn link_project(
     name: Option<String>,
     domain: Option<String>,
     manager: State<'_, ServiceManager>,
+    db_state: State<'_, DbState>,
 ) -> Result<(), AppError> {
     projects::link(&path, name, domain)?;
     // The newly linked project needs a vhost before it can serve.
-    sync_vhosts_and_reload(&manager, "after linking");
+    sync_vhosts_and_reload(&manager, &db_state, "after linking");
     Ok(())
 }
 
 /// Forgets a linked project. The folder and everything in it is left
 /// exactly as it was — this only removes Rezure's pointer to it.
 #[tauri::command]
-pub fn unlink_project(id: String, manager: State<'_, ServiceManager>) -> Result<(), AppError> {
+pub fn unlink_project(
+    id: String,
+    manager: State<'_, ServiceManager>,
+    db_state: State<'_, DbState>,
+) -> Result<(), AppError> {
     projects::unlink(&id)?;
-    sync_vhosts_and_reload(&manager, "after unlinking");
+    sync_vhosts_and_reload(&manager, &db_state, "after unlinking");
     Ok(())
 }

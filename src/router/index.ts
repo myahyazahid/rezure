@@ -4,10 +4,15 @@ import DashboardView from '../views/DashboardView.vue'
 import ProjectsView from '../views/ProjectsView.vue'
 import DatabasesView from '../views/DatabasesView.vue'
 import SwitchView from '../views/SwitchView.vue'
+import PhpExtensionsView from '../views/PhpExtensionsView.vue'
 import LogsView from '../views/LogsView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import SupportView from '../views/SupportView.vue'
 import ChangelogView from '../views/ChangelogView.vue'
+import SupportDeveloperView from '../views/SupportDeveloperView.vue'
+import AppearanceView from '../views/AppearanceView.vue'
+import DecorationsView from '../views/DecorationsView.vue'
+import AboutView from '../views/AboutView.vue'
 
 // Imported eagerly rather than as `() => import(...)`. Code-splitting pays off
 // when chunks travel over a network and most users never open most routes —
@@ -38,6 +43,11 @@ const router = createRouter({
       component: SwitchView,
     },
     {
+      path: '/php-extensions',
+      name: 'php-extensions',
+      component: PhpExtensionsView,
+    },
+    {
       path: '/logs',
       name: 'logs',
       component: LogsView,
@@ -56,6 +66,26 @@ const router = createRouter({
       path: '/changelog',
       name: 'changelog',
       component: ChangelogView,
+    },
+    {
+      path: '/donate',
+      name: 'donate',
+      component: SupportDeveloperView,
+    },
+    {
+      path: '/appearance',
+      name: 'appearance',
+      component: AppearanceView,
+    },
+    {
+      path: '/decorations',
+      name: 'decorations',
+      component: DecorationsView,
+    },
+    {
+      path: '/about',
+      name: 'about',
+      component: AboutView,
     },
   ],
 })

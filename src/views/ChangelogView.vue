@@ -3,8 +3,10 @@ import { computed, onActivated, ref, useTemplateRef } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { useChangelogStore } from '@/stores/changelog'
+import { useUpdateStore } from '@/stores/update'
 
 const store = useChangelogStore()
+const updateStore = useUpdateStore()
 
 const PAGE_SIZE = 10
 const page = ref(1)
@@ -16,6 +18,12 @@ onActivated(async () => {
   page.value = 1
   await store.fetchAll()
   await store.markSeen()
+  await Promise.all([updateStore.checkForUpdate(), updateStore.fetchUpgradeNotice()])
+})
+
+const updateProgressPercent = computed(() => {
+  if (updateStore.totalBytes === null || updateStore.totalBytes === 0) return null
+  return Math.min(100, Math.round((updateStore.downloadedBytes / updateStore.totalBytes) * 100))
 })
 
 function renderBody(markdown: string): string {
@@ -58,28 +66,80 @@ function goToPage(next: number) {
     </h1>
     <p class="mt-1 text-sm text-neutral-500">What's new in Rezure, release by release.</p>
 
+    <p v-if="updateStore.checking" class="mt-3 text-xs text-neutral-400">Checking for updates…</p>
+
+    <div
+      v-else-if="updateStore.available"
+      class="mt-4 rounded-2xl border border-accent-300/60 bg-accent-100/50 p-4 dark:border-accent-500/20 dark:bg-accent-500/10"
+    >
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <p class="text-sm font-semibold text-accent-900 dark:text-accent-200">
+          Rezure {{ updateStore.available.version }} is available
+        </p>
+        <button
+          type="button"
+          class="glass-accent shrink-0 rounded-full px-4 py-1.5 text-sm font-semibold transition disabled:opacity-60"
+          :disabled="updateStore.downloading"
+          @click="updateStore.downloadAndApply()"
+        >
+          {{ updateStore.downloading ? 'Downloading…' : 'Update' }}
+        </button>
+      </div>
+
+      <div
+        v-if="updateStore.downloading"
+        class="mt-3 h-1.5 overflow-hidden rounded-full bg-accent-500/15 dark:bg-accent-900/40"
+      >
+        <div
+          class="h-full rounded-full bg-linear-to-r from-accent-500 to-accent-alt transition-all"
+          :class="updateProgressPercent === null ? 'w-1/3 animate-pulse' : ''"
+          :style="
+            updateProgressPercent !== null ? { width: `${updateProgressPercent}%` } : undefined
+          "
+        ></div>
+      </div>
+
+      <p v-if="updateStore.downloadError" class="mt-3 text-xs text-red-700 dark:text-red-300">
+        {{ updateStore.downloadError }}
+      </p>
+    </div>
+
+    <!-- A newer major line: a pointer to the website, never an in-app update. -->
+    <div v-if="updateStore.upgradeNotice" class="glass mt-4 rounded-2xl p-4">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="min-w-0">
+          <p class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+            Rezure v{{ updateStore.upgradeNotice.major }} is out
+          </p>
+          <p class="mt-0.5 text-sm text-neutral-600 dark:text-neutral-400">
+            {{ updateStore.upgradeNotice.message }}
+          </p>
+        </div>
+        <button
+          type="button"
+          class="glass-btn shrink-0 rounded-full px-4 py-1.5 text-sm font-semibold text-neutral-700 transition dark:text-neutral-200"
+          @click="updateStore.openUpgradeNotice()"
+        >
+          Learn more
+        </button>
+      </div>
+    </div>
+
     <p v-if="store.loading && !hasEntries" class="mt-6 text-sm text-neutral-500">Loading…</p>
 
-    <p
-      v-else-if="!hasEntries"
-      class="mt-6 rounded-2xl border border-neutral-200 bg-white p-5 text-sm text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900/60"
-    >
+    <p v-else-if="!hasEntries" class="glass mt-6 rounded-2xl p-5 text-sm text-neutral-500">
       No changelog entries yet.
     </p>
 
     <div v-else class="mt-5 space-y-2.5">
-      <article
-        v-for="entry in pagedEntries"
-        :key="entry.version"
-        class="rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/60"
-      >
+      <article v-for="entry in pagedEntries" :key="entry.version" class="glass rounded-2xl p-4">
         <div class="flex flex-wrap items-baseline justify-between gap-2">
           <h2 class="font-semibold text-neutral-900 dark:text-neutral-100">
             {{ entry.title }}
           </h2>
           <div class="flex items-center gap-2 text-xs text-neutral-500">
             <span
-              class="rounded-full bg-red-50 px-2 py-0.5 font-mono font-semibold text-red-600 dark:bg-red-500/10 dark:text-red-400"
+              class="rounded-full bg-accent-500/10 px-2 py-0.5 font-mono font-semibold text-accent-600 dark:bg-accent-500/10 dark:text-accent-400"
             >
               v{{ entry.version }}
             </span>
@@ -98,7 +158,7 @@ function goToPage(next: number) {
     <div v-if="hasEntries && totalPages > 1" class="mt-4 flex items-center justify-between gap-3">
       <button
         type="button"
-        class="rounded-full border border-neutral-200 bg-white/70 px-4 py-1.5 text-sm font-semibold text-neutral-700 transition hover:bg-white disabled:opacity-40 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
+        class="glass-btn rounded-full px-4 py-1.5 text-sm font-semibold text-neutral-700 transition disabled:opacity-40 dark:text-neutral-200"
         :disabled="currentPage === 1"
         @click="goToPage(currentPage - 1)"
       >
@@ -107,7 +167,7 @@ function goToPage(next: number) {
       <span class="text-xs text-neutral-500">Page {{ currentPage }} of {{ totalPages }}</span>
       <button
         type="button"
-        class="rounded-full border border-neutral-200 bg-white/70 px-4 py-1.5 text-sm font-semibold text-neutral-700 transition hover:bg-white disabled:opacity-40 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
+        class="glass-btn rounded-full px-4 py-1.5 text-sm font-semibold text-neutral-700 transition disabled:opacity-40 dark:text-neutral-200"
         :disabled="currentPage === totalPages"
         @click="goToPage(currentPage + 1)"
       >
@@ -157,17 +217,20 @@ function goToPage(next: number) {
 }
 .changelog-body :deep(code) {
   border-radius: 0.25rem;
-  background: rgba(115, 115, 115, 0.15);
+  border: 1px solid var(--glass-inset-border);
+  background: var(--glass-inset-bg);
   padding: 0.1em 0.35em;
   font-size: 0.85em;
 }
 .changelog-body :deep(pre) {
   overflow-x: auto;
   border-radius: 0.5rem;
-  background: rgba(115, 115, 115, 0.15);
+  border: 1px solid var(--glass-inset-border);
+  background: var(--glass-inset-bg);
   padding: 0.75em;
 }
 .changelog-body :deep(pre code) {
+  border: none;
   background: none;
   padding: 0;
 }

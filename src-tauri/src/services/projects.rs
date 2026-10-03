@@ -68,6 +68,19 @@ pub fn scan_projects() -> Result<Vec<ProjectInfo>, AppError> {
     Ok(projects)
 }
 
+/// Re-resolves `id` against a fresh scan.
+///
+/// Every caller that only ever received a project *id* from the frontend
+/// (`services::launcher`, `services::share`) goes through this rather than
+/// trusting a domain or path passed in alongside it — the scan is the one
+/// source of truth for what a project's real domain is right now.
+pub fn find(id: &str) -> Result<ProjectInfo, AppError> {
+    scan_projects()?
+        .into_iter()
+        .find(|project| project.id == id)
+        .ok_or_else(|| AppError::ProjectNotFound(id.to_string()))
+}
+
 /// The linked folders, skipping any that duplicate a domain already taken
 /// by a scanned project.
 ///
@@ -114,6 +127,11 @@ fn linked_projects(scanned: &[ProjectInfo]) -> Vec<ProjectInfo> {
             open_count: 0,
             kind: ProjectKind::Linked,
             missing,
+            // Filled in by `commands::projects::list_projects` from SQLite,
+            // same as `last_opened_at`/`open_count` — a scan has no opinion
+            // on PHP version.
+            php_version: None,
+            node_version: None,
         });
     }
     projects
@@ -165,6 +183,10 @@ fn scan_www() -> Result<Vec<ProjectInfo>, AppError> {
             // A scanned project is a folder that was just read, so it's
             // there by definition.
             missing: false,
+            // Filled in by `commands::projects::list_projects` from SQLite —
+            // a bare scan has no way to know this either.
+            php_version: None,
+            node_version: None,
         });
     }
 

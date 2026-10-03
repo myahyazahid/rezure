@@ -9,9 +9,10 @@
 //!
 //! Rezure writes two copies, because PHP gets started two different ways:
 //!
-//! - [`ensure_php_ini`] writes one under Rezure's own data folder and
-//!   returns its path to pass as `php -c` — that covers every process
-//!   Rezure spawns itself (the FastCGI service, Composer, scaffolding).
+//! - [`ensure_php_ini`] writes one under Rezure's own data folder — one per
+//!   PHP install, since several versions can now run at once — and returns
+//!   its path to pass as `php -c`. That covers every process Rezure spawns
+//!   itself (the FastCGI services, Composer, scaffolding).
 //! - [`ensure_cli_php_ini`] writes one *inside the install folder*, which
 //!   is the only copy a `php artisan …` typed into the user's own terminal
 //!   will ever read. `-c` isn't in play there: the global PATH switch
@@ -26,45 +27,26 @@
 //! existed there was no edit a user could make that both survived a start
 //! and reached a web request. `PHP_INI_SCAN_DIR` gives them one.
 
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
+use super::{ca_bundle, php, php_ext_toggle, php_path};
 use crate::utils::error::AppError;
 use crate::utils::paths;
 
-/// Enabled for every PHP process Rezure spawns — the FastCGI service
-/// (`services::process`) and Composer/scaffolding (`services::scaffold`) —
-/// and for the `php` on the user's PATH.
-const EXTENSIONS: &[&str] = &[
-    "curl",
-    "fileinfo",
-    "gd",
-    // Every modern Laravel stack that touches formatting or localisation
-    // wants this — Filament hard-requires `ext-intl`, and a project that
-    // needs it and doesn't have it fails as a blank 500 with the reason
-    // buried in `laravel.log`, which is the worst shape a missing default
-    // can take. The official Windows zip already carries both the DLL and
-    // the ICU libraries it links against, so enabling it costs nothing that
-    // isn't already on disk.
-    "intl",
-    "mbstring",
-    "mysqli",
-    "openssl",
-    "pdo_mysql",
-    // Laravel 11's default `.env` uses SQLite (a local file, no server
-    // needed) until a project's config points it at MariaDB instead.
-    "pdo_sqlite",
-    // Not in the official zip — `services::php_ext` installs it on request.
-    // Listed here so that the moment its DLL lands in a version's `ext/`, the
-    // generated ini turns it on by itself; versions without it are unaffected,
-    // since every name here is filtered against what's really on disk.
-    "redis",
-    "sqlite3",
-    "zip",
-];
+/// The two directives that name the CA bundle — one per TLS stack PHP has.
+/// `curl.cainfo` covers ext/curl (Guzzle, Laravel's Http client);
+/// `openssl.cafile` covers the stream wrappers (`file_get_contents("https://…")`).
+const CA_DIRECTIVES: [&str; 2] = ["curl.cainfo", "openssl.cafile"];
 
-/// The CA bundle's name inside [`paths::etc`].
-const CA_BUNDLE_FILE: &str = "cacert.pem";
+/// The environment variable OpenSSL reads its config file's path from.
+///
+/// Set only on processes Rezure spawns, never machine-wide the way
+/// [`SCAN_DIR_ENV`] is: every other OpenSSL-linked tool on the machine (Git,
+/// for one) reads the same variable, and would be handed PHP's config.
+pub const OPENSSL_CONF_ENV: &str = "OPENSSL_CONF";
 
 /// The environment variable PHP reads to find *extra* ini files, on top of
 /// whichever one it was told to load.
@@ -73,6 +55,19 @@ const CA_BUNDLE_FILE: &str = "cacert.pem";
 /// sets it machine-wide when the PATH switch is on, so the user's own
 /// terminal reads the same folder.
 pub const SCAN_DIR_ENV: &str = "PHP_INI_SCAN_DIR";
+
+/// Upload/POST size limit, in megabytes, written into the generated php.ini
+/// as both `upload_max_filesize` and `post_max_size`. Shared with
+/// [`super::vhosts`], which sets nginx's `client_max_body_size` to the same
+/// value — nginx otherwise defaults to 1 MB and rejects anything larger
+/// with a 413 before PHP ever sees the request.
+pub const BODY_SIZE_LIMIT_MB: u32 = 64;
+
+/// `max_execution_time` written into the generated php.ini. Shared with
+/// [`super::vhosts`], which uses it for nginx's FastCGI timeouts — nginx
+/// otherwise gives up on a slow script after 60s, well before PHP itself
+/// would have stopped it.
+pub const MAX_EXECUTION_TIME_SECS: u32 = 300;
 
 /// Dropped into [`conf_d`] the first time it's created. Not an `.ini`, so
 /// PHP never tries to parse it.
@@ -115,14 +110,32 @@ fn ensure_tmp_dir() -> Result<PathBuf, AppError> {
     Ok(tmp)
 }
 
-/// The CA bundle both TLS stacks get pointed at, when one is installed.
-///
-/// It lives in `etc/` rather than beside a PHP build because it is not a
-/// property of any one version: a bundle installed once has to keep working
-/// across a version switch, and both copies of the ini name the same file.
+/// The CA bundle both TLS stacks get pointed at, when one is installed —
+/// see [`super::ca_bundle`] for how it gets there.
 fn ca_bundle() -> Option<PathBuf> {
-    let path = paths::etc().ok()?.join(CA_BUNDLE_FILE);
-    path.is_file().then_some(path)
+    ca_bundle::installed()
+}
+
+/// `extras/ssl/openssl.cnf` inside a PHP install, which the official zip
+/// ships for exactly this purpose. Without it, OpenSSL on Windows looks for
+/// a config under `C:\Program Files\Common Files\SSL` that is never there,
+/// and `openssl_pkey_new()`/`openssl_csr_new()` fail — key generation in
+/// packages like web-push or some JWT libraries.
+fn openssl_conf(php_dir: &Path) -> Option<PathBuf> {
+    let conf = php_dir.join("extras").join("ssl").join("openssl.cnf");
+    conf.is_file().then_some(conf)
+}
+
+/// The environment every PHP process Rezure spawns runs with, so the
+/// FastCGI service, Composer and the requirements check can never disagree
+/// about their configuration: the user's [`conf_d`], and the OpenSSL config
+/// of the install `php_exe` belongs to (see [`OPENSSL_CONF_ENV`]).
+pub fn apply_process_env(cmd: &mut Command, php_exe: &Path) -> Result<(), AppError> {
+    cmd.env(SCAN_DIR_ENV, ensure_conf_d()?);
+    if let Some(conf) = php_exe.parent().and_then(openssl_conf) {
+        cmd.env(OPENSSL_CONF_ENV, conf);
+    }
+    Ok(())
 }
 
 /// The one folder a user's own PHP settings live in.
@@ -165,13 +178,51 @@ pub fn ensure_conf_d() -> Result<PathBuf, AppError> {
     Ok(dir)
 }
 
+/// [`SCAN_DIR_ENV`] for a terminal Rezure opens for a project: the value
+/// Rezure itself inherited, with [`conf_d`] appended when it isn't already
+/// in it.
+///
+/// Without it, `php` in that terminal reads only the ini beside `php.exe`,
+/// which leaves out whatever the user enabled in `conf.d` (see [`render`]),
+/// so the terminal and the site would disagree about which extensions are
+/// loaded — unless the PATH switch happens to be on, which sets the same
+/// variable machine-wide. Appended rather than replaced for the reason
+/// [`super::php_path`] gives: another tool may already be using it.
+pub fn terminal_scan_dir() -> Result<OsString, AppError> {
+    let conf_d = ensure_conf_d()?;
+    Ok(scan_dir_with(
+        std::env::var_os(SCAN_DIR_ENV).as_deref(),
+        &conf_d,
+    ))
+}
+
+fn scan_dir_with(current: Option<&OsStr>, conf_d: &Path) -> OsString {
+    let mut dirs: Vec<PathBuf> = current
+        .map(|value| {
+            std::env::split_paths(value)
+                .filter(|dir| !dir.as_os_str().is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let wanted = conf_d.display().to_string();
+    if !dirs
+        .iter()
+        .any(|dir| php_path::same_dir(&dir.display().to_string(), &wanted))
+    {
+        dirs.push(conf_d.to_path_buf());
+    }
+    std::env::join_paths(dirs).unwrap_or_else(|_| conf_d.as_os_str().to_owned())
+}
+
 /// `<php dir>/ext`, the folder the extension DLLs actually live in.
 fn extension_dir(php_dir: &Path) -> PathBuf {
     php_dir.join("ext")
 }
 
-/// Which of [`EXTENSIONS`] this particular build actually ships, as the
-/// names its `extension=` lines have to use.
+/// Which of `wanted` (ids from [`php_ext_toggle`] — its defaults, adjusted by
+/// whatever the user toggled for this version) this particular build
+/// actually ships, as the names its `extension=` lines have to use.
 ///
 /// Enabling one whose DLL isn't there makes PHP print a startup warning on
 /// *every* invocation — noise on the CLI, and bytes ahead of the response
@@ -180,13 +231,14 @@ fn extension_dir(php_dir: &Path) -> PathBuf {
 /// `php_gd2.dll` before 8.0 renamed it — hence the `<name>2` fallback.
 ///
 /// An `ext/` folder that isn't there to look in (a version mid-install)
-/// falls back to the full list, which is what this did before it checked.
-fn enabled_extensions(extension_dir: &Path) -> Vec<String> {
+/// falls back to `wanted` unfiltered, which is what this did before it
+/// checked.
+fn enabled_extensions(extension_dir: &Path, wanted: &[&str]) -> Vec<String> {
     if !extension_dir.is_dir() {
-        return EXTENSIONS.iter().map(|e| e.to_string()).collect();
+        return wanted.iter().map(|e| e.to_string()).collect();
     }
 
-    EXTENSIONS
+    wanted
         .iter()
         .filter_map(|name| {
             [name.to_string(), format!("{name}2")]
@@ -194,6 +246,33 @@ fn enabled_extensions(extension_dir: &Path) -> Vec<String> {
                 .find(|candidate| extension_dir.join(format!("php_{candidate}.dll")).is_file())
         })
         .collect()
+}
+
+/// Maps a PHP install's folder back to the version id [`php_ext_toggle`]'s
+/// per-version state is keyed by (`services::php`'s scan-based ids), so the
+/// extensions a start enables can follow that version's own toggle choices
+/// without every caller having to carry the version alongside the path it
+/// already has.
+///
+/// `None` for a folder that isn't a currently-discovered install — a version
+/// removed mid-run, or a test's fake path — in which case [`wanted_extensions`]
+/// falls back to the plain defaults, same as before per-version toggles
+/// existed.
+fn version_for(php_dir: &Path) -> Option<String> {
+    php::installed()
+        .into_iter()
+        .find(|runtime| runtime.dir == php_dir)
+        .map(|runtime| runtime.version)
+}
+
+/// The extension ids a start of the PHP install at `php_dir` should turn on
+/// — resolved per-version through [`php_ext_toggle::enabled_ids`] when the
+/// folder maps to a known install, or the plain defaults otherwise.
+fn wanted_extensions(php_dir: &Path) -> Vec<&'static str> {
+    match version_for(php_dir) {
+        Some(version) => php_ext_toggle::enabled_ids(&version),
+        None => php_ext_toggle::default_ids(),
+    }
 }
 
 /// Extension names the user's own `conf.d` fragments already enable.
@@ -206,7 +285,8 @@ fn enabled_extensions(extension_dir: &Path) -> Vec<String> {
 ///
 /// Both spellings PHP accepts are recognised, since a fragment copied out of
 /// an old php.ini says `extension=php_intl.dll` where a modern one says
-/// `extension=intl`.
+/// `extension=intl`. `zend_extension=` (OPcache's directive) counts too —
+/// tried first, since it ends in the same word `extension` would also match.
 fn user_enabled_extensions(conf_d: &Path) -> Vec<String> {
     let Ok(entries) = fs::read_dir(conf_d) else {
         return Vec::new();
@@ -222,7 +302,10 @@ fn user_enabled_extensions(conf_d: &Path) -> Vec<String> {
                 .lines()
                 .map(str::trim)
                 .filter(|line| !line.starts_with(';'))
-                .filter_map(|line| line.strip_prefix("extension"))
+                .filter_map(|line| {
+                    line.strip_prefix("zend_extension")
+                        .or_else(|| line.strip_prefix("extension"))
+                })
                 .filter_map(|rest| rest.trim_start().strip_prefix('='))
                 .map(|value| {
                     value
@@ -243,7 +326,13 @@ fn user_enabled_extensions(conf_d: &Path) -> Vec<String> {
 /// the *working directory* of whatever invoked it, so `php artisan` run
 /// from a project folder would look for the DLLs under that project, find
 /// none, and load no extensions at all.
-fn render(extension_dir: &Path, tmp: &Path, ca_bundle: Option<&Path>, conf_d: &Path) -> String {
+fn render(
+    extension_dir: &Path,
+    tmp: &Path,
+    ca_bundle: Option<&Path>,
+    conf_d: &Path,
+    wanted: &[&str],
+) -> String {
     // Not decoration: this file is regenerated under the user's feet, so the
     // one thing it owes whoever opens it is where their own settings go.
     let mut ini = format!(
@@ -261,16 +350,26 @@ fn render(extension_dir: &Path, tmp: &Path, ca_bundle: Option<&Path>, conf_d: &P
     // enabling it here too would only earn an "already loaded" warning on
     // every start.
     let user_enabled = user_enabled_extensions(conf_d);
-    for extension in enabled_extensions(extension_dir) {
+    for extension in enabled_extensions(extension_dir, wanted) {
         if user_enabled.contains(&extension.to_lowercase()) {
             continue;
         }
-        ini.push_str(&format!("extension={extension}\n"));
+        // Only OPcache needs this: it hooks the engine itself, so PHP only
+        // recognizes it behind `zend_extension=`. The resolved name — not
+        // `wanted`'s original id — is looked up so a suffix variant like
+        // `gd`'s `gd2` (which isn't in the catalog under that spelling)
+        // still falls through to the plain directive, correctly.
+        let directive = if php_ext_toggle::find(&extension).is_some_and(|m| m.zend_extension) {
+            "zend_extension"
+        } else {
+            "extension"
+        };
+        ini.push_str(&format!("{directive}={extension}\n"));
     }
     ini.push_str("memory_limit = 256M\n");
-    ini.push_str("upload_max_filesize = 64M\n");
-    ini.push_str("post_max_size = 64M\n");
-    ini.push_str("max_execution_time = 300\n");
+    ini.push_str(&format!("upload_max_filesize = {BODY_SIZE_LIMIT_MB}M\n"));
+    ini.push_str(&format!("post_max_size = {BODY_SIZE_LIMIT_MB}M\n"));
+    ini.push_str(&format!("max_execution_time = {MAX_EXECUTION_TIME_SECS}\n"));
     // Without buffering, any stray byte a project emits before its
     // response — a space after a `?>`, a BOM, a warning — flushes PHP's
     // header block early, and every `header()`/`setcookie()` after that is
@@ -290,18 +389,23 @@ fn render(extension_dir: &Path, tmp: &Path, ca_bundle: Option<&Path>, conf_d: &P
     // cannot verify any certificate at all: every outbound HTTPS call dies
     // with "cURL error 60: unable to get local issuer certificate". That is
     // not a niche path, it is Composer, Laravel's Http client and every API
-    // a project talks to. Both stacks are named because they are separate:
-    // curl.cainfo covers ext/curl, openssl.cafile covers the stream
-    // wrappers, so file_get_contents("https://...") verifies too.
+    // a project talks to. Both stacks are named because they are separate —
+    // see `CA_DIRECTIVES`.
     //
     // Written only when the bundle is really on disk: a cainfo naming a
     // file that is not there is a failure of its own, and a worse one to
     // read than the default.
     if let Some(bundle) = ca_bundle {
-        ini.push_str(&format!("curl.cainfo = \"{}\"\n", ini_value(bundle)));
-        ini.push_str(&format!("openssl.cafile = \"{}\"\n", ini_value(bundle)));
+        for directive in CA_DIRECTIVES {
+            ini.push_str(&ca_line(directive, bundle));
+            ini.push('\n');
+        }
     }
     ini
+}
+
+fn ca_line(directive: &str, bundle: &Path) -> String {
+    format!("{directive} = \"{}\"", ini_value(bundle))
 }
 
 /// Writes Rezure's `php.ini` for the PHP install at `php_exe`, pointing
@@ -311,29 +415,68 @@ fn render(extension_dir: &Path, tmp: &Path, ca_bundle: Option<&Path>, conf_d: &P
 /// location, nothing in it is meant to be hand-edited, and this keeps it
 /// correct if the PHP version ever changes.
 pub fn ensure_php_ini(php_exe: &Path) -> Result<PathBuf, AppError> {
-    let dir = runtime_dir()?;
-    fs::create_dir_all(&dir)
-        .map_err(|e| AppError::Io(format!("could not create {}: {e}", dir.display())))?;
-
-    let tmp = ensure_tmp_dir()?;
-
     let php_dir = php_exe
         .parent()
         .ok_or_else(|| AppError::Io("php.exe has no parent directory".to_string()))?;
 
+    let dir = generated_ini_dir(php_dir)?;
+    fs::create_dir_all(&dir)
+        .map_err(|e| AppError::Io(format!("could not create {}: {e}", dir.display())))?;
+
+    let tmp = ensure_tmp_dir()?;
+    let content = render(
+        &extension_dir(php_dir),
+        &tmp,
+        ca_bundle().as_deref(),
+        &ensure_conf_d()?,
+        &wanted_extensions(php_dir),
+    );
+
     let ini_path = dir.join("php.ini");
-    fs::write(
-        &ini_path,
-        render(
-            &extension_dir(php_dir),
-            &tmp,
-            ca_bundle().as_deref(),
-            &ensure_conf_d()?,
-        ),
-    )
-    .map_err(|e| AppError::Io(format!("could not write {}: {e}", ini_path.display())))?;
+    // Skipped when unchanged: rewriting truncates the file first, and another
+    // process of this same install (Composer, the doctor) may be reading it
+    // at that moment.
+    if fs::read_to_string(&ini_path).ok().as_deref() != Some(content.as_str()) {
+        fs::write(&ini_path, content)
+            .map_err(|e| AppError::Io(format!("could not write {}: {e}", ini_path.display())))?;
+    }
 
     Ok(ini_path)
+}
+
+/// The folder holding the generated ini for the install at `php_dir`.
+///
+/// One per install, not one shared file: `extension_dir` names that install's
+/// own `ext/`, and pooled versions (`services::php_pool`) start side by side.
+/// With a single file, PHP 7.4 starting a moment after PHP 8.5 wrote it read
+/// 8.5's `extension_dir`, failed to load `php_openssl.dll` built for another
+/// ABI, and served `openssl_cipher_iv_length()` as undefined.
+///
+/// Keyed by folder name plus a hash of the full path, since the managed and
+/// drop-in roots can each hold a folder with the same version name.
+fn generated_ini_dir(php_dir: &Path) -> Result<PathBuf, AppError> {
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    php_dir.hash(&mut hasher);
+
+    let name: String = php_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("php")
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+
+    Ok(runtime_dir()?
+        .join("ini")
+        .join(format!("{name}-{:016x}", hasher.finish())))
 }
 
 /// Writes `php.ini` into a PHP install folder, so the `php` a user types
@@ -344,7 +487,8 @@ pub fn ensure_php_ini(php_exe: &Path) -> Result<PathBuf, AppError> {
 /// Never overwritten wholesale: this file sits in a folder the user can open,
 /// and a hand-tuned ini (a raised `memory_limit`, an extra extension, Xdebug)
 /// is theirs to keep. Only `extension_dir` is corrected, by
-/// [`repair_extension_dir`].
+/// [`repair_extension_dir`], and the CA bundle lines by
+/// [`repair_ca_directives`].
 ///
 /// That correction exists because the obvious assumption turned out to be
 /// wrong. This ini sits beside the very `php.exe` it configures, so its
@@ -355,8 +499,11 @@ pub fn ensure_php_ini(php_exe: &Path) -> Result<PathBuf, AppError> {
 pub fn ensure_cli_php_ini(php_dir: &Path) -> Result<Option<PathBuf>, AppError> {
     let ini_path = php_dir.join("php.ini");
     if ini_path.exists() {
-        // Present, but not necessarily still correct — see below.
-        return repair_extension_dir(php_dir).map(|repaired| repaired.then_some(ini_path));
+        // Present, but not necessarily still correct — see below. Both
+        // repairs run; neither result short-circuits the other.
+        let extension_dir_repaired = repair_extension_dir(php_dir)?;
+        let ca_repaired = repair_ca_directives(php_dir)?;
+        return Ok((extension_dir_repaired || ca_repaired).then_some(ini_path));
     }
 
     let tmp = ensure_tmp_dir()?;
@@ -367,6 +514,7 @@ pub fn ensure_cli_php_ini(php_dir: &Path) -> Result<Option<PathBuf>, AppError> {
             &tmp,
             ca_bundle().as_deref(),
             &ensure_conf_d()?,
+            &wanted_extensions(php_dir),
         ),
     )
     .map_err(|e| AppError::Io(format!("could not write {}: {e}", ini_path.display())))?;
@@ -484,14 +632,84 @@ pub fn repair_extension_dir(php_dir: &Path) -> Result<bool, AppError> {
     Ok(true)
 }
 
+/// Points an install's own `php.ini` at the CA bundle, so `php artisan` in a
+/// terminal verifies HTTPS the same way a web request does. Reports whether
+/// the file changed.
+///
+/// Needed because [`ensure_cli_php_ini`] writes this file once and then
+/// leaves it alone: every version installed before a bundle existed was
+/// written without these lines and would never get them — a queue worker or
+/// `tinker` session calling an API hits cURL error 60 while the same code
+/// served over the web works.
+///
+/// Only the two [`CA_DIRECTIVES`] are touched, the rest of the file may be
+/// the user's own. A directive already naming a file that exists is left
+/// as it is, whether that's Rezure's bundle or a corporate one the user
+/// chose; one naming a missing file (a moved Rezure home, a deleted bundle)
+/// is repointed, and a missing directive is appended.
+pub fn repair_ca_directives(php_dir: &Path) -> Result<bool, AppError> {
+    match ca_bundle() {
+        Some(bundle) => repair_ca_directives_to(php_dir, &bundle),
+        // Nothing to point at — a line naming a missing file is worse than
+        // none (see `render`).
+        None => Ok(false),
+    }
+}
+
+fn repair_ca_directives_to(php_dir: &Path, bundle: &Path) -> Result<bool, AppError> {
+    let ini_path = php_dir.join("php.ini");
+    let Ok(existing) = fs::read_to_string(&ini_path) else {
+        return Ok(false);
+    };
+
+    let mut lines: Vec<String> = existing.lines().map(str::to_string).collect();
+    let mut changed = false;
+    for directive in CA_DIRECTIVES {
+        let declared = lines
+            .iter()
+            .enumerate()
+            .find_map(|(i, line)| directive_value(line, directive).map(|value| (i, value)));
+        match declared {
+            Some((_, value)) if Path::new(value).is_file() => {}
+            Some((i, _)) => {
+                lines[i] = ca_line(directive, bundle);
+                changed = true;
+            }
+            None => {
+                lines.push(ca_line(directive, bundle));
+                changed = true;
+            }
+        }
+    }
+    if !changed {
+        return Ok(false);
+    }
+
+    fs::write(&ini_path, format!("{}\n", lines.join("\n")))
+        .map_err(|e| AppError::Io(format!("could not write {}: {e}", ini_path.display())))?;
+    log::info!("pointed {} at the CA bundle", ini_path.display());
+    Ok(true)
+}
+
+/// The value an active (not commented-out) `directive = value` line sets,
+/// unquoted. `None` for any other line, including a longer directive that
+/// merely starts with the same name.
+fn directive_value<'a>(line: &'a str, directive: &str) -> Option<&'a str> {
+    let line = line.trim();
+    if line.starts_with(';') {
+        return None;
+    }
+    let value = line.strip_prefix(directive)?.trim_start();
+    let value = value.strip_prefix('=')?.trim();
+    Some(value.trim_matches('"').trim())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// `ensure_php_ini` writes one fixed path by design, so every test that
-    /// calls it has to take a turn: run in parallel, one test reads the file
-    /// while another is still writing it and sees a truncated ini. The failure
-    /// looks like a missing extension, which is a lie about the code.
+    /// Tests that touch the shared `conf.d` take turns: one test's fragment
+    /// would otherwise change what another test's generated ini leaves out.
     fn ini_guard() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
         LOCK.get_or_init(|| std::sync::Mutex::new(()))
@@ -586,7 +804,7 @@ mod tests {
         // out of this file - see `user_enabled_extensions`. The rule is
         // "enabled somewhere", not "enabled here".
         let user_enabled = user_enabled_extensions(&conf_d().unwrap());
-        for extension in EXTENSIONS {
+        for extension in php_ext_toggle::default_ids() {
             assert!(
                 content.contains(&format!("extension={extension}"))
                     || user_enabled.contains(&extension.to_lowercase()),
@@ -596,8 +814,7 @@ mod tests {
         assert!(content.contains("extension_dir"));
         assert!(!content.contains('\\'), "paths must use forward slashes");
 
-        // Both tests write the same php.ini, so neither owns the cleanup.
-        let _ = fs::remove_file(&ini_path);
+        let _ = fs::remove_dir_all(ini_path.parent().unwrap());
     }
     /// The one directive a Laragon-era project silently depends on: without
     /// it, a stray byte before the response drops `Set-Cookie` and logins
@@ -623,8 +840,7 @@ mod tests {
         }
         assert!(tmp.is_dir(), "the temp dir php.ini points at must exist");
 
-        // Both tests write the same php.ini, so neither owns the cleanup.
-        let _ = fs::remove_file(&ini_path);
+        let _ = fs::remove_dir_all(ini_path.parent().unwrap());
     }
 
     /// The regression this guards: the PATH switch exposes the install
@@ -668,7 +884,7 @@ mod tests {
             fs::write(ext.join(dll), "").unwrap();
         }
 
-        let enabled = enabled_extensions(&ext);
+        let enabled = enabled_extensions(&ext, &php_ext_toggle::default_ids());
 
         assert!(enabled.contains(&"pdo_mysql".to_string()));
         assert!(enabled.contains(&"curl".to_string()));
@@ -687,7 +903,8 @@ mod tests {
     /// is filtered against what's really in `ext/`.
     #[test]
     fn intl_is_on_by_default_but_only_where_the_build_ships_it() {
-        assert!(EXTENSIONS.contains(&"intl"), "intl must be a default");
+        let default_ids = php_ext_toggle::default_ids();
+        assert!(default_ids.contains(&"intl"), "intl must be a default");
 
         let php_dir =
             std::env::temp_dir().join(format!("rezure-test-ini-intl-{}", std::process::id()));
@@ -696,10 +913,10 @@ mod tests {
         fs::create_dir_all(&ext).unwrap();
         fs::write(ext.join("php_intl.dll"), "").unwrap();
 
-        assert!(enabled_extensions(&ext).contains(&"intl".to_string()));
+        assert!(enabled_extensions(&ext, &default_ids).contains(&"intl".to_string()));
         // The same list against a build without it must not name it.
         fs::remove_file(ext.join("php_intl.dll")).unwrap();
-        assert!(!enabled_extensions(&ext).contains(&"intl".to_string()));
+        assert!(!enabled_extensions(&ext, &default_ids).contains(&"intl".to_string()));
 
         let _ = fs::remove_dir_all(&php_dir);
     }
@@ -709,7 +926,11 @@ mod tests {
     #[test]
     fn a_missing_ext_folder_falls_back_to_the_full_list() {
         let nowhere = std::env::temp_dir().join("rezure-test-ini-no-ext-folder");
-        assert_eq!(enabled_extensions(&nowhere).len(), EXTENSIONS.len());
+        let default_ids = php_ext_toggle::default_ids();
+        assert_eq!(
+            enabled_extensions(&nowhere, &default_ids).len(),
+            default_ids.len()
+        );
     }
 
     /// Without these, every HTTPS call out of PHP fails with cURL error 60,
@@ -717,9 +938,15 @@ mod tests {
     #[test]
     fn render_points_both_tls_stacks_at_the_ca_bundle() {
         let dir = std::env::temp_dir().join("rezure-test-ini-ca");
-        let bundle = dir.join(CA_BUNDLE_FILE);
+        let bundle = dir.join(ca_bundle::FILE_NAME);
 
-        let content = render(&dir.join("ext"), &dir, Some(&bundle), &dir.join("conf.d"));
+        let content = render(
+            &dir.join("ext"),
+            &dir,
+            Some(&bundle),
+            &dir.join("conf.d"),
+            &[],
+        );
 
         let expected = ini_value(&bundle);
         assert!(
@@ -739,14 +966,119 @@ mod tests {
     fn render_omits_the_ca_directives_when_no_bundle_is_installed() {
         let dir = std::env::temp_dir().join("rezure-test-ini-no-ca");
 
-        let content = render(&dir.join("ext"), &dir, None, &dir.join("conf.d"));
+        let content = render(&dir.join("ext"), &dir, None, &dir.join("conf.d"), &[]);
 
         assert!(!content.contains("curl.cainfo"));
         assert!(!content.contains("openssl.cafile"));
     }
 
+    /// A version whose ini was written before any bundle existed gets both
+    /// lines appended, and nothing else in the file moves.
+    #[test]
+    fn missing_ca_directives_are_appended_to_a_cli_ini() {
+        let dir = fake_php_dir("ca-missing", "; hand-tuned\nmemory_limit = 2G\n");
+        let bundle = dir.join(ca_bundle::FILE_NAME);
+        fs::write(&bundle, "pem").unwrap();
+
+        assert!(repair_ca_directives_to(&dir, &bundle).unwrap());
+        let content = fs::read_to_string(dir.join("php.ini")).unwrap();
+        let expected = ini_value(&bundle);
+        assert!(content.starts_with("; hand-tuned\nmemory_limit = 2G\n"));
+        assert!(content.contains(&format!("curl.cainfo = \"{expected}\"")));
+        assert!(content.contains(&format!("openssl.cafile = \"{expected}\"")));
+
+        assert!(
+            !repair_ca_directives_to(&dir, &bundle).unwrap(),
+            "a second pass has nothing left to do"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A directive naming a file that's gone — a moved Rezure home — is
+    /// repointed in place; a commented-out one doesn't count as set.
+    #[test]
+    fn a_ca_directive_naming_a_missing_file_is_repointed() {
+        let dir = fake_php_dir(
+            "ca-stale",
+            ";curl.cainfo =\ncurl.cainfo = \"C:/gone/cacert.pem\"\nopenssl.cafile=\n",
+        );
+        let bundle = dir.join(ca_bundle::FILE_NAME);
+        fs::write(&bundle, "pem").unwrap();
+
+        assert!(repair_ca_directives_to(&dir, &bundle).unwrap());
+        let content = fs::read_to_string(dir.join("php.ini")).unwrap();
+        let expected = ini_value(&bundle);
+        assert_eq!(
+            content,
+            format!(
+                ";curl.cainfo =\ncurl.cainfo = \"{expected}\"\nopenssl.cafile = \"{expected}\"\n"
+            )
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A bundle the user chose themselves — one that exists — is theirs.
+    #[test]
+    fn a_ca_directive_naming_a_real_file_is_left_alone() {
+        let dir = fake_php_dir("ca-custom", "");
+        let custom = dir.join("corporate.pem");
+        fs::write(&custom, "pem").unwrap();
+        let ini = format!(
+            "curl.cainfo = \"{0}\"\nopenssl.cafile = \"{0}\"\n",
+            ini_value(&custom)
+        );
+        fs::write(dir.join("php.ini"), &ini).unwrap();
+        let bundle = dir.join(ca_bundle::FILE_NAME);
+        fs::write(&bundle, "pem").unwrap();
+
+        assert!(!repair_ca_directives_to(&dir, &bundle).unwrap());
+        assert_eq!(fs::read_to_string(dir.join("php.ini")).unwrap(), ini);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_longer_directive_sharing_the_prefix_is_not_mistaken_for_it() {
+        assert_eq!(
+            directive_value("curl.cainfo_extra = x", "curl.cainfo"),
+            None
+        );
+        assert_eq!(directive_value("; curl.cainfo = x", "curl.cainfo"), None);
+        assert_eq!(
+            directive_value("  curl.cainfo=\"C:/a.pem\" ", "curl.cainfo"),
+            Some("C:/a.pem")
+        );
+    }
+
+    /// Every spawned PHP gets its own install's `openssl.cnf`, when the zip
+    /// shipped one.
+    #[test]
+    fn process_env_names_the_installs_openssl_config() {
+        let dir = fake_php_dir("openssl-conf", "");
+        let conf = dir.join("extras").join("ssl").join("openssl.cnf");
+        fs::create_dir_all(conf.parent().unwrap()).unwrap();
+        fs::write(&conf, "").unwrap();
+
+        let mut cmd = Command::new(dir.join("php.exe"));
+        apply_process_env(&mut cmd, &dir.join("php.exe")).unwrap();
+        let openssl_conf = cmd
+            .get_envs()
+            .find(|(key, _)| *key == OPENSSL_CONF_ENV)
+            .and_then(|(_, value)| value);
+        assert_eq!(openssl_conf, Some(conf.as_os_str()));
+
+        let bare = fake_php_dir("openssl-conf-none", "");
+        let mut cmd = Command::new(bare.join("php.exe"));
+        apply_process_env(&mut cmd, &bare.join("php.exe")).unwrap();
+        assert!(!cmd.get_envs().any(|(key, _)| key == OPENSSL_CONF_ENV));
+
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&bare);
+    }
+
     /// A user's own edits live in this file, so a switch or a re-install
-    /// must never rewrite it.
+    /// must never rewrite it. The one thing ever added is the CA bundle
+    /// pair — and only on a machine that has a bundle, which this test
+    /// can't control, so it accepts either.
     #[test]
     fn ensure_cli_php_ini_leaves_an_existing_ini_alone() {
         let php_dir =
@@ -755,13 +1087,20 @@ mod tests {
         fs::create_dir_all(&php_dir).unwrap();
 
         let ini_path = php_dir.join("php.ini");
-        fs::write(&ini_path, "; hand-tuned\nmemory_limit = 2G\n").unwrap();
+        let hand_tuned = "; hand-tuned\nmemory_limit = 2G\n";
+        fs::write(&ini_path, hand_tuned).unwrap();
 
-        assert!(ensure_cli_php_ini(&php_dir).unwrap().is_none());
-        assert_eq!(
-            fs::read_to_string(&ini_path).unwrap(),
-            "; hand-tuned\nmemory_limit = 2G\n"
+        let reported = ensure_cli_php_ini(&php_dir).unwrap();
+        let content = fs::read_to_string(&ini_path).unwrap();
+        assert!(content.starts_with(hand_tuned), "got: {content}");
+        let added: Vec<&str> = content[hand_tuned.len()..].lines().collect();
+        assert!(
+            added
+                .iter()
+                .all(|line| CA_DIRECTIVES.iter().any(|d| line.starts_with(d))),
+            "only CA directives may be added, got: {added:?}"
         );
+        assert_eq!(reported.is_some(), !added.is_empty());
 
         let _ = fs::remove_dir_all(&php_dir);
     }
@@ -828,7 +1167,7 @@ extension=curl
         fs::write(conf_d.join("10-intl.ini"), "extension=intl\n").unwrap();
         fs::write(conf_d.join("20-curl.ini"), ";extension=zip\n").unwrap();
 
-        let content = render(&ext, &dir, None, &conf_d);
+        let content = render(&ext, &dir, None, &conf_d, &php_ext_toggle::default_ids());
 
         assert!(
             !content.contains("extension=intl"),
@@ -855,7 +1194,66 @@ extension=curl
         fs::write(ext.join("php_intl.dll"), "").unwrap();
         fs::write(conf_d.join("intl.ini"), "extension = \"php_intl.dll\"").unwrap();
 
-        assert!(!render(&ext, &dir, None, &conf_d).contains("extension=intl"));
+        assert!(
+            !render(&ext, &dir, None, &conf_d, &php_ext_toggle::default_ids())
+                .contains("extension=intl")
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// OPcache is the one catalog entry PHP won't load behind the ordinary
+    /// directive — `extension=opcache` is silently wrong, since the engine
+    /// only recognizes it as a `zend_extension`.
+    #[test]
+    fn opcache_is_enabled_with_the_zend_extension_directive() {
+        let dir =
+            std::env::temp_dir().join(format!("rezure-test-ini-opcache-{}", std::process::id()));
+        let ext = dir.join("ext");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&ext).unwrap();
+        fs::write(ext.join("php_opcache.dll"), "").unwrap();
+
+        let content = render(&ext, &dir, None, &dir.join("conf.d"), &["opcache"]);
+
+        assert!(
+            content.contains("zend_extension=opcache"),
+            "missing zend_extension=opcache, got: {content}"
+        );
+        // `"zend_extension=opcache"` itself contains the substring
+        // `"extension=opcache"`, so the plain-directive line has to be
+        // checked for on its own line rather than as a bare substring.
+        assert!(
+            !content.lines().any(|line| line == "extension=opcache"),
+            "opcache must never be enabled with the plain directive, got: {content}"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A user's own `zend_extension=opcache` fragment has to be recognised
+    /// the same way a plain `extension=` one is, or the generated ini would
+    /// declare it a second time and PHP would warn on every start.
+    #[test]
+    fn a_user_enabled_zend_extension_is_not_enabled_twice() {
+        let dir = std::env::temp_dir().join(format!(
+            "rezure-test-ini-opcache-dup-{}-confd",
+            std::process::id()
+        ));
+        let ext = dir.join("ext");
+        let conf_d = dir.join("conf.d");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&ext).unwrap();
+        fs::create_dir_all(&conf_d).unwrap();
+        fs::write(ext.join("php_opcache.dll"), "").unwrap();
+        fs::write(conf_d.join("10-opcache.ini"), "zend_extension=opcache\n").unwrap();
+
+        let content = render(&ext, &dir, None, &conf_d, &["opcache"]);
+
+        assert!(
+            !content.contains("zend_extension=opcache"),
+            "conf.d already enables it, got: {content}"
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -891,7 +1289,7 @@ extension=curl
         let dir = std::env::temp_dir().join("rezure-test-ini-confd-header");
         let conf_d = dir.join("conf.d");
 
-        let content = render(&dir.join("ext"), &dir, None, &conf_d);
+        let content = render(&dir.join("ext"), &dir, None, &conf_d, &[]);
 
         let first = content.lines().next().unwrap_or_default();
         assert!(
@@ -931,6 +1329,41 @@ extension=curl
         assert_eq!(ensure_conf_d().unwrap(), dir);
     }
 
+    #[test]
+    fn a_terminal_with_no_scan_dir_gets_just_conf_d() {
+        let conf_d = PathBuf::from("rezure").join("etc").join("conf.d");
+        assert_eq!(scan_dir_with(None, &conf_d), conf_d.as_os_str());
+        assert_eq!(
+            scan_dir_with(Some(OsStr::new("")), &conf_d),
+            conf_d.as_os_str()
+        );
+    }
+
+    /// Another tool's scan dir stays, ahead of ours — the same order
+    /// `php_path` writes machine-wide, so Rezure's fragments win a conflict.
+    #[test]
+    fn an_existing_scan_dir_is_kept_and_conf_d_appended() {
+        let theirs = PathBuf::from("laragon").join("conf.d");
+        let conf_d = PathBuf::from("rezure").join("etc").join("conf.d");
+        let current = std::env::join_paths([&theirs]).unwrap();
+
+        assert_eq!(
+            scan_dir_with(Some(&current), &conf_d),
+            std::env::join_paths([&theirs, &conf_d]).unwrap()
+        );
+    }
+
+    /// The case once the PATH switch is on and Rezure was started after it:
+    /// the inherited value already names `conf.d`, maybe spelled differently.
+    #[test]
+    fn conf_d_already_in_the_scan_dir_is_not_added_twice() {
+        let conf_d = PathBuf::from("rezure").join("etc").join("conf.d");
+        let spelled_differently = format!("{}/", conf_d.display().to_string().to_uppercase());
+        let current = OsString::from(&spelled_differently);
+
+        assert_eq!(scan_dir_with(Some(&current), &conf_d), current);
+    }
+
     /// A user's own fragment must never be overwritten by a start, which is
     /// the whole failure this folder exists to end.
     #[test]
@@ -952,6 +1385,30 @@ extension=curl
         );
 
         let _ = fs::remove_file(&fragment);
-        let _ = fs::remove_file(&ini_path);
+        let _ = fs::remove_dir_all(ini_path.parent().unwrap());
+    }
+
+    /// Two installs running at once must never share a generated ini — each
+    /// has to point at its own `ext/`.
+    #[test]
+    fn each_php_install_gets_its_own_generated_ini() {
+        let _guard = ini_guard();
+        let root =
+            std::env::temp_dir().join(format!("rezure-test-perinstall-{}", std::process::id()));
+        let old_exe = root.join("7.4.33").join("php.exe");
+        let new_exe = root.join("8.5.10").join("php.exe");
+
+        let old_ini = ensure_php_ini(&old_exe).unwrap();
+        let new_ini = ensure_php_ini(&new_exe).unwrap();
+
+        assert_ne!(old_ini, new_ini);
+        let old_content = fs::read_to_string(&old_ini).unwrap();
+        let new_content = fs::read_to_string(&new_ini).unwrap();
+        assert!(old_content.contains(&ini_value(&extension_dir(&root.join("7.4.33")))));
+        assert!(new_content.contains(&ini_value(&extension_dir(&root.join("8.5.10")))));
+        assert!(!old_content.contains("8.5.10"));
+
+        let _ = fs::remove_dir_all(old_ini.parent().unwrap());
+        let _ = fs::remove_dir_all(new_ini.parent().unwrap());
     }
 }

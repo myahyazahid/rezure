@@ -27,13 +27,36 @@ pub struct AttachmentInfo {
     pub size_bytes: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TicketHistoryItem {
     pub category: String,
     pub title: String,
     pub status: String,
     pub created_at: String,
+}
+
+/// Mirrors `GET /api/v1/support/tickets`' snake_case wire shape — see
+/// `services::changelog`'s `ApiChangelogEntry` for why this isn't
+/// deserialized straight into `TicketHistoryItem` (which would look for
+/// `createdAt` and fail on every non-empty history).
+#[derive(Debug, Deserialize)]
+struct ApiTicketHistoryItem {
+    category: String,
+    title: String,
+    status: String,
+    created_at: String,
+}
+
+impl From<ApiTicketHistoryItem> for TicketHistoryItem {
+    fn from(item: ApiTicketHistoryItem) -> Self {
+        Self {
+            category: item.category,
+            title: item.title,
+            status: item.status,
+            created_at: item.created_at,
+        }
+    }
 }
 
 fn extension_of(path: &Path) -> String {
@@ -138,10 +161,14 @@ pub async fn submit_ticket(
     attachment_paths: &[String],
     log_text: Option<&str>,
 ) -> Result<(), AppError> {
-    if attachment_paths.len() > MAX_ATTACHMENTS {
+    // The attached log goes up as one more file, and the backend counts it
+    // against the same limit.
+    if attachment_paths.len() + usize::from(log_text.is_some()) > MAX_ATTACHMENTS {
         return Err(AppError::AttachmentRejected {
             path: String::new(),
-            reason: format!("at most {MAX_ATTACHMENTS} attachments are allowed"),
+            reason: format!(
+                "at most {MAX_ATTACHMENTS} attachments are allowed, including the attached log"
+            ),
         });
     }
 
@@ -236,10 +263,12 @@ pub async fn fetch_ticket_history(device_id: &str) -> Result<Vec<TicketHistoryIt
         return Err(AppError::TicketHistoryFailed(message));
     }
 
-    response
-        .json::<Vec<TicketHistoryItem>>()
+    let items = response
+        .json::<Vec<ApiTicketHistoryItem>>()
         .await
-        .map_err(|e| AppError::TicketHistoryFailed(format!("unexpected response: {e}")))
+        .map_err(|e| AppError::TicketHistoryFailed(format!("unexpected response: {e}")))?;
+
+    Ok(items.into_iter().map(TicketHistoryItem::from).collect())
 }
 
 #[cfg(test)]
@@ -264,5 +293,44 @@ mod tests {
         let info = inspect_attachment(path.to_str().unwrap()).unwrap();
         assert_eq!(info.size_bytes, 5);
         std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn decodes_the_servers_snake_case_history() {
+        let body = r#"[{"category":"bug","title":"App crashes on start","status":"open","created_at":"2026-09-01T06:00:00.000000Z"}]"#;
+
+        let items: Vec<TicketHistoryItem> = serde_json::from_str::<Vec<ApiTicketHistoryItem>>(body)
+            .expect("the documented response shape")
+            .into_iter()
+            .map(TicketHistoryItem::from)
+            .collect();
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].created_at, "2026-09-01T06:00:00.000000Z");
+        // The IPC side stays camelCase for the frontend.
+        let ipc = serde_json::to_value(&items[0]).unwrap();
+        assert_eq!(ipc["createdAt"], "2026-09-01T06:00:00.000000Z");
+    }
+
+    #[tokio::test]
+    async fn the_attached_log_counts_toward_the_attachment_limit() {
+        let paths: Vec<String> = (0..MAX_ATTACHMENTS)
+            .map(|i| format!("unused-{i}.txt"))
+            .collect();
+
+        let result = submit_ticket(
+            "00000000-0000-4000-8000-000000000000",
+            "00000000-0000-4000-8000-000000000001",
+            "bug",
+            "title",
+            "description",
+            None,
+            None,
+            &paths,
+            Some("log line"),
+        )
+        .await;
+
+        assert!(matches!(result, Err(AppError::AttachmentRejected { .. })));
     }
 }

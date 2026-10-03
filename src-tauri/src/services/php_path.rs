@@ -159,7 +159,9 @@ fn entries(path: &str) -> Vec<&str> {
         .collect()
 }
 
-fn same_dir(a: &str, b: &str) -> bool {
+/// Also used by `php_ini::terminal_scan_dir`, which compares against the
+/// same kind of hand-edited, `;`-separated environment value.
+pub(super) fn same_dir(a: &str, b: &str) -> bool {
     a.trim()
         .trim_end_matches(['\\', '/'])
         .eq_ignore_ascii_case(b.trim().trim_end_matches(['\\', '/']))

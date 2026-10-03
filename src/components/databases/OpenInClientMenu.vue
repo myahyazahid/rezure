@@ -104,7 +104,7 @@ onUnmounted(() => {
     <button
       ref="button"
       type="button"
-      class="flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-red-600 px-3.5 text-sm font-semibold text-white transition select-none hover:bg-red-500"
+      class="glass-accent flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-sm font-semibold transition select-none"
       :title="
         single
           ? `Open ${props.database} in ${single.name}`
@@ -122,7 +122,7 @@ onUnmounted(() => {
       <div
         v-if="open"
         data-open-with-menu
-        class="fixed z-50 overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-xl dark:border-neutral-700 dark:bg-neutral-900"
+        class="glass-strong fixed z-50 overflow-hidden rounded-2xl"
         :style="{
           top: position.top,
           bottom: position.bottom,
@@ -131,21 +131,30 @@ onUnmounted(() => {
         }"
       >
         <p
-          class="border-b border-neutral-200/70 px-4 py-2 text-[11px] font-semibold tracking-wide text-neutral-400 uppercase dark:border-neutral-800"
+          class="glass-divider border-b px-4 py-2 text-[11px] font-semibold tracking-wide text-neutral-400 uppercase"
         >
           Open {{ props.database }} with
+        </p>
+        <!-- Nothing found for this kind of server — say what would work
+             rather than show an empty list. -->
+        <p v-if="store.clients.length === 0" class="px-4 py-3 text-xs text-neutral-500">
+          <template v-if="store.server?.kind === 'sqlserver'">
+            No SQL Server client found. Install SQL Server Management Studio to open databases from
+            here.
+          </template>
+          <template v-else>No SQL client found on this machine.</template>
         </p>
         <button
           v-for="client in store.clients"
           :key="client.id"
           type="button"
-          class="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left text-sm transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
+          class="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left text-sm transition hover:bg-white/50 dark:hover:bg-white/5"
           @click="activate(client.id)"
         >
           <span class="truncate font-medium text-neutral-800 dark:text-neutral-100">
             {{ client.name }}
           </span>
-          <!-- Workbench and HeidiSQL can only be pointed at a server, so the
+          <!-- Workbench and Navicat can only be pointed at a server, so the
                menu says so rather than letting the click look like it failed. -->
           <span v-if="!client.opensDatabase" class="shrink-0 text-[11px] text-neutral-400">
             server only

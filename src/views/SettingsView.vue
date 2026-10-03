@@ -43,9 +43,7 @@ const PATH_ROWS = [
         How Rezure starts and what it does in the background.
       </p>
 
-      <div
-        class="mt-3 divide-y divide-neutral-200/80 rounded-2xl border border-neutral-200 bg-white dark:divide-neutral-800 dark:border-neutral-800 dark:bg-neutral-900/60"
-      >
+      <div class="glass mt-3 divide-y divide-neutral-900/8 rounded-2xl dark:divide-white/8">
         <div class="flex items-center justify-between gap-4 p-4">
           <div>
             <p class="font-semibold text-neutral-900 dark:text-neutral-100">
@@ -61,7 +59,9 @@ const PATH_ROWS = [
             :aria-checked="settingsStore.startWithWindows"
             class="relative h-6 w-11 shrink-0 rounded-full transition"
             :class="
-              settingsStore.startWithWindows ? 'bg-red-600' : 'bg-neutral-200 dark:bg-neutral-700'
+              settingsStore.startWithWindows
+                ? 'bg-accent-600'
+                : 'bg-neutral-900/15 dark:bg-white/15'
             "
             @click="settingsStore.setStartWithWindows(!settingsStore.startWithWindows)"
           >
@@ -85,7 +85,9 @@ const PATH_ROWS = [
             :aria-checked="settingsStore.keepInTrayOnClose"
             class="relative h-6 w-11 shrink-0 rounded-full transition"
             :class="
-              settingsStore.keepInTrayOnClose ? 'bg-red-600' : 'bg-neutral-200 dark:bg-neutral-700'
+              settingsStore.keepInTrayOnClose
+                ? 'bg-accent-600'
+                : 'bg-neutral-900/15 dark:bg-white/15'
             "
             @click="settingsStore.setKeepInTrayOnClose(!settingsStore.keepInTrayOnClose)"
           >
@@ -111,7 +113,7 @@ const PATH_ROWS = [
             :aria-checked="settingsStore.notifyOnCrash"
             class="relative h-6 w-11 shrink-0 rounded-full transition"
             :class="
-              settingsStore.notifyOnCrash ? 'bg-red-600' : 'bg-neutral-200 dark:bg-neutral-700'
+              settingsStore.notifyOnCrash ? 'bg-accent-600' : 'bg-neutral-900/15 dark:bg-white/15'
             "
             @click="settingsStore.setNotifyOnCrash(!settingsStore.notifyOnCrash)"
           >
@@ -128,9 +130,7 @@ const PATH_ROWS = [
       <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Domains</h2>
       <p class="mt-0.5 text-xs text-neutral-500">Applied to every generated virtual host.</p>
 
-      <div
-        class="mt-3 divide-y divide-neutral-200/80 rounded-2xl border border-neutral-200 bg-white dark:divide-neutral-800 dark:border-neutral-800 dark:bg-neutral-900/60"
-      >
+      <div class="glass mt-3 divide-y divide-neutral-900/8 rounded-2xl dark:divide-white/8">
         <div class="flex items-center justify-between gap-4 p-4">
           <div>
             <p class="font-semibold text-neutral-900 dark:text-neutral-100">Domain suffix</p>
@@ -159,7 +159,7 @@ const PATH_ROWS = [
             :aria-checked="settingsStore.autoWriteHosts"
             class="relative h-6 w-11 shrink-0 rounded-full transition"
             :class="
-              settingsStore.autoWriteHosts ? 'bg-red-600' : 'bg-neutral-200 dark:bg-neutral-700'
+              settingsStore.autoWriteHosts ? 'bg-accent-600' : 'bg-neutral-900/15 dark:bg-white/15'
             "
             @click="settingsStore.setAutoWriteHosts(!settingsStore.autoWriteHosts)"
           >
@@ -172,12 +172,8 @@ const PATH_ROWS = [
       </div>
     </div>
 
-    <div
-      class="mt-6 rounded-2xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900/60"
-    >
-      <div
-        class="flex items-center justify-between gap-4 border-b border-neutral-200/80 p-4 dark:border-neutral-800"
-      >
+    <div class="glass mt-6 rounded-2xl">
+      <div class="glass-divider flex items-center justify-between gap-4 border-b p-4">
         <div>
           <p class="font-semibold text-neutral-900 dark:text-neutral-100">Default port</p>
           <p class="mt-0.5 text-xs text-neutral-500">Used to pre-fill new virtual hosts.</p>
@@ -187,7 +183,7 @@ const PATH_ROWS = [
           min="1"
           max="65535"
           :value="settingsStore.defaultPort"
-          class="w-24 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-right text-sm text-neutral-900 focus:border-red-500 focus:outline-none dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
+          class="glass-inset w-24 rounded-lg px-3 py-1.5 text-right text-sm text-neutral-900 focus:border-accent-400/70 focus:outline-none dark:text-neutral-100"
           @change="onPortChange"
         />
       </div>
@@ -201,9 +197,7 @@ const PATH_ROWS = [
         Read-only — Rezure scans these folders directly, so there's nothing to redirect.
       </p>
 
-      <div
-        class="mt-3 divide-y divide-neutral-200/80 rounded-2xl border border-neutral-200 bg-white dark:divide-neutral-800 dark:border-neutral-800 dark:bg-neutral-900/60"
-      >
+      <div class="glass mt-3 divide-y divide-neutral-900/8 rounded-2xl dark:divide-white/8">
         <div
           v-for="row in PATH_ROWS"
           :key="row.key"

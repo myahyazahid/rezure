@@ -1,66 +1,92 @@
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
-use crate::config::device::DeviceIdState;
 use crate::config::settings::SettingsState;
-use crate::db::DbState;
 use crate::services::ports::{self, PortHolder};
-use crate::services::telemetry::TelemetryClient;
-use crate::services::{ServiceInfo, ServiceManager};
+use crate::services::service_visibility::{self, ManagedService};
+use crate::services::telemetry;
+use crate::services::{ServiceInfo, ServiceManager, ServiceStatus};
 use crate::utils::error::AppError;
 
+/// The Services page's rows — every service not removed with Manage
+/// services.
 #[tauri::command]
-pub fn list_services(manager: State<'_, ServiceManager>) -> Vec<ServiceInfo> {
-    manager.list()
+pub fn list_services(
+    manager: State<'_, ServiceManager>,
+    settings: State<'_, SettingsState>,
+) -> Vec<ServiceInfo> {
+    service_visibility::visible(manager.list(), &service_visibility::hidden(&settings))
 }
 
-/// Queues a `service.start`/`service.stop` event — best-effort, the same as
-/// every other telemetry call site: a failure here must never fail the
-/// service action itself, so it's only ever logged.
-fn record_service_event(
-    app: &AppHandle,
-    db: &DbState,
-    settings: &SettingsState,
-    device: &DeviceIdState,
-    event_type: &str,
-    service_name: &str,
-) {
-    let share_usage_data = settings.0.lock().unwrap().share_usage_data;
-    let app_version = app.package_info().version.to_string();
-    let conn = db.0.lock().unwrap();
-    if let Err(err) = TelemetryClient::record_event(
-        &conn,
-        share_usage_data,
-        &device.0,
-        event_type,
-        Some(service_name),
-        &app_version,
-    ) {
-        log::warn!("could not record {event_type} event: {err}");
-    }
+/// The Manage services list: every service, and whether it's on the page.
+#[tauri::command]
+pub fn list_managed_services(
+    manager: State<'_, ServiceManager>,
+    settings: State<'_, SettingsState>,
+) -> Vec<ManagedService> {
+    service_visibility::catalog(&manager.list(), &service_visibility::hidden(&settings))
+}
+
+/// Adds a service to the Services page or removes it, returning the updated
+/// Manage services list. Removing a running service stops it, which for a
+/// database can take a while — hence off the async runtime.
+#[tauri::command]
+pub async fn set_service_shown(
+    id: String,
+    shown: bool,
+    app: AppHandle,
+) -> Result<Vec<ManagedService>, AppError> {
+    tokio::task::spawn_blocking(move || {
+        let manager = app.state::<ServiceManager>();
+        let settings = app.state::<SettingsState>();
+        service_visibility::set_shown(&manager, &settings, &id, shown)?;
+        Ok(service_visibility::catalog(
+            &manager.list(),
+            &service_visibility::hidden(&settings),
+        ))
+    })
+    .await
+    .map_err(|e| AppError::ProcessSpawnFailed {
+        name: "manage services".to_string(),
+        reason: format!("background task panicked: {e}"),
+    })?
 }
 
 // Spawning/killing a real process (and, for MariaDB's first run, waiting on
 // `mariadb-install-db`) can briefly block — these are `async` and hand the
 // actual work to `spawn_blocking` so they never tie up the async runtime.
 
+/// Runs a blocking service action off the async runtime. A panicked task
+/// comes back as the same `AppError` a failed action would.
+async fn run_blocking(
+    id: &str,
+    action: impl FnOnce() -> Result<ServiceInfo, AppError> + Send + 'static,
+) -> Result<ServiceInfo, AppError> {
+    tokio::task::spawn_blocking(action)
+        .await
+        .map_err(|e| AppError::ProcessSpawnFailed {
+            name: id.to_string(),
+            reason: format!("background task panicked: {e}"),
+        })?
+}
+
 #[tauri::command]
 pub async fn start_service(
     id: String,
     manager: State<'_, ServiceManager>,
     app: AppHandle,
-    db: State<'_, DbState>,
-    settings: State<'_, SettingsState>,
-    device: State<'_, DeviceIdState>,
 ) -> Result<ServiceInfo, AppError> {
     let service = manager.find(&id)?;
-    let info = tokio::task::spawn_blocking(move || service.start())
-        .await
-        .map_err(|e| AppError::ProcessSpawnFailed {
-            name: id,
-            reason: format!("background task panicked: {e}"),
-        })??;
-    record_service_event(&app, &db, &settings, &device, "service.start", &info.name);
-    Ok(info)
+    let result = run_blocking(&id, move || service.start()).await;
+    match &result {
+        Ok(info) => telemetry::record(
+            &app,
+            "service.start",
+            Some(&info.name),
+            telemetry::stack_context(info),
+        ),
+        Err(err) => telemetry::record_error(&app, err, "service.start", &id),
+    }
+    result
 }
 
 #[tauri::command]
@@ -68,19 +94,14 @@ pub async fn stop_service(
     id: String,
     manager: State<'_, ServiceManager>,
     app: AppHandle,
-    db: State<'_, DbState>,
-    settings: State<'_, SettingsState>,
-    device: State<'_, DeviceIdState>,
 ) -> Result<ServiceInfo, AppError> {
     let service = manager.find(&id)?;
-    let info = tokio::task::spawn_blocking(move || service.stop())
-        .await
-        .map_err(|e| AppError::ProcessSpawnFailed {
-            name: id,
-            reason: format!("background task panicked: {e}"),
-        })??;
-    record_service_event(&app, &db, &settings, &device, "service.stop", &info.name);
-    Ok(info)
+    let result = run_blocking(&id, move || service.stop()).await;
+    match &result {
+        Ok(info) => telemetry::record(&app, "service.stop", Some(&info.name), None),
+        Err(err) => telemetry::record_error(&app, err, "service.stop", &id),
+    }
+    result
 }
 
 /// Kills the service outright, skipping the clean shutdown `stop_service`
@@ -95,12 +116,7 @@ pub async fn force_stop_service(
     manager: State<'_, ServiceManager>,
 ) -> Result<ServiceInfo, AppError> {
     let service = manager.find(&id)?;
-    tokio::task::spawn_blocking(move || service.force_stop())
-        .await
-        .map_err(|e| AppError::ProcessSpawnFailed {
-            name: id,
-            reason: format!("background task panicked: {e}"),
-        })?
+    run_blocking(&id, move || service.force_stop()).await
 }
 
 /// Who is holding the port a service wants, so a "port in use" failure can
@@ -134,16 +150,34 @@ pub async fn free_port(port: u16) -> Result<Option<PortHolder>, AppError> {
     .map_err(|e| AppError::Io(format!("background task panicked: {e}")))?
 }
 
+/// Opens a running service's web UI (Mailpit's inbox) in the default
+/// browser. The address comes from the service itself, never from the
+/// frontend, so this can only ever open what a service reports serving.
+#[tauri::command]
+pub fn open_service_ui(id: String, manager: State<'_, ServiceManager>) -> Result<(), AppError> {
+    let info = manager.find(&id)?.info();
+    let url = info
+        .web_url
+        .ok_or_else(|| AppError::NoWebUi(info.name.clone()))?;
+    if info.status != ServiceStatus::Running {
+        return Err(AppError::ServiceNotRunning(info.name));
+    }
+    tauri_plugin_opener::open_url(&url, None::<&str>).map_err(|e| AppError::OpenFailed {
+        target: url,
+        reason: e.to_string(),
+    })
+}
+
 #[tauri::command]
 pub async fn restart_service(
     id: String,
     manager: State<'_, ServiceManager>,
+    app: AppHandle,
 ) -> Result<ServiceInfo, AppError> {
     let service = manager.find(&id)?;
-    tokio::task::spawn_blocking(move || service.restart())
-        .await
-        .map_err(|e| AppError::ProcessSpawnFailed {
-            name: id,
-            reason: format!("background task panicked: {e}"),
-        })?
+    let result = run_blocking(&id, move || service.restart()).await;
+    if let Err(err) = &result {
+        telemetry::record_error(&app, err, "service.restart", &id);
+    }
+    result
 }

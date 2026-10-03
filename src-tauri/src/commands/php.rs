@@ -10,12 +10,16 @@ use tauri::State;
 
 use crate::config::settings::{self, SettingsState};
 use crate::services::binaries;
-use crate::services::doctor::{self, ProjectDiagnosis};
+use crate::services::ca_bundle::{self, CaBundleStatus};
+use crate::services::doctor::{self, ProjectDiagnosis, TlsCheck};
+use crate::services::mssql_localdb;
 use crate::services::php::{self, PhpVersionStatus};
 use crate::services::php_catalog::{self, PhpRelease};
 use crate::services::php_ext::{self, ExtensionStatus};
+use crate::services::php_ext_toggle::{self, ExtensionToggle};
 use crate::services::php_ini;
 use crate::services::php_path::{self, PhpPathStatus};
+use crate::services::postgres;
 use crate::services::{ServiceManager, ServiceStatus};
 use crate::utils::error::AppError;
 
@@ -59,9 +63,10 @@ pub fn list_php_versions() -> Vec<PhpVersionStatus> {
 /// should use") is true the moment it's clicked, instead of quietly
 /// requiring a manual restart nothing in the UI asks for.
 ///
-/// Only PHP is restarted: nginx reaches it over `127.0.0.1:9000` per
-/// request and reconnects on its own once the new process has rebound the
-/// port, so bouncing nginx too would drop live requests for nothing.
+/// Only PHP is restarted: nginx reaches its workers over
+/// `127.0.0.1:9100–9103` (`php_pool::DEFAULT_BASE_PORT`) per request and
+/// reconnects on its own once the new processes have rebound those ports, so
+/// bouncing nginx too would drop live requests for nothing.
 #[tauri::command]
 pub async fn set_active_php_version(
     id: String,
@@ -185,17 +190,97 @@ pub async fn install_php_extension(
     php_ext::status_for(&php_version)
 }
 
+/// Every bundled extension Rezure knows about, for one PHP version: whether
+/// it's on right now, whether that's the default or a user override, and
+/// whether the build even ships the DLL. Distinct from [`php_extensions`],
+/// which is about PECL extensions the zip doesn't ship at all.
+#[tauri::command]
+pub async fn list_bundled_php_extensions(
+    php_version: String,
+) -> Result<Vec<ExtensionToggle>, AppError> {
+    tokio::task::spawn_blocking(move || php_ext_toggle::status_for(&php_version))
+        .await
+        .map_err(joined)?
+}
+
+/// Turns one bundled extension on or off for a PHP version. Only writes
+/// that version's own toggle state — the change reaches PHP the next time
+/// it starts, same as installing a PECL extension does.
+#[tauri::command]
+pub async fn set_bundled_php_extension(
+    php_version: String,
+    id: String,
+    enabled: bool,
+) -> Result<Vec<ExtensionToggle>, AppError> {
+    tokio::task::spawn_blocking(move || php_ext_toggle::set_enabled(&php_version, &id, enabled))
+        .await
+        .map_err(joined)?
+}
+
 /// Reads a project's `ext-*` requirements back against the active PHP.
 ///
 /// Lives with the PHP commands rather than the project ones because that is
 /// what it answers a question about: the project side is just the
 /// `composer.json` it reads. Spawns `php -m`, so it goes through
 /// `spawn_blocking` like every other command here that shells out.
+///
+/// When the project mails a local SMTP server, whether Mailpit is there to
+/// catch it is filled in here — and likewise LocalDB for a project on SQL
+/// Server, and PostgreSQL for one on `pgsql`: `doctor` reads the project,
+/// the `ServiceManager` knows the services.
 #[tauri::command]
-pub async fn diagnose_project(id: String) -> Result<ProjectDiagnosis, AppError> {
-    tokio::task::spawn_blocking(move || doctor::diagnose_project(&id))
+pub async fn diagnose_project(
+    id: String,
+    manager: State<'_, ServiceManager>,
+) -> Result<ProjectDiagnosis, AppError> {
+    let mut diagnosis = tokio::task::spawn_blocking(move || doctor::diagnose_project(&id))
+        .await
+        .map_err(joined)??;
+    if let (Some(mail), Ok(mailpit)) = (diagnosis.mail.as_mut(), manager.find("mailpit")) {
+        let info = mailpit.info();
+        mail.mailpit_installed = info.installed;
+        mail.mailpit_running = info.status == ServiceStatus::Running;
+    }
+    if let (Some(sql_server), Ok(localdb)) = (
+        diagnosis.sql_server.as_mut(),
+        manager.find(mssql_localdb::SERVICE_ID),
+    ) {
+        let info = localdb.info();
+        sql_server.localdb_installed = info.installed;
+        sql_server.localdb_running = info.status == ServiceStatus::Running;
+    }
+    if let (Some(setup), Ok(service)) = (
+        diagnosis.postgres.as_mut(),
+        manager.find(postgres::SERVICE_ID),
+    ) {
+        let info = service.info();
+        setup.postgres_installed = info.installed;
+        setup.postgres_running = info.status == ServiceStatus::Running;
+    }
+    Ok(diagnosis)
+}
+
+/// Whether the active PHP can verify an HTTPS certificate — the
+/// requirements check's second half, kept separate because it waits on the
+/// network. See `services::doctor::TlsCheck`.
+#[tauri::command]
+pub async fn check_php_tls() -> Result<TlsCheck, AppError> {
+    tokio::task::spawn_blocking(doctor::check_active_tls)
         .await
         .map_err(joined)?
+}
+
+/// The CA bundle PHP verifies HTTPS against, for the Switch page.
+#[tauri::command]
+pub fn ca_bundle_status() -> Result<CaBundleStatus, AppError> {
+    ca_bundle::status()
+}
+
+/// Replaces the CA bundle with curl.se's current one (checksum-verified)
+/// and points every installed version's terminal ini at it.
+#[tauri::command]
+pub async fn update_ca_bundle() -> Result<CaBundleStatus, AppError> {
+    ca_bundle::update().await
 }
 
 /// The folder a user's own PHP settings go in, shown on the Switch page.

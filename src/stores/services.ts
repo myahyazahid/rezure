@@ -1,10 +1,18 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import type { PortHolder, ServiceInfo } from '@/types/service'
+import { listen } from '@tauri-apps/api/event'
+import type { ManagedService, PortHolder, ServiceInfo } from '@/types/service'
+
+// Keep in sync with `CHANGED_EVENT` in src-tauri/src/services/supervisor.rs
+const CHANGED_EVENT = 'service://changed'
 
 export const useServicesStore = defineStore('services', () => {
+  /** The Services page's rows: every service not removed with Manage
+   *  services. */
   const services = ref<ServiceInfo[]>([])
+  /** The Manage services list — every service, shown or not. */
+  const managed = ref<ManagedService[]>([])
   const loading = ref(false)
   const pendingIds = ref<Set<string>>(new Set())
 
@@ -25,6 +33,13 @@ export const useServicesStore = defineStore('services', () => {
       loading.value = false
     }
   }
+
+  // The backend noticed a crash, restarted a service or gave up on one
+  // without the UI asking — refetch so a dead PHP doesn't still read as
+  // Running.
+  listen(CHANGED_EVENT, () => {
+    fetchAll()
+  })
 
   async function withPending(id: string, action: () => Promise<ServiceInfo>) {
     pendingIds.value.add(id)
@@ -68,12 +83,42 @@ export const useServicesStore = defineStore('services', () => {
     return withPending(id, () => invoke<ServiceInfo>('restart_service', { id }))
   }
 
+  /** Starts every stopped service that's installed. An optional service
+   *  nobody has downloaded yet (Mailpit) is skipped rather than failing the
+   *  whole action. */
   function startAll() {
-    return Promise.all(services.value.filter((s) => s.status !== 'running').map((s) => start(s.id)))
+    return Promise.all(
+      services.value.filter((s) => s.status !== 'running' && s.installed).map((s) => start(s.id)),
+    )
+  }
+
+  /** Opens a running service's web UI. The address is looked up on the Rust
+   *  side from the service itself. */
+  function openUi(id: string) {
+    return invoke<void>('open_service_ui', { id })
   }
 
   function stopAll() {
     return Promise.all(services.value.filter((s) => s.status === 'running').map((s) => stop(s.id)))
+  }
+
+  /** Restarts every running service. Stopped ones stay stopped — that's
+   *  what Start all is for. */
+  function restartAll() {
+    return Promise.all(
+      services.value.filter((s) => s.status === 'running').map((s) => restart(s.id)),
+    )
+  }
+
+  async function fetchManaged() {
+    managed.value = await invoke<ManagedService[]>('list_managed_services')
+  }
+
+  /** Adds a service to the Services page or removes it. Removing a running
+   *  one stops it first, on the Rust side. */
+  async function setShown(id: string, shown: boolean) {
+    managed.value = await invoke<ManagedService[]>('set_service_shown', { id, shown })
+    await fetchAll()
   }
 
   function isPending(id: string) {
@@ -82,6 +127,7 @@ export const useServicesStore = defineStore('services', () => {
 
   return {
     services,
+    managed,
     loading,
     runningCount,
     busy,
@@ -93,7 +139,11 @@ export const useServicesStore = defineStore('services', () => {
     freePort,
     restart,
     startAll,
+    openUi,
     stopAll,
+    restartAll,
+    fetchManaged,
+    setShown,
     isPending,
   }
 })

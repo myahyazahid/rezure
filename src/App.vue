@@ -3,6 +3,7 @@ import { RouterView } from 'vue-router'
 import { onMounted } from 'vue'
 import AppTitleBar from '@/components/common/AppTitleBar.vue'
 import AppSidebar from '@/components/common/AppSidebar.vue'
+import StickerOverlay from '@/components/common/StickerOverlay.vue'
 import { useServicesStore } from '@/stores/services'
 import { useProjectsStore } from '@/stores/projects'
 import { usePhpStore } from '@/stores/php'
@@ -18,7 +19,10 @@ const databasesStore = useDatabasesStore()
 onMounted(() => {
   // Sidebar badges and the dashboard read from all of these, so they are loaded up front.
   servicesStore.fetchAll()
-  projectsStore.fetchAll()
+  // Restoring share status has to wait for the project list itself — it
+  // checks each project's id against a running cloudflared tunnel, so a
+  // reload while sharing is active doesn't show it as "not shared".
+  projectsStore.fetchAll().then(() => projectsStore.restoreShareStatus())
   phpStore.fetchAll()
   binariesStore.fetchAll()
   // Best-effort: this one fails when MariaDB isn't running, which the
@@ -28,13 +32,13 @@ onMounted(() => {
 </script>
 
 <template>
-  <div
-    class="flex h-screen flex-col bg-linear-to-b from-red-50 via-neutral-50 to-neutral-50 text-neutral-900 dark:from-neutral-900 dark:via-neutral-950 dark:to-neutral-950 dark:text-neutral-100"
-  >
+  <!-- `bg-app` is the colourful backdrop every glass surface lets through;
+       see the design-system notes in assets/main.css. -->
+  <div class="bg-app flex h-screen flex-col text-neutral-900 dark:text-neutral-100">
     <AppTitleBar />
 
     <div class="flex min-h-0 flex-1">
-      <AppSidebar />
+      <AppSidebar class="mb-3 ml-3" />
       <!-- More room at the bottom than the top: the full-height views end
            flush with this edge, and without the gap their last row reads as
            clipped by the window rather than scrolled. -->
@@ -56,5 +60,7 @@ onMounted(() => {
         </RouterView>
       </main>
     </div>
+
+    <StickerOverlay />
   </div>
 </template>

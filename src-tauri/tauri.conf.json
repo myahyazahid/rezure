@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "rezureapp",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "identifier": "com.redscale.rezure",
   "build": {
     "frontendDist": "../dist",
@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "Rezure",
-        "width": 1200,
-        "height": 780,
+        "width": 1080,
+        "height": 700,
         "minWidth": 900,
         "minHeight": 600,
         "resizable": true,
@@ -29,6 +29,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -38,10 +39,19 @@
     ],
     "resources": {
       "bundled-bin/nginx": "bundled-bin/nginx",
-      "bundled-bin/php": "bundled-bin/php"
+      "bundled-bin/php": "bundled-bin/php",
+      "bundled-bin/ca": "bundled-bin/ca"
     },
     "android": {
       "debugApplicationIdSuffix": ".debug"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdEN0M1RERCQTE1OTZCRDQKUldUVWExbWgyMTE4ZlJ1b2FhT2RMVFRDVVd3MHFFUnFieVVHV0QvYXV2RUw5bTIwcW1YN1U1bTcK",
+      "endpoints": [
+        "https://api.redscale.my.id/api/v1/version/latest?target={{target}}&arch={{arch}}&current_version={{current_version}}"
+      ]
     }
   }
 }

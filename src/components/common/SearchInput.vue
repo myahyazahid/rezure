@@ -5,7 +5,7 @@ const model = defineModel<string>({ default: '' })
 
 <template>
   <div
-    class="flex items-center gap-2 rounded-xl border border-neutral-200 bg-white/70 px-3.5 py-2.5 dark:border-neutral-800 dark:bg-neutral-900/60"
+    class="glass flex items-center gap-2 rounded-xl px-3.5 py-2.5 transition focus-within:border-accent-400/60 dark:focus-within:border-accent-400/40"
   >
     <svg
       viewBox="0 0 24 24"

@@ -52,12 +52,10 @@ async function confirm() {
 
 <template>
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+    class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
     @click.self="emit('close')"
   >
-    <div
-      class="w-full max-w-lg rounded-2xl border border-neutral-200 bg-white p-6 shadow-2xl dark:border-neutral-700 dark:bg-neutral-900"
-    >
+    <div class="glass-strong w-full max-w-lg rounded-2xl p-6">
       <h2 class="text-lg font-bold text-neutral-900 dark:text-neutral-100">Add existing folder</h2>
       <p class="mt-1 text-sm text-neutral-500">
         Serve a project from wherever it already lives. Rezure records the path and nothing else —
@@ -67,7 +65,7 @@ async function confirm() {
       <div class="mt-5">
         <button
           type="button"
-          class="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-neutral-300 py-6 text-sm font-semibold text-neutral-600 transition hover:border-red-400 hover:text-red-600 dark:border-neutral-600 dark:text-neutral-300 dark:hover:border-red-500 dark:hover:text-red-400"
+          class="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-neutral-900/20 py-6 text-sm font-semibold text-neutral-600 transition hover:border-accent-400 hover:text-accent-600 dark:border-white/20 dark:text-neutral-300 dark:hover:border-accent-500 dark:hover:text-accent-400"
           :disabled="checking"
           @click="pickFolder"
         >
@@ -97,9 +95,7 @@ async function confirm() {
       </p>
 
       <template v-if="preview">
-        <div
-          class="mt-4 rounded-xl border border-neutral-200 bg-neutral-50 p-3.5 dark:border-neutral-700 dark:bg-neutral-800/40"
-        >
+        <div class="glass-inset mt-4 rounded-xl p-3.5">
           <p class="truncate font-mono text-xs text-neutral-500" :title="preview.path">
             {{ preview.path }}
           </p>
@@ -129,7 +125,7 @@ async function confirm() {
             <input
               v-model="name"
               type="text"
-              class="mt-1.5 w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+              class="glass-inset mt-1.5 w-full rounded-lg px-3 py-2 text-sm dark:text-neutral-100"
             />
           </div>
           <div>
@@ -139,7 +135,7 @@ async function confirm() {
             <input
               v-model="domain"
               type="text"
-              class="mt-1.5 w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 font-mono text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+              class="glass-inset mt-1.5 w-full rounded-lg px-3 py-2 font-mono text-sm dark:text-neutral-100"
             />
           </div>
         </div>
@@ -158,7 +154,7 @@ async function confirm() {
         </button>
         <button
           type="button"
-          class="rounded-full bg-red-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-red-500 disabled:opacity-50"
+          class="glass-accent rounded-full px-4 py-2 text-sm font-semibold transition disabled:opacity-50"
           :disabled="!preview || store.linking || !name.trim() || !domain.trim()"
           @click="confirm"
         >

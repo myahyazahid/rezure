@@ -8,21 +8,25 @@
 //! nginx at it with `-c` / `-p`.
 //!
 //! There's no PHP-FPM on Windows, so every vhost proxies PHP requests to
-//! `php-cgi -b 127.0.0.1:PHP_FASTCGI_PORT` (see `services::process`) — the
-//! standard substitute FastCGI responder on this platform.
+//! `php-cgi -b 127.0.0.1:PORT` responders (see `services::process`) — the
+//! standard substitute FastCGI responder on this platform. Each PHP version
+//! runs several of them, so a vhost names an nginx `upstream` holding that
+//! version's workers rather than one port; the upstreams themselves live in
+//! one generated file next to the vhosts (see [`upstreams_config`]).
 
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use super::binaries;
+use super::php;
+use super::php_ini;
+use super::php_pool;
 use super::projects::{docroot, scan_projects};
 use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
 use crate::utils::paths;
-
-/// Must match the port `ProcessService::php()` binds `php-cgi` to.
-pub const PHP_FASTCGI_PORT: u16 = 9000;
 
 /// `%LOCALAPPDATA%\Rezure\data\nginx` — Rezure's own generated nginx
 /// config, logs, and temp directories (separate from the pristine
@@ -33,6 +37,12 @@ pub fn nginx_runtime_dir() -> Result<PathBuf, AppError> {
 
 pub fn vhosts_dir() -> Result<PathBuf, AppError> {
     Ok(nginx_runtime_dir()?.join("vhosts"))
+}
+
+/// Every PHP `upstream` block a vhost can name. Outside [`vhosts_dir`] on
+/// purpose: that folder is pruned down to one `.conf` per project.
+fn upstreams_path() -> Result<PathBuf, AppError> {
+    Ok(nginx_runtime_dir()?.join("php-upstreams.conf"))
 }
 
 fn nginx_conf_dir() -> Result<PathBuf, AppError> {
@@ -68,6 +78,15 @@ pub fn ensure_main_config(nginx_exe: &Path) -> Result<PathBuf, AppError> {
     ensure_dir(&runtime.join("temp").join("fastcgi"))?;
     ensure_dir(&vhosts)?;
 
+    // `sync_vhosts` writes the real one, but nginx refuses to start on an
+    // `include` of a file that doesn't exist — which it wouldn't yet if
+    // nginx is started before any sync ever ran.
+    let upstreams = upstreams_path()?;
+    if !upstreams.is_file() {
+        fs::write(&upstreams, upstreams_config(&[php_pool::DEFAULT_BASE_PORT]))
+            .map_err(|e| AppError::Io(format!("could not write {}: {e}", upstreams.display())))?;
+    }
+
     let mime_types = nginx_exe
         .parent()
         .map(|dir| dir.join("conf").join("mime.types"))
@@ -93,6 +112,17 @@ http {{
     # (e.g. "my-awesome-app.test" already overflows it) — nginx refuses to
     # start at all rather than truncate, so this has to be raised up front.
     server_names_hash_bucket_size 64;
+    # Kept in step with the generated php.ini (`services::php_ini`): nginx's
+    # own defaults (1 MB body, 60s FastCGI timeouts) sit far below PHP's, so
+    # uploads 413 and slow requests time out before PHP gets a say.
+    client_max_body_size {body_size_limit_mb}m;
+    fastcgi_read_timeout {fastcgi_timeout}s;
+    fastcgi_send_timeout {fastcgi_timeout}s;
+    # A worker that's down (crashed, restarting) refuses the connection, and
+    # `error` sends the request on to the next one. `timeout` is left out
+    # deliberately: a request that ran out the clock would otherwise be
+    # re-run on every other worker in turn, tying all of them up.
+    fastcgi_next_upstream error;
 
     # Catches any request whose Host header doesn't match a vhost below.
     server {{
@@ -101,6 +131,7 @@ http {{
         return 404;
     }}
 
+    include "{upstreams}";
     include "{vhosts_glob}";
 }}
 "#,
@@ -110,7 +141,10 @@ http {{
         client_body_temp = conf_path(&runtime.join("temp").join("client_body")),
         proxy_temp = conf_path(&runtime.join("temp").join("proxy")),
         fastcgi_temp = conf_path(&runtime.join("temp").join("fastcgi")),
+        upstreams = conf_path(&upstreams),
         vhosts_glob = conf_path(&vhosts.join("*.conf")),
+        body_size_limit_mb = php_ini::BODY_SIZE_LIMIT_MB,
+        fastcgi_timeout = php_ini::MAX_EXECUTION_TIME_SECS,
     );
 
     let config_path = runtime.join("nginx.conf");
@@ -119,7 +153,51 @@ http {{
     Ok(config_path)
 }
 
-fn vhost_config(domain: &str, project_root: &Path, stack: &str, fastcgi_params: &Path) -> String {
+/// One `upstream` per PHP port block in `bases`, each listing that
+/// version's workers.
+///
+/// `least_conn` rather than nginx's default round-robin: a `php-cgi` busy
+/// with a slow request still *accepts* new connections (the OS queues them
+/// in its listen backlog), so round-robin would keep handing requests to it
+/// and they'd wait behind the slow one — the exact stall the workers exist
+/// to avoid. `least_conn` sends each request to the worker with the fewest
+/// requests in flight, i.e. an idle one whenever there is one.
+fn upstreams_config(bases: &[u16]) -> String {
+    let mut config = String::from(
+        "# Generated by Rezure from services::php_pool - rewritten on every project sync.\n",
+    );
+    for &base in bases {
+        config.push_str(&format!(
+            "\nupstream {} {{\n    least_conn;\n",
+            php_pool::upstream_name(base)
+        ));
+        for port in php_pool::worker_ports(base) {
+            config.push_str(&format!("    server 127.0.0.1:{port};\n"));
+        }
+        config.push_str("}\n");
+    }
+    config
+}
+
+/// Writes `contents` to `path` unless it already holds exactly that.
+/// Returns whether it wrote — the same "don't make nginx reload for
+/// nothing" rule [`VhostSync::changed`] exists for.
+fn write_if_changed(path: &Path, contents: &str) -> Result<bool, AppError> {
+    if fs::read_to_string(path).ok().as_deref() == Some(contents) {
+        return Ok(false);
+    }
+    fs::write(path, contents)
+        .map_err(|e| AppError::Io(format!("could not write {}: {e}", path.display())))?;
+    Ok(true)
+}
+
+fn vhost_config(
+    domain: &str,
+    project_root: &Path,
+    stack: &str,
+    fastcgi_params: &Path,
+    upstream: &str,
+) -> String {
     format!(
         r#"server {{
     listen 80;
@@ -132,7 +210,7 @@ fn vhost_config(domain: &str, project_root: &Path, stack: &str, fastcgi_params: 
     }}
 
     location ~ \.php$ {{
-        fastcgi_pass 127.0.0.1:{port};
+        fastcgi_pass {upstream};
         fastcgi_index index.php;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
         include "{fastcgi_params}";
@@ -145,13 +223,13 @@ fn vhost_config(domain: &str, project_root: &Path, stack: &str, fastcgi_params: 
 "#,
         domain = domain,
         root = conf_path(&docroot(project_root, stack)),
-        port = PHP_FASTCGI_PORT,
+        upstream = upstream,
         fastcgi_params = conf_path(fastcgi_params),
     )
 }
 
 /// What a [`sync_vhosts`] pass did.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VhostSync {
     /// How many vhosts are active.
     pub active: usize,
@@ -168,7 +246,29 @@ pub struct VhostSync {
 /// `projects::www_root()`, deleting `.conf` files for projects that no
 /// longer exist. Only touches the files on disk — call [`reload`] afterward,
 /// when [`VhostSync::changed`] is set, to make a running nginx pick it up.
-pub fn sync_vhosts() -> Result<VhostSync, AppError> {
+///
+/// `php_versions` is each project's SQLite-stored PHP version override
+/// (`db::projects::fetch_php_versions`) — a filesystem scan alone has no way
+/// to know it (a folder has no opinion on PHP version), same reason
+/// `commands::projects::list_projects` merges it in separately for the
+/// frontend. Without this, every project would resolve to the global
+/// default port regardless of what it's pinned to, silently making every
+/// pin a no-op.
+///
+/// `resolve_pool` is handed the set of versions this pass' projects need a
+/// pooled instance for (via `php_pool::wanted_versions`) and must return
+/// their actual port blocks — in practice always `ServiceManager::sync_php_pool`,
+/// the one thing that knows which port an already-registered pooled
+/// service is really bound to. Taking a closure rather than computing ports
+/// here directly is deliberate: an earlier version of this function
+/// computed them independently, and that's exactly what let a pinned
+/// project's port silently move out from under its own already-running
+/// `php-cgi` (see `php_pool::assign_ports`'s doc comment) — routing every
+/// caller through `ServiceManager` is what makes that impossible now.
+pub fn sync_vhosts(
+    php_versions: &HashMap<String, Option<String>>,
+    resolve_pool: impl FnOnce(&BTreeSet<String>) -> BTreeMap<String, u16>,
+) -> Result<VhostSync, AppError> {
     let vhosts = vhosts_dir()?;
     ensure_dir(&vhosts)?;
     let fastcgi_params = nginx_conf_dir()?.join("fastcgi_params");
@@ -176,14 +276,28 @@ pub fn sync_vhosts() -> Result<VhostSync, AppError> {
     // A linked project whose folder is gone gets no vhost — nginx would be
     // pointed at a root that doesn't exist. It stays in the list, though,
     // since the folder may simply be on a drive that isn't plugged in.
-    let current: Vec<_> = scan_projects()?
+    let mut current: Vec<_> = scan_projects()?
         .into_iter()
         .filter(|project| !project.missing && !project.domain_invalid)
         .collect();
-    let current_ids: std::collections::HashSet<&str> =
-        current.iter().map(|p| p.id.as_str()).collect();
+    for project in &mut current {
+        if let Some(version) = php_versions.get(&project.id) {
+            project.php_version = version.clone();
+        }
+    }
+    let current_ids: HashSet<&str> = current.iter().map(|p| p.id.as_str()).collect();
 
-    let mut changed = false;
+    let installed: BTreeSet<String> = php::installed().into_iter().map(|r| r.version).collect();
+    let global_active = php::active_id();
+    let wanted = php_pool::wanted_versions(&current, &installed, &global_active);
+    let pool = resolve_pool(&wanted);
+
+    // Written before any vhost, so a vhost never names an upstream nginx
+    // hasn't been told about. Stale versions' upstreams are harmless to keep
+    // until the next sync drops them — nothing names them any more.
+    let mut bases: Vec<u16> = vec![php_pool::DEFAULT_BASE_PORT];
+    bases.extend(pool.values().copied());
+    let mut changed = write_if_changed(&upstreams_path()?, &upstreams_config(&bases))?;
 
     // Drop vhosts for projects that no longer exist on disk.
     if let Ok(entries) = fs::read_dir(&vhosts) {
@@ -204,22 +318,23 @@ pub fn sync_vhosts() -> Result<VhostSync, AppError> {
     }
 
     for project in &current {
+        let base = php_pool::port_for_project(
+            project.php_version.as_deref(),
+            &pool,
+            php_pool::DEFAULT_BASE_PORT,
+        );
         let config = vhost_config(
             &project.domain,
             Path::new(&project.path),
             &project.stack,
             &fastcgi_params,
+            &php_pool::upstream_name(base),
         );
         let path = vhosts.join(format!("{}.conf", project.id));
 
         // Compared before writing, so an unchanged project neither churns the
         // file's mtime nor reports a change nginx would have to reload for.
-        if fs::read_to_string(&path).ok().as_deref() == Some(config.as_str()) {
-            continue;
-        }
-        fs::write(&path, config)
-            .map_err(|e| AppError::Io(format!("could not write {}: {e}", path.display())))?;
-        changed = true;
+        changed |= write_if_changed(&path, &config)?;
     }
 
     Ok(VhostSync {
@@ -271,18 +386,47 @@ mod tests {
     }
 
     #[test]
-    fn vhost_config_embeds_domain_root_and_fastcgi_port() {
+    fn vhost_config_embeds_domain_root_and_fastcgi_upstream() {
         let config = vhost_config(
             "blog.test",
             Path::new(r"C:\Users\dev\rezure\www\blog"),
             "PHP",
             Path::new(r"C:\nginx\conf\fastcgi_params"),
+            &php_pool::upstream_name(php_pool::DEFAULT_BASE_PORT),
         );
 
         assert!(config.contains("server_name blog.test;"));
         assert!(config.contains("root \"C:/Users/dev/rezure/www/blog\";"));
-        assert!(config.contains("fastcgi_pass 127.0.0.1:9000;"));
+        assert!(config.contains("fastcgi_pass rezure_php_9100;"));
         assert!(config.contains("include \"C:/nginx/conf/fastcgi_params\";"));
+    }
+
+    #[test]
+    fn upstreams_list_every_worker_of_every_block_least_conn() {
+        let config = upstreams_config(&[php_pool::DEFAULT_BASE_PORT, php_pool::BASE_PORT]);
+
+        for base in [php_pool::DEFAULT_BASE_PORT, php_pool::BASE_PORT] {
+            assert!(config.contains(&format!("upstream {} {{", php_pool::upstream_name(base))));
+            for port in php_pool::worker_ports(base) {
+                assert!(config.contains(&format!("server 127.0.0.1:{port};")));
+            }
+        }
+        assert_eq!(config.matches("least_conn;").count(), 2);
+        assert_eq!(config.matches('{').count(), config.matches('}').count());
+    }
+
+    #[test]
+    fn write_if_changed_only_reports_a_real_change() {
+        let path = std::env::temp_dir().join(format!(
+            "rezure-test-write-if-changed-{}.conf",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+
+        assert!(write_if_changed(&path, "a").unwrap());
+        assert!(!write_if_changed(&path, "a").unwrap());
+        assert!(write_if_changed(&path, "b").unwrap());
+        let _ = fs::remove_file(&path);
     }
 
     #[test]
@@ -291,7 +435,13 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("public")).unwrap();
 
-        let config = vhost_config("app.test", &dir, "Laravel", Path::new("fastcgi_params"));
+        let config = vhost_config(
+            "app.test",
+            &dir,
+            "Laravel",
+            Path::new("fastcgi_params"),
+            &php_pool::upstream_name(php_pool::DEFAULT_BASE_PORT),
+        );
         assert!(config.contains(&conf_path(&dir.join("public"))));
 
         fs::remove_dir_all(&dir).unwrap();

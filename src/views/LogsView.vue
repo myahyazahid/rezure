@@ -1,14 +1,30 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { LOG_SERVICES, useLogsStore } from '@/stores/logs'
+import { useServicesStore } from '@/stores/services'
 import type { LogLevel } from '@/types/log'
 import SearchInput from '@/components/common/SearchInput.vue'
 
 const store = useLogsStore()
+const servicesStore = useServicesStore()
 
 const search = ref('')
 const selectedService = ref<string | null>(null)
 const selectedLevel = ref<LogLevel | null>(null)
+
+/** Pooled PHP instances (`php-8.3.0`, ...) aren't in the static
+ *  `LOG_SERVICES` list — they're registered dynamically per pinned
+ *  version (see `services::php_pool`). Add one filter shortcut per
+ *  instance currently known to the services store, alongside the fixed
+ *  ones, so their logs get the same one-click filter. */
+const pooledPhpServices = computed(() =>
+  servicesStore.services
+    .map((s) => s.id)
+    .filter((id) => id.startsWith('php-'))
+    .sort(),
+)
+
+const filterableServices = computed(() => [...LOG_SERVICES, ...pooledPhpServices.value])
 
 const LEVELS: { value: LogLevel | null; label: string }[] = [
   { value: null, label: 'All' },
@@ -16,6 +32,9 @@ const LEVELS: { value: LogLevel | null; label: string }[] = [
   { value: 'warn', label: 'Warn' },
   { value: 'error', label: 'Error' },
 ]
+
+/** The chosen segment of the service and level pickers. */
+const SEGMENT_ON_CLASS = 'glass-raised text-neutral-900 dark:text-neutral-50'
 
 const filtered = computed(() =>
   store.filtered(selectedService.value, selectedLevel.value, search.value),
@@ -37,21 +56,37 @@ function levelClass(level: LogLevel) {
       </div>
 
       <div class="flex shrink-0 items-center gap-2">
+        <!-- Same language as a service's Start/Stop: one neutral button whose
+             icon carries the state — green play to resume, accent-coloured bars to pause. -->
         <button
           type="button"
-          class="rounded-full px-4 py-2 text-sm font-semibold transition"
-          :class="
-            store.paused
-              ? 'bg-neutral-200/70 text-neutral-700 hover:bg-neutral-300/70 dark:bg-neutral-800 dark:text-neutral-200 dark:hover:bg-neutral-700'
-              : 'bg-red-100 text-red-600 hover:bg-red-200 dark:bg-red-500/15 dark:text-red-400 dark:hover:bg-red-500/25'
-          "
+          class="glass-accent flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition"
           @click="store.togglePause"
         >
+          <svg
+            v-if="store.paused"
+            viewBox="0 0 10 10"
+            fill="currentColor"
+            aria-hidden="true"
+            class="h-2.5 w-2.5 text-emerald-500"
+          >
+            <path d="M1.5 0.8 9 5 1.5 9.2Z" />
+          </svg>
+          <svg
+            v-else
+            viewBox="0 0 10 10"
+            fill="currentColor"
+            aria-hidden="true"
+            class="h-2.5 w-2.5"
+          >
+            <rect x="1.5" y="1" width="2.5" height="8" rx="0.8" />
+            <rect x="6" y="1" width="2.5" height="8" rx="0.8" />
+          </svg>
           {{ store.paused ? 'Resume' : 'Pause' }}
         </button>
         <button
           type="button"
-          class="rounded-full border border-neutral-200 bg-white/70 px-4 py-2 text-sm font-semibold text-neutral-700 transition hover:bg-white dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
+          class="glass-btn rounded-full px-4 py-2 text-sm font-semibold text-neutral-700 transition dark:text-neutral-200"
           @click="store.clear"
         >
           Clear
@@ -62,48 +97,36 @@ function levelClass(level: LogLevel) {
     <div class="mt-5 flex flex-wrap items-center gap-2">
       <SearchInput v-model="search" placeholder="Filter log text" class="min-w-55 flex-1" />
 
-      <div class="flex flex-wrap items-center gap-1.5">
+      <!-- A segmented control, like the level picker beside it: the chosen
+           filter is the lifted segment, the rest stay bare until hovered. -->
+      <div class="glass flex flex-wrap items-center gap-0.5 rounded-2xl p-1">
         <button
           type="button"
-          class="rounded-full px-3.5 py-1.5 text-sm font-medium transition"
-          :class="
-            selectedService === null
-              ? 'bg-red-600 text-white shadow-sm shadow-red-600/30'
-              : 'border border-neutral-200 bg-white/70 text-neutral-600 hover:bg-white dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-300 dark:hover:bg-neutral-800'
-          "
+          class="rounded-full px-3 py-1 text-sm font-medium transition"
+          :class="selectedService === null ? SEGMENT_ON_CLASS : 'glass-ghost'"
           @click="selectedService = null"
         >
           All services
         </button>
         <button
-          v-for="service in LOG_SERVICES"
+          v-for="service in filterableServices"
           :key="service"
           type="button"
-          class="rounded-full px-3.5 py-1.5 text-sm font-medium transition"
-          :class="
-            selectedService === service
-              ? 'bg-red-600 text-white shadow-sm shadow-red-600/30'
-              : 'border border-neutral-200 bg-white/70 text-neutral-600 hover:bg-white dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-300 dark:hover:bg-neutral-800'
-          "
+          class="rounded-full px-3 py-1 text-sm font-medium transition"
+          :class="selectedService === service ? SEGMENT_ON_CLASS : 'glass-ghost'"
           @click="selectedService = service"
         >
           {{ service }}
         </button>
       </div>
 
-      <div
-        class="ml-auto flex shrink-0 items-center gap-0.5 rounded-full border border-neutral-200 bg-white/70 p-1 dark:border-neutral-700 dark:bg-neutral-900/60"
-      >
+      <div class="glass ml-auto flex shrink-0 items-center gap-0.5 rounded-full p-1">
         <button
           v-for="level in LEVELS"
           :key="level.label"
           type="button"
           class="rounded-full px-3 py-1 text-xs font-semibold transition"
-          :class="
-            selectedLevel === level.value
-              ? 'bg-red-600 text-white'
-              : 'text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-100'
-          "
+          :class="selectedLevel === level.value ? SEGMENT_ON_CLASS : 'glass-ghost'"
           @click="selectedLevel = level.value"
         >
           {{ level.label }}
@@ -111,9 +134,7 @@ function levelClass(level: LogLevel) {
       </div>
     </div>
 
-    <div
-      class="mt-4 rounded-2xl border border-neutral-200/80 bg-neutral-100/60 dark:border-neutral-800 dark:bg-neutral-900/60"
-    >
+    <div class="glass mt-4 rounded-2xl">
       <div v-if="filtered.length === 0" class="p-6 text-center text-sm text-neutral-500">
         No log lines match the current filters.
       </div>
@@ -121,7 +142,7 @@ function levelClass(level: LogLevel) {
         <div
           v-for="entry in filtered"
           :key="entry.id"
-          class="flex items-start gap-3 rounded-lg px-2.5 py-1.5 font-mono text-xs hover:bg-white/60 dark:hover:bg-neutral-800/60"
+          class="flex items-start gap-3 rounded-lg px-2.5 py-1.5 font-mono text-xs hover:bg-white/50 dark:hover:bg-white/5"
         >
           <span class="w-16 shrink-0 text-neutral-400">{{ entry.time }}</span>
           <span class="w-16 shrink-0 text-neutral-500">{{ entry.service }}</span>
@@ -135,7 +156,7 @@ function levelClass(level: LogLevel) {
       </div>
 
       <div
-        class="flex items-center justify-between border-t border-neutral-200 px-4 py-2.5 text-xs text-neutral-500 dark:border-neutral-800"
+        class="glass-divider flex items-center justify-between border-t px-4 py-2.5 text-xs text-neutral-500"
       >
         <span>{{ filtered.length }} lines</span>
         <span>{{ store.paused ? 'Paused' : 'Live tail' }}</span>

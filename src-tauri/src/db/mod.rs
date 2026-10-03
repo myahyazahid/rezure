@@ -43,6 +43,17 @@ fn migrations() -> &'static Migrations<'static> {
                 sent_at INTEGER
             )",
             ),
+            // A project's own pinned PHP version, distinct from the global
+            // active one — `NULL` means "follow the global active version",
+            // same as a project that's never set an override. See
+            // `services::php_pool` for how this lets projects on different
+            // PHP versions run concurrently.
+            M::up("ALTER TABLE projects ADD COLUMN php_version TEXT"),
+            // Same idea as `php_version`, for Node.js — `NULL` follows the
+            // global active version (`services::node`). No pool/port behind
+            // this one: it only decides what `services::launcher::open_terminal`
+            // puts first on `PATH` when opening this project's terminal.
+            M::up("ALTER TABLE projects ADD COLUMN node_version TEXT"),
         ])
     })
 }

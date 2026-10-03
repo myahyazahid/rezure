@@ -18,6 +18,17 @@ export interface ProjectInfo {
   /** The folder name can't be used as a domain (a space, `;`, `{`…), so it
    *  isn't served — writing it to the nginx config would break every site. */
   domainInvalid: boolean
+  /** This project's own pinned PHP version, or `null` to follow the global
+   *  active version (Switch page). Pinning a version distinct from the
+   *  global default gives this project its own concurrently-running
+   *  `php-cgi`, so projects on different versions can run at the same time.
+   *  A terminal opened for this project resolves `php` as the same version. */
+  phpVersion: string | null
+  /** This project's own pinned Node.js version, or `null` to follow the
+   *  global active version. Unlike `phpVersion`, this never spawns anything
+   *  of its own — it only changes what a terminal opened for this project
+   *  resolves `node`/`npm`/`npx` as. */
+  nodeVersion: string | null
 }
 
 /** What linking a folder would produce, shown before anything is saved. */

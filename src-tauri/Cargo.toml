@@ -1,6 +1,6 @@
 [package]
 name = "rezureapp"
-version = "2.0.0"
+version = "3.0.0"
 description = "A modern, lightweight local development environment manager for Windows."
 authors = []
 license = "MIT"
@@ -28,7 +28,8 @@ tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-notification = "2"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+tauri-plugin-updater = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "sync", "io-util"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "multipart", "json"] }
 futures-util = "0.3"
 sha2 = "0.10"
@@ -40,3 +41,12 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 rusqlite_migration = "1"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+keyring = { version = "3.6.3", features = ["windows-native"] }
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+http = "1"
+bytes = "1"
+url = "2"
+odbc-api = { version = "29.1.1", default-features = false, features = ["odbc_version_3_80"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading"] }

@@ -4,18 +4,23 @@ import { usePhpStore } from '@/stores/php'
 import { useBinariesStore } from '@/stores/binaries'
 import { useServicesStore } from '@/stores/services'
 import { useComposerStore } from '@/stores/composer'
+import { useNodeStore } from '@/stores/node'
+import { usePostgresStore } from '@/stores/postgres'
 import RuntimeSwitchRow, {
   type RuntimeVersionEntry,
 } from '@/components/services/RuntimeSwitchRow.vue'
-import InstallPhpVersionModal from '@/components/services/InstallPhpVersionModal.vue'
+import InstallVersionModal from '@/components/services/InstallVersionModal.vue'
 import PhpPathLinkCard from '@/components/services/PhpPathLinkCard.vue'
 import PhpConfigCard from '@/components/services/PhpConfigCard.vue'
+import PhpCaBundleCard from '@/components/services/PhpCaBundleCard.vue'
 import BusyOverlay from '@/components/common/BusyOverlay.vue'
 
 const phpStore = usePhpStore()
 const binariesStore = useBinariesStore()
 const servicesStore = useServicesStore()
 const composerStore = useComposerStore()
+const nodeStore = useNodeStore()
+const postgresStore = usePostgresStore()
 
 const showInstallModal = ref(false)
 
@@ -33,6 +38,11 @@ async function switchPhp(id: string) {
 // Kept-alive view: fires on first mount and on every return to the page.
 onActivated(() => {
   composerStore.fetchStatus()
+  composerStore.fetchVersions()
+  binariesStore.fetchAll()
+  binariesStore.fetchMariaDbVersions()
+  nodeStore.fetchVersions()
+  postgresStore.fetchVersions()
   phpStore.fetchDropInDir()
   phpStore.fetchConfigDir()
   phpStore.fetchPathStatus()
@@ -46,15 +56,10 @@ const phpVersions = computed<RuntimeVersionEntry[]>(() =>
 const phpInstalledCount = computed(() => phpStore.versions.length)
 const customPhpCount = computed(() => phpStore.versions.filter((v) => !v.managed).length)
 
-const mariadb = computed(() => binariesStore.binaries.find((b) => b.id === 'mariadb') ?? null)
-const mariadbVersions = computed<RuntimeVersionEntry[]>(() =>
-  mariadb.value
-    ? [{ id: 'mariadb', version: mariadb.value.version, installed: mariadb.value.installed }]
-    : [],
-)
-
-// Only one build is offered, so there's nothing to switch between — the row
-// is here because this is the one place that installs it.
+// Only one build is offered for now (see the open question in
+// docs/v3/rezure-app-v3-phases-tasks.md about Nginx having no checksum
+// source to build a real catalog from), so there's nothing to switch
+// between yet — the row exists so the page has one place that installs it.
 const nginx = computed(() => binariesStore.binaries.find((b) => b.id === 'nginx') ?? null)
 const nginxVersions = computed<RuntimeVersionEntry[]>(() =>
   nginx.value
@@ -62,9 +67,81 @@ const nginxVersions = computed<RuntimeVersionEntry[]>(() =>
     : [],
 )
 
-const composerVersions = computed<RuntimeVersionEntry[]>(() => [
-  { id: 'composer', version: 'latest', installed: composerStore.installed },
-])
+// Same shape as Nginx: one build Rezure pins and checksums itself, so the
+// row reports whether it's installed rather than offering a switch.
+const mailpit = computed(() => binariesStore.binaries.find((b) => b.id === 'mailpit') ?? null)
+const mailpitVersions = computed<RuntimeVersionEntry[]>(() =>
+  mailpit.value
+    ? [{ id: 'mailpit', version: mailpit.value.version, installed: mailpit.value.installed }]
+    : [],
+)
+
+// MariaDB can have several versions installed (each database profile picks
+// its own compatible build — see `db_profiles::resolve_server_exe`), so
+// there's no single "active" version at this page's level the way PHP has
+// one. The newest installed build is shown as a label, not a real switch.
+// SQL Server LocalDB: a Windows install rather than a zip, but like Nginx and
+// Mailpit one pinned version, so the row only reports installed or not.
+const localdb = computed(() => binariesStore.binaries.find((b) => b.id === 'sqllocaldb') ?? null)
+const localdbVersions = computed<RuntimeVersionEntry[]>(() =>
+  localdb.value
+    ? [{ id: 'sqllocaldb', version: localdb.value.version, installed: localdb.value.installed }]
+    : [],
+)
+
+const mariadbVersions = computed<RuntimeVersionEntry[]>(() =>
+  binariesStore.mariadbVersions.map((v) => ({
+    id: v.version,
+    version: v.version,
+    installed: true,
+  })),
+)
+const mariadbActiveVersion = computed(() => binariesStore.mariadbVersions[0]?.version ?? null)
+const mariadbProgress = computed(() =>
+  binariesStore.installingMariaDbVersion
+    ? binariesStore.progressFor(`mariadb-${binariesStore.installingMariaDbVersion}`)
+    : null,
+)
+
+const composerVersions = computed<RuntimeVersionEntry[]>(() =>
+  composerStore.versions.map((v) => ({ id: v.id, version: v.version, installed: true })),
+)
+const composerProgress = computed(() =>
+  composerStore.installingVersion
+    ? composerStore.progressFor(composerStore.installingVersion)
+    : null,
+)
+
+// Node versions are discovered on disk, same as PHP — everything listed is
+// installed by definition, and switching (unlike PHP) never restarts a
+// service since Node isn't proxied through nginx here. See `services::node`.
+const nodeVersions = computed<RuntimeVersionEntry[]>(() =>
+  nodeStore.versions.map((v) => ({
+    id: v.id,
+    version: v.version,
+    installed: v.installed,
+    detail: v.npm ? `npm ${v.npm}` : null,
+  })),
+)
+const nodeProgress = computed(() =>
+  nodeStore.installingVersion ? nodeStore.progressFor(nodeStore.installingVersion) : null,
+)
+
+// PostgreSQL: discovered on disk like Node, but switching restarts a running
+// server — on the new major's own data (see `services::postgres`).
+const postgresVersions = computed<RuntimeVersionEntry[]>(() =>
+  postgresStore.versions.map((v) => ({
+    id: v.id,
+    version: v.version,
+    installed: v.installed,
+    detail: `data: postgres\\${v.major}`,
+  })),
+)
+const postgresProgress = computed(() =>
+  postgresStore.installingVersion
+    ? postgresStore.progressFor(postgresStore.installingVersion)
+    : null,
+)
 
 // A PHP install can be started from the modal and keeps running after it's
 // closed, so the row reports the progress of whichever version is in flight.
@@ -91,7 +168,7 @@ const hasPhpConfig = computed(
 
       <button
         type="button"
-        class="flex shrink-0 items-center gap-2 rounded-full bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-red-500/40 transition hover:bg-red-500"
+        class="glass-accent flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition"
         @click="showInstallModal = true"
       >
         <svg
@@ -107,7 +184,7 @@ const hasPhpConfig = computed(
       </button>
     </div>
 
-    <InstallPhpVersionModal v-if="showInstallModal" @close="showInstallModal = false" />
+    <InstallVersionModal v-if="showInstallModal" @close="showInstallModal = false" />
 
     <p v-if="phpStore.error" class="mt-3 text-sm text-red-600 dark:text-red-400">
       {{ phpStore.error }}
@@ -118,15 +195,25 @@ const hasPhpConfig = computed(
     <p v-if="composerStore.error" class="mt-3 text-sm text-red-600 dark:text-red-400">
       {{ composerStore.error }}
     </p>
+    <p v-if="binariesStore.mariadbCatalogError" class="mt-3 text-sm text-red-600 dark:text-red-400">
+      {{ binariesStore.mariadbCatalogError }}
+    </p>
+    <p v-if="nodeStore.catalogError" class="mt-3 text-sm text-red-600 dark:text-red-400">
+      {{ nodeStore.catalogError }}
+    </p>
+    <p v-if="nodeStore.error" class="mt-3 text-sm text-red-600 dark:text-red-400">
+      {{ nodeStore.error }}
+    </p>
+    <p v-if="postgresStore.error" class="mt-3 text-sm text-red-600 dark:text-red-400">
+      {{ postgresStore.error }}
+    </p>
 
     <h2 class="mt-6 mb-2 text-xs font-semibold tracking-wide text-neutral-400 uppercase">
       Runtimes
     </h2>
-    <div
-      class="flex flex-col divide-y divide-neutral-200/80 rounded-2xl border border-neutral-200/80 bg-neutral-100/60 dark:divide-neutral-800 dark:border-neutral-800 dark:bg-neutral-900/60"
-    >
+    <div class="glass flex flex-col divide-y divide-neutral-900/8 rounded-2xl dark:divide-white/8">
       <RuntimeSwitchRow
-        icon="P"
+        icon="php"
         name="PHP"
         :active-version="phpStore.active?.version ?? null"
         :installed-count="phpInstalledCount"
@@ -135,47 +222,77 @@ const hasPhpConfig = computed(
         :progress="phpProgress"
         :busy="phpStore.switching !== null"
         @select="switchPhp"
-        @install="phpStore.install"
       />
       <RuntimeSwitchRow
-        icon="N"
+        icon="nginx"
         name="Nginx"
         :active-version="nginx?.installed ? nginx.version : null"
         :installed-count="nginx?.installed ? 1 : 0"
         :versions="nginxVersions"
         :installing-id="binariesStore.isInstalling('nginx') ? 'nginx' : null"
         :progress="binariesStore.progressFor('nginx')"
-        @install="binariesStore.install('nginx')"
       />
       <RuntimeSwitchRow
-        icon="M"
+        icon="mariadb"
         name="MariaDB"
-        :active-version="mariadb?.installed ? mariadb.version : null"
-        :installed-count="mariadb?.installed ? 1 : 0"
+        :active-version="mariadbActiveVersion"
+        :installed-count="binariesStore.mariadbVersions.length"
         :versions="mariadbVersions"
-        :installing-id="binariesStore.isInstalling('mariadb') ? 'mariadb' : null"
-        :progress="binariesStore.progressFor('mariadb')"
-        @install="binariesStore.install('mariadb')"
+        :installing-id="binariesStore.installingMariaDbVersion"
+        :progress="mariadbProgress"
       />
       <RuntimeSwitchRow
-        icon="C"
+        icon="postgres"
+        name="PostgreSQL"
+        :active-version="postgresStore.active?.version ?? null"
+        :installed-count="postgresStore.versions.length"
+        :versions="postgresVersions"
+        :installing-id="postgresStore.installingVersion"
+        :progress="postgresProgress"
+        :busy="postgresStore.switching !== null"
+        @select="postgresStore.setActive"
+      />
+      <RuntimeSwitchRow
+        icon="mailpit"
+        name="Mailpit"
+        :active-version="mailpit?.installed ? mailpit.version : null"
+        :installed-count="mailpit?.installed ? 1 : 0"
+        :versions="mailpitVersions"
+        :installing-id="binariesStore.isInstalling('mailpit') ? 'mailpit' : null"
+        :progress="binariesStore.progressFor('mailpit')"
+      />
+      <RuntimeSwitchRow
+        icon="sqlserver"
+        name="SQL Server LocalDB"
+        :active-version="localdb?.installed ? localdb.version : null"
+        :installed-count="localdb?.installed ? 1 : 0"
+        :versions="localdbVersions"
+        :installing-id="binariesStore.isInstalling('sqllocaldb') ? 'sqllocaldb' : null"
+        :progress="binariesStore.progressFor('sqllocaldb')"
+      />
+      <RuntimeSwitchRow
+        icon="composer"
         name="Composer"
-        :active-version="composerStore.installed ? 'latest' : null"
-        :installed-count="composerStore.installed ? 1 : 0"
+        :active-version="composerStore.active?.version ?? null"
+        :installed-count="composerStore.versions.length"
         :versions="composerVersions"
-        :installing-id="composerStore.installing ? 'composer' : null"
-        @install="composerStore.install"
+        :installing-id="composerStore.installingVersion"
+        :progress="composerProgress"
+        @select="composerStore.setActive"
       />
       <RuntimeSwitchRow
-        icon="N"
+        icon="node"
         name="Node.js"
-        active-version=""
-        :installed-count="0"
-        :versions="[]"
-        disabled
+        :active-version="nodeStore.active?.version ?? null"
+        :installed-count="nodeStore.versions.length"
+        :versions="nodeVersions"
+        :installing-id="nodeStore.installingVersion"
+        :progress="nodeProgress"
+        :busy="nodeStore.switching !== null"
+        @select="nodeStore.setActive"
       />
       <RuntimeSwitchRow
-        icon="P"
+        icon="python"
         name="Python"
         active-version=""
         :installed-count="0"
@@ -188,8 +305,13 @@ const hasPhpConfig = computed(
       hand — Rezure didn't checksum those.
     </p>
     <p class="mt-2 text-xs text-neutral-400">
-      Node.js and Python aren't available yet — Rezure doesn't bundle a portable runtime for either,
-      so there's nothing installable to switch between.
+      The PHP and Node.js versions picked here are what a project's terminal uses unless that
+      project pins its own (see the PHP and Node icons on a project's card). Python isn't available
+      yet — it publishes no checksum Rezure can verify a download against.
+    </p>
+    <p v-if="postgresStore.versions.length > 1" class="mt-2 text-xs text-neutral-400">
+      Each PostgreSQL major keeps its own databases: switching from one to another starts on that
+      version's data, it doesn't carry yours across. Export and import to move them.
     </p>
 
     <h2
@@ -200,10 +322,11 @@ const hasPhpConfig = computed(
     </h2>
     <div
       v-if="hasPhpConfig"
-      class="divide-y divide-neutral-200/80 rounded-2xl border border-neutral-200/80 bg-neutral-100/60 dark:divide-neutral-800 dark:border-neutral-800 dark:bg-neutral-900/60"
+      class="glass divide-y divide-neutral-900/8 rounded-2xl dark:divide-white/8"
     >
       <PhpPathLinkCard />
       <PhpConfigCard />
+      <PhpCaBundleCard />
 
       <div v-if="phpStore.dropInDir" class="p-4">
         <div class="flex items-start justify-between gap-4">
@@ -216,14 +339,14 @@ const hasPhpConfig = computed(
           </div>
           <button
             type="button"
-            class="shrink-0 rounded-full border border-neutral-200 bg-white px-4 py-1.5 text-xs font-semibold text-neutral-700 transition hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-200 dark:hover:bg-neutral-800"
+            class="glass-btn shrink-0 rounded-full px-4 py-1.5 text-xs font-semibold text-neutral-700 transition dark:text-neutral-200"
             @click="phpStore.openDropInDir"
           >
             Open folder
           </button>
         </div>
         <p
-          class="mt-3 truncate rounded-lg bg-neutral-100 px-2.5 py-1.5 font-mono text-xs text-neutral-500 dark:bg-neutral-800/60"
+          class="glass-inset mt-3 truncate rounded-lg px-2.5 py-1.5 font-mono text-xs text-neutral-500"
           :title="phpStore.dropInDir"
         >
           {{ phpStore.dropInDir }}
@@ -235,6 +358,11 @@ const hasPhpConfig = computed(
       :show="phpStore.switching !== null"
       label="Switching PHP…"
       :detail="`Re-pointing the PATH link and reloading the service onto ${phpStore.switching}.`"
+    />
+    <BusyOverlay
+      :show="postgresStore.switching !== null"
+      label="Switching PostgreSQL…"
+      :detail="`Stopping the running server cleanly and starting ${postgresStore.switching}.`"
     />
   </section>
 </template>
