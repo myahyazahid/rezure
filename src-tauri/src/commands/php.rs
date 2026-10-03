@@ -12,12 +12,14 @@ use crate::config::settings::{self, SettingsState};
 use crate::services::binaries;
 use crate::services::ca_bundle::{self, CaBundleStatus};
 use crate::services::doctor::{self, ProjectDiagnosis, TlsCheck};
+use crate::services::mssql_localdb;
 use crate::services::php::{self, PhpVersionStatus};
 use crate::services::php_catalog::{self, PhpRelease};
 use crate::services::php_ext::{self, ExtensionStatus};
 use crate::services::php_ext_toggle::{self, ExtensionToggle};
 use crate::services::php_ini;
 use crate::services::php_path::{self, PhpPathStatus};
+use crate::services::postgres;
 use crate::services::{ServiceManager, ServiceStatus};
 use crate::utils::error::AppError;
 
@@ -223,8 +225,9 @@ pub async fn set_bundled_php_extension(
 /// `spawn_blocking` like every other command here that shells out.
 ///
 /// When the project mails a local SMTP server, whether Mailpit is there to
-/// catch it is filled in here: `doctor` reads the project, the
-/// `ServiceManager` knows the services.
+/// catch it is filled in here — and likewise LocalDB for a project on SQL
+/// Server, and PostgreSQL for one on `pgsql`: `doctor` reads the project,
+/// the `ServiceManager` knows the services.
 #[tauri::command]
 pub async fn diagnose_project(
     id: String,
@@ -237,6 +240,22 @@ pub async fn diagnose_project(
         let info = mailpit.info();
         mail.mailpit_installed = info.installed;
         mail.mailpit_running = info.status == ServiceStatus::Running;
+    }
+    if let (Some(sql_server), Ok(localdb)) = (
+        diagnosis.sql_server.as_mut(),
+        manager.find(mssql_localdb::SERVICE_ID),
+    ) {
+        let info = localdb.info();
+        sql_server.localdb_installed = info.installed;
+        sql_server.localdb_running = info.status == ServiceStatus::Running;
+    }
+    if let (Some(setup), Ok(service)) = (
+        diagnosis.postgres.as_mut(),
+        manager.find(postgres::SERVICE_ID),
+    ) {
+        let info = service.info();
+        setup.postgres_installed = info.installed;
+        setup.postgres_running = info.status == ServiceStatus::Running;
     }
     Ok(diagnosis)
 }

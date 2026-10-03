@@ -2,13 +2,17 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import type { PortHolder, ServiceInfo } from '@/types/service'
+import type { ManagedService, PortHolder, ServiceInfo } from '@/types/service'
 
 // Keep in sync with `CHANGED_EVENT` in src-tauri/src/services/supervisor.rs
 const CHANGED_EVENT = 'service://changed'
 
 export const useServicesStore = defineStore('services', () => {
+  /** The Services page's rows: every service not removed with Manage
+   *  services. */
   const services = ref<ServiceInfo[]>([])
+  /** The Manage services list — every service, shown or not. */
+  const managed = ref<ManagedService[]>([])
   const loading = ref(false)
   const pendingIds = ref<Set<string>>(new Set())
 
@@ -106,12 +110,24 @@ export const useServicesStore = defineStore('services', () => {
     )
   }
 
+  async function fetchManaged() {
+    managed.value = await invoke<ManagedService[]>('list_managed_services')
+  }
+
+  /** Adds a service to the Services page or removes it. Removing a running
+   *  one stops it first, on the Rust side. */
+  async function setShown(id: string, shown: boolean) {
+    managed.value = await invoke<ManagedService[]>('set_service_shown', { id, shown })
+    await fetchAll()
+  }
+
   function isPending(id: string) {
     return pendingIds.value.has(id)
   }
 
   return {
     services,
+    managed,
     loading,
     runningCount,
     busy,
@@ -126,6 +142,8 @@ export const useServicesStore = defineStore('services', () => {
     openUi,
     stopAll,
     restartAll,
+    fetchManaged,
+    setShown,
     isPending,
   }
 })

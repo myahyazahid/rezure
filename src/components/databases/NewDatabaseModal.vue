@@ -8,8 +8,36 @@ const store = useDatabasesStore()
 
 const DEFAULT_COLLATION = 'utf8mb4_unicode_ci'
 
+/** The default to offer before the server's list arrives. SQL Server's
+ *  collations are nothing like MySQL's, so there it waits for the real list;
+ *  PostgreSQL picks an encoding instead, and UTF-8 is the one. */
+const fallback = computed(() => {
+  switch (store.server?.kind) {
+    case 'sqlserver':
+      return null
+    case 'postgres':
+      return 'UTF8'
+    default:
+      return DEFAULT_COLLATION
+  }
+})
+
+/** What the second field picks: PostgreSQL sets an encoding per database,
+ *  not a collation. */
+const settingLabel = computed(() => (store.server?.kind === 'postgres' ? 'Encoding' : 'Collation'))
+
 const name = ref('')
-const collation = ref(DEFAULT_COLLATION)
+const collation = ref(fallback.value ?? '')
+
+// The list leads with the server's own default; land on it rather than on a
+// name this server may not have.
+watch(
+  () => store.collations,
+  (list) => {
+    const first = list[0]
+    if (first && !list.includes(collation.value)) collation.value = first
+  },
+)
 
 /** Mirrors `validate_identifier` in `services/database.rs` — the Rust side
  *  is the one that actually enforces this; checking here just means the
@@ -29,7 +57,9 @@ const nameError = computed(() => {
   return null
 })
 
-const canCreate = computed(() => name.value.trim().length > 0 && !nameError.value)
+const canCreate = computed(
+  () => name.value.trim().length > 0 && !nameError.value && collation.value !== '',
+)
 
 function close() {
   if (store.creating) return
@@ -48,7 +78,9 @@ function onKeydown(e: KeyboardEvent) {
 
 onMounted(() => {
   window.addEventListener('keydown', onKeydown)
-  if (store.collations.length === 0) store.fetchCollations()
+  // Every time, not once: the list belongs to whichever server the page is
+  // reading, and that changes with the switcher.
+  store.fetchCollations()
 })
 onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
@@ -65,7 +97,7 @@ watch(name, () => {
     <div class="glass-strong w-full max-w-md rounded-3xl p-6">
       <h2 class="text-xl font-bold tracking-tight">New database</h2>
       <p class="mt-0.5 text-sm text-neutral-500">
-        Created on Rezure's MariaDB — empty, with no tables.
+        Created on {{ store.server?.label || 'the database server' }} — empty, with no tables.
       </p>
 
       <label class="mt-5 block text-xs font-medium text-neutral-500">Database name</label>
@@ -80,15 +112,15 @@ watch(name, () => {
       />
       <p v-if="nameError" class="mt-1.5 text-xs text-red-600 dark:text-red-400">{{ nameError }}</p>
 
-      <label class="mt-4 block text-xs font-medium text-neutral-500">Collation</label>
+      <label class="mt-4 block text-xs font-medium text-neutral-500">{{ settingLabel }}</label>
       <select
         v-model="collation"
         class="glass-inset mt-1 w-full rounded-xl px-3.5 py-2.5 font-mono text-sm text-neutral-900 outline-none focus:border-accent-400/70 dark:text-neutral-100"
       >
         <!-- The server's real list, once it has loaded; until then the
              default is still a valid choice on its own. -->
-        <option v-if="store.collations.length === 0" :value="DEFAULT_COLLATION">
-          {{ DEFAULT_COLLATION }}
+        <option v-if="store.collations.length === 0 && fallback" :value="fallback">
+          {{ fallback }}
         </option>
         <option v-for="option in store.collations" :key="option" :value="option">
           {{ option }}

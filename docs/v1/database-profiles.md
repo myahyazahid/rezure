@@ -1,7 +1,11 @@
 # Database profiles
 
-Rezure runs **one** database server at a time. A *profile* decides which data directory that
-server is pointed at — Rezure's own, or one belonging to a tool you already use.
+Rezure runs **one** MySQL-family database server at a time. A *profile* decides which data
+directory that server is pointed at — Rezure's own, or one belonging to a tool you already use.
+
+> This rule is about MySQL and MariaDB only — one `mysqld` per data directory. PostgreSQL is a
+> separate service on its own port (5432) and runs alongside whichever profile is active; it has
+> no profiles. See [PostgreSQL](databases.md#postgresql).
 
 This is what lets you open a Laragon or XAMPP database in Rezure without exporting and
 re-importing gigabytes of data. Nothing is copied, moved, merged, or converted: a profile

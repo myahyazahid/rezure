@@ -246,6 +246,7 @@ pub async fn install(app: &AppHandle, version: &str) -> Result<(), AppError> {
             sha256: &release.sha256,
             dest_dir,
             exe_relative_path: &exe_relative,
+            keep: &[],
         },
     )
     .await

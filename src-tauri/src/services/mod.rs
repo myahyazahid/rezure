@@ -18,9 +18,14 @@ pub mod doctor;
 pub mod donate;
 pub mod hosts;
 pub mod launcher;
+pub mod localdb_bridge;
 pub mod mariadb_catalog;
+pub mod msi;
+pub mod mssql;
+pub mod mssql_localdb;
 pub mod node;
 pub mod node_catalog;
+pub mod odbc;
 pub mod php;
 pub mod php_catalog;
 pub mod php_ext;
@@ -29,10 +34,14 @@ pub mod php_ini;
 pub mod php_path;
 pub mod php_pool;
 pub mod ports;
+pub mod postgres;
+pub mod postgres_catalog;
+pub mod postgres_client;
 pub mod process;
 pub mod projects;
 pub mod scaffold;
 pub mod secrets;
+pub mod service_visibility;
 pub mod share;
 pub mod share_proxy;
 pub mod supervisor;
@@ -100,6 +109,10 @@ pub struct ServiceInfo {
     pub install_id: Option<String>,
     /// A web UI the service serves, to open in the browser while it runs.
     pub web_url: Option<String>,
+    /// How clients reach a service that listens on no TCP port — SQL Server
+    /// LocalDB answers on a named pipe, addressed as `(localdb)\Rezure`.
+    /// Shown in place of the port; `None` for every port-bound service.
+    pub endpoint: Option<String>,
 }
 
 /// How many of a multi-process service's workers are up.

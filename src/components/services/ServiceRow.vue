@@ -7,6 +7,8 @@ import BasePill from '@/components/common/BasePill.vue'
 import ServiceSparkline from '@/components/services/ServiceSparkline.vue'
 import ServiceLogPanel from '@/components/services/ServiceLogPanel.vue'
 import TechIcon from '@/components/common/TechIcon.vue'
+import LicenseConsentModal from '@/components/common/LicenseConsentModal.vue'
+import { useLicensedInstall } from '@/composables/useLicensedInstall'
 
 const props = defineProps<{ service: ServiceInfo }>()
 
@@ -30,8 +32,16 @@ const error = ref<string | null>(null)
 const ports = computed(() => props.service.ports)
 
 /** Workers sit on consecutive ports and read best as a range; separate
- *  listeners (Mailpit's SMTP and web UI) are listed side by side. */
+ *  listeners (Mailpit's SMTP and web UI) are listed side by side. A service
+ *  with no port at all (LocalDB's named pipe) shows how it's reached
+ *  instead. */
 const portLabel = computed(() => {
+  // LocalDB: its pipe address, plus the TCP port Rezure bridges to it for
+  // clients that can't open a pipe.
+  if (props.service.endpoint) {
+    const bridged = ports.value[0]
+    return bridged ? `${props.service.endpoint} · :${bridged}` : props.service.endpoint
+  }
   const list = ports.value
   if (props.service.workers && list.length > 1) return `:${list[0]}–${list[list.length - 1]}`
   return list.map((port) => `:${port}`).join(' ')
@@ -53,22 +63,29 @@ const installLabel = computed(() => {
   if (!p) return 'Installing…'
   if (p.stage === 'verifying') return 'Verifying…'
   if (p.stage === 'extracting') return 'Extracting…'
+  if (p.stage === 'installing') return 'Installing…'
   return p.totalBytes
     ? `Downloading… ${Math.min(100, Math.round((p.downloadedBytes / p.totalBytes) * 100))}%`
     : 'Downloading…'
 })
 
+/** Asks for license consent first when the package is a Microsoft
+ *  installer (LocalDB); installs straight away otherwise. */
+const licensed = useLicensedInstall()
+
 async function onInstall() {
   const id = props.service.installId
   if (!id) return
   error.value = null
-  try {
-    // Refetches the service list itself, which is what flips this row to
-    // Start.
-    await binaries.install(id)
-  } catch (e) {
-    error.value = errorMessage(e)
-  }
+  // Refetches the service list itself, which is what flips this row to
+  // Start.
+  await licensed.request(id)
+  if (licensed.error.value) error.value = licensed.error.value
+}
+
+async function onConsent() {
+  await licensed.confirm()
+  if (licensed.error.value) error.value = licensed.error.value
 }
 
 async function onOpenUi() {
@@ -529,5 +546,12 @@ function requestForceStop() {
     </div>
 
     <ServiceLogPanel v-if="expanded" :service-id="service.id" />
+
+    <LicenseConsentModal
+      v-if="licensed.pending.value"
+      :pkg="licensed.pending.value"
+      @confirm="onConsent"
+      @close="licensed.cancel"
+    />
   </div>
 </template>

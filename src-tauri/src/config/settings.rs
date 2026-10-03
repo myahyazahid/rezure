@@ -34,6 +34,9 @@ pub struct Settings {
     /// `settings.json` written before this field existed still loads.
     #[serde(default)]
     pub active_node_version: Option<String>,
+    /// Same again, for `services::postgres`.
+    #[serde(default)]
+    pub active_postgres_version: Option<String>,
     /// Registers Rezure with Windows to launch at sign-in, via
     /// `tauri-plugin-autostart`. Kept here (rather than only asking the OS)
     /// so the Settings toggle reflects intent even if `lib.rs`'s startup
@@ -68,6 +71,11 @@ pub struct Settings {
     /// (see `config::stickers`), so what is in memory is always drawable.
     #[serde(default, deserialize_with = "stickers::lenient_decorations")]
     pub decorations: Decorations,
+    /// Services taken off the Services page with Manage services, by id.
+    /// See `services::service_visibility` for why it lists the removed ones
+    /// rather than the kept ones.
+    #[serde(default)]
+    pub hidden_services: Vec<String>,
 }
 
 /// Light, dark, or whatever Windows is set to. Light is the default on
@@ -224,12 +232,14 @@ impl Default for Settings {
             share_usage_data: default_share_usage_data(),
             active_php_version: None,
             active_node_version: None,
+            active_postgres_version: None,
             start_with_windows: false,
             keep_in_tray_on_close: false,
             notify_on_crash: false,
             auto_write_hosts: false,
             appearance: None,
             decorations: Decorations::default(),
+            hidden_services: Vec::new(),
         }
     }
 }
@@ -376,6 +386,7 @@ mod tests {
             share_usage_data: true,
             active_php_version: Some("8.3.33".to_string()),
             active_node_version: Some("22.11.0".to_string()),
+            active_postgres_version: Some("18.6".to_string()),
             start_with_windows: true,
             keep_in_tray_on_close: true,
             notify_on_crash: true,
@@ -402,6 +413,7 @@ mod tests {
                     flip: true,
                 }],
             },
+            hidden_services: vec!["sqlserver".to_string()],
         };
         save_to(&path, &settings).unwrap();
         let loaded = load_from(&path);
@@ -409,12 +421,14 @@ mod tests {
         assert!(loaded.share_usage_data);
         assert_eq!(loaded.active_php_version.as_deref(), Some("8.3.33"));
         assert_eq!(loaded.active_node_version.as_deref(), Some("22.11.0"));
+        assert_eq!(loaded.active_postgres_version.as_deref(), Some("18.6"));
         assert!(loaded.start_with_windows);
         assert!(loaded.keep_in_tray_on_close);
         assert!(loaded.notify_on_crash);
         assert!(loaded.auto_write_hosts);
         assert_eq!(loaded.appearance, settings.appearance);
         assert_eq!(loaded.decorations, settings.decorations);
+        assert_eq!(loaded.hidden_services, ["sqlserver"]);
         std::fs::remove_file(&path).unwrap();
     }
 

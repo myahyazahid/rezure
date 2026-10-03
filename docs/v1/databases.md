@@ -2,7 +2,8 @@
 
 The Databases page manages the schemas inside **Rezure's own MariaDB** — creating them,
 exporting them, importing dumps, and handing one off to whichever SQL client you already
-use.
+use. The same page reads [SQL Server](#sql-server) and [PostgreSQL](#postgresql), local or
+elsewhere, through its connection switcher.
 
 ---
 
@@ -179,6 +180,178 @@ input.
 
 Every argument handed to a SQL client is passed as its own argv entry — nothing is spliced
 into a shell command line.
+
+---
+
+## SQL Server
+
+For projects whose database is Microsoft SQL Server. Everything below is installed from
+inside Rezure, on request — but two of the pieces are real **Windows installs**, not files
+under `C:\rezure`:
+
+| Piece | Where it's installed from | What it is |
+|---|---|---|
+| `pdo_sqlsrv` / `sqlsrv` | PHP Extensions page, or a project's requirements check | Microsoft's PHP drivers. A DLL in the PHP version's `ext\`, like `redis` |
+| Microsoft ODBC Driver 18 | PHP Extensions page, the requirements check, or Add connection | What both the PHP drivers and the Databases page talk to SQL Server through. **One UAC prompt**; listed in Settings → Apps |
+| SQL Server Express LocalDB (optional) | Services card, or Switch → Install version | A local SQL Server. **One UAC prompt**; listed in Settings → Apps |
+
+Before either Windows install, Rezure shows Microsoft's license and waits for you to tick
+the box accepting it — it never accepts it for you. The installers are downloaded from
+Microsoft, checked against a pinned checksum and Microsoft's signature, then run.
+Uninstalling Rezure doesn't remove them.
+
+**The PHP drivers load without the ODBC Driver** — PHP reports nothing wrong — and every
+connection then fails with "This extension requires the Microsoft ODBC Driver for SQL
+Server". The PHP Extensions page and the requirements check both say so up front.
+
+### LocalDB
+
+Rezure creates one instance, `Rezure`, as soon as LocalDB is installed. It has **no TCP
+port**: clients reach it over a named pipe, as `(localdb)\Rezure`, signed in as your Windows
+user. The Services card shows that address where other services show a port, and LocalDB
+starts by itself the moment something connects — Start on the card is optional.
+
+```dotenv
+DB_CONNECTION=sqlsrv
+DB_HOST='(localdb)\Rezure'
+DB_PORT=           # must be empty — Laravel appends any port, even its 1433 default
+DB_DATABASE=my_app
+DB_USERNAME=       # empty = Windows Authentication
+DB_PASSWORD=
+```
+
+**For SQL clients that can't open a named pipe** — TablePlus and DBeaver only speak to SQL
+Server over TCP — Rezure also relays `127.0.0.1:14330` to the instance's pipe while it runs
+(not 1433, so a SQL Server you install later can still have that). Connect with the SQL login
+**`rezure`, no password**, and **encryption off**: over its pipe LocalDB offers no TLS, so a
+client that insists on it is refused. The login is Rezure's, created on first use, with the
+same stance as MariaDB's passwordless `root`: a throwaway local server, reachable from this
+machine only. The Services card shows the port beside `(localdb)\Rezure`.
+
+A connection called **SQL Server LocalDB** appears in the Databases switcher by itself. It's
+treated like the local MariaDB: writable, with the "Used by" column. Databases created or
+restored there keep their files in `C:\rezure\data\mssql\` (LocalDB's own default is the root
+of your user folder). **Export** writes a `.bak` backup to `C:\rezure\dumps\`; **Import**
+takes either a `.sql` script (split on `GO` lines, as SSMS does) or a `.bak`, which is
+**restored whole**, replacing a database of the same name.
+
+### A SQL Server elsewhere
+
+Add it as a connection (Add connection → Server type: SQL Server). Sign in with a SQL Server
+login, or with your Windows account for a server on your office domain. For a named instance
+(`host\SQLEXPRESS`) leave the port empty.
+
+Export and `.bak` restore aren't offered for these: `BACKUP` and `RESTORE` read and write the
+**server's** disk, not this machine's. Listing, creating, dropping (when the connection isn't
+read-only) and running `.sql` scripts work.
+
+**ODBC Driver 18 encrypts by default** and refuses a self-signed certificate, which most
+development and office servers have. Tick **Trust server certificate** on the connection for
+such a server. A Laravel project needs the same thing in two places — uncomment
+`'trust_server_certificate'` in `config/database.php` **and** set
+`DB_TRUST_SERVER_CERTIFICATE=true` — because Laravel ships that config line commented out, so
+the env var alone does nothing. LocalDB doesn't need any of this.
+
+Open in a client, for SQL Server:
+
+| Client | How it's opened | When it's offered |
+|---|---|---|
+| SQL Server Management Studio | `-S`, `-d`, `-E`/`-U` | Always — it reaches LocalDB's pipe itself |
+| TablePlus | `sqlserver://user@host:port/database` | A SQL login on a known port — for LocalDB, the bridge and `rezure`. TablePlus can't do Windows Authentication |
+| DBeaver | `-con "driver=microsoft\|…"`, with `prop.encrypt=false` for LocalDB | Same as TablePlus. The first time, DBeaver asks to download its SQL Server JDBC driver — once per DBeaver workspace |
+
+HeidiSQL isn't offered for SQL Server: version 12.8 opened its session manager on the last
+session for every form of its MSSQL command line (`-n=4`) that was tried, and never connected.
+It's still offered for MySQL and MariaDB.
+
+`show databases` doesn't exist in SQL Server — use `SELECT name FROM sys.databases`.
+
+---
+
+## PostgreSQL
+
+A local PostgreSQL, run by Rezure like MariaDB — beside it, on its own port, not instead of
+it. Install it from its card on the Services page (the newest version) or from Switch →
+Install version (18, 17 or 16). These are EDB's portable Windows builds, unpacked under
+`C:\rezure\bin\postgres\<version>\`: no installer, no admin prompt, nothing in Settings → Apps.
+Only the server and its tools are kept — about 150 MB — not the pgAdmin that comes in the same
+archive.
+
+| | |
+|---|---|
+| Address | `127.0.0.1:5432` |
+| Users | `postgres` and `root`, both superusers |
+| Password | none needed — the server trusts connections from this machine, and only listens on `127.0.0.1` |
+| Data | `C:\rezure\data\postgres\<major>\`, created on the first start |
+
+`root` is there because it's the username Laravel's `config/database.php` falls back to for
+`pgsql`, so a project switched to PostgreSQL connects without touching `DB_USERNAME`:
+
+```dotenv
+DB_CONNECTION=pgsql
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_DATABASE=my_app
+DB_USERNAME=root
+DB_PASSWORD=
+```
+
+**PHP's `pdo_pgsql` is off by default** — it ships with every PHP build, it just isn't loaded —
+and Laravel then fails with "could not find driver". Turn it on in PHP Extensions, or from a
+project's requirements check, which also says whether PostgreSQL is installed and running and
+whether `.env` matches it.
+
+### Versions and their data
+
+The Switch page picks which installed version the service runs. **Each major version keeps
+its own databases**: a data directory can only be opened by the major that created it, so
+switching from 17 to 18 starts 18 on its own data — nothing is upgraded or lost, 17's data is
+still there when you switch back. Move databases between them with Export and Import. Switching
+while PostgreSQL is running stops it cleanly and starts the new version.
+
+PostgreSQL refuses to run as administrator. If Rezure itself was opened with "Run as
+administrator", Start says so — close it and open it normally.
+
+### On the Databases page
+
+A connection called **PostgreSQL** appears in the switcher by itself, treated like the local
+MariaDB: writable, with the "Used by" column.
+
+- **New database** asks for an encoding rather than a collation, and creates it in UTF-8 from
+  `template0`.
+- **Export** runs `pg_dump` and writes a plain `.sql` file to `C:\rezure\dumps\`, without
+  ownership or privilege statements, so it imports into a database of any name, under any role.
+  It can't be cancelled half-way.
+- **Import** runs a `.sql` file with `psql`, creating the database first if it doesn't exist,
+  and stops at the first error, naming its line. A `pg_dump` script has no `DROP` statements
+  unless it was taken with `--clean`, so importing into a database that already has those tables
+  stops at the first one — import into a new name instead.
+- **Drop** (from the backend; there's still no button) closes any open sessions on Rezure's own
+  server first, so a PHP worker holding a connection doesn't block it.
+
+Every query goes through the `psql` of an installed PostgreSQL build, passing SQL on stdin:
+Windows hands a console program its arguments in the ANSI code page, which turned `é` into an
+invalid byte when passed on the command line.
+
+### A PostgreSQL elsewhere
+
+Add it as a connection (Add connection → Server type: PostgreSQL). It needs at least one
+PostgreSQL version installed here, for `psql` and `pg_dump`; the newest one is used, because
+`pg_dump` refuses a server newer than itself. **Encryption** maps to libpq's `sslmode`: Off is
+`disable`, Automatic is `prefer`, Required is `require`. A password is passed through a
+temporary password file, never on a command line.
+
+Open in a client, for PostgreSQL:
+
+| Client | How it's opened |
+|---|---|
+| TablePlus | `postgresql://user@host:port/database` |
+| DBeaver | `-con "driver=postgres-jdbc\|…"`. The first time, DBeaver asks to download its PostgreSQL JDBC driver |
+| pgAdmin 4 | Opens the app only — it has no command line to pass a connection |
+| psql console | `psql` from an installed build, in its own window. Always offered |
+
+HeidiSQL isn't offered for PostgreSQL until its command line has been checked against a real
+server, the same reason it isn't offered for SQL Server.
 
 ---
 

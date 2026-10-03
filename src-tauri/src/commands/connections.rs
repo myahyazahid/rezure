@@ -6,11 +6,11 @@
 //! those commands hop onto a blocking task rather than freezing the UI
 //! thread on a server that may not exist.
 
-use crate::config::connections::{NewConnection, SshAuth, SshTunnel, TlsMode};
+use crate::config::connections::{NewConnection, ServerKind, SshAuth, SshTunnel, TlsMode};
 use crate::services::connections::{self, ConnectionStatus};
-use crate::services::database;
 use crate::services::db_engine::Engine;
 use crate::services::secrets;
+use crate::services::{database, mssql, postgres_client};
 use crate::utils::error::AppError;
 
 fn joined(e: tokio::task::JoinError) -> AppError {
@@ -34,7 +34,12 @@ pub struct ConnectionRequest {
     /// Absent for a passwordless server; never stored in `connections.json`
     /// either way — see `services::secrets`.
     pub password: Option<String>,
+    /// Absent from forms older than SQL Server support: MySQL-family.
+    pub kind: Option<ServerKind>,
     pub engine: Engine,
+    /// SQL Server only — see `config::connections::Connection`.
+    pub windows_auth: Option<bool>,
+    pub trust_server_certificate: Option<bool>,
     pub tls_mode: Option<TlsMode>,
     pub read_only: Option<bool>,
     pub save_password: Option<bool>,
@@ -54,6 +59,30 @@ pub struct ConnectionRequest {
 #[tauri::command]
 pub async fn test_db_connection(request: ConnectionRequest) -> Result<String, AppError> {
     tokio::task::spawn_blocking(move || {
+        if request.kind == Some(ServerKind::Sqlserver) {
+            return mssql::probe(mssql::Probe {
+                host: &request.host,
+                port: request.port,
+                user: &request.user,
+                password: request.password.as_deref(),
+                windows_auth: request.windows_auth.unwrap_or(false),
+                tls: request.tls_mode.unwrap_or_default(),
+                trust_server_certificate: request.trust_server_certificate.unwrap_or(false),
+                ssh: request.ssh.as_ref(),
+                ssh_password: request.ssh_password.as_deref(),
+            });
+        }
+        if request.kind == Some(ServerKind::Postgres) {
+            return postgres_client::probe(postgres_client::Probe {
+                host: &request.host,
+                port: request.port,
+                user: &request.user,
+                password: request.password.as_deref(),
+                tls: request.tls_mode.unwrap_or_default(),
+                ssh: request.ssh.as_ref(),
+                ssh_password: request.ssh_password.as_deref(),
+            });
+        }
         database::probe(database::Probe {
             host: &request.host,
             port: request.port,
@@ -85,7 +114,10 @@ pub fn add_db_connection(request: ConnectionRequest) -> Result<Vec<ConnectionSta
             host: request.host,
             port: request.port,
             user: request.user,
+            kind: request.kind.unwrap_or_default(),
             engine: request.engine,
+            windows_auth: request.windows_auth.unwrap_or(false),
+            trust_server_certificate: request.trust_server_certificate.unwrap_or(false),
             tls_mode: request.tls_mode.unwrap_or_default(),
             read_only: request.read_only.unwrap_or(true),
             save_password: request.save_password.unwrap_or(false),

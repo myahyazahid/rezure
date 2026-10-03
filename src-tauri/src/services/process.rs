@@ -21,12 +21,14 @@ use super::db_engine;
 use super::db_profiles;
 use super::php_ini;
 use super::php_pool;
+use super::postgres;
 use super::vhosts;
 use super::{
     Service, ServiceHandle, ServiceInfo, ServiceManager, ServiceStatus, WorkerCount,
     CPU_HISTORY_LEN,
 };
 use crate::utils::command::HiddenWindow;
+use crate::utils::elevation;
 use crate::utils::error::AppError;
 use crate::utils::paths;
 
@@ -117,6 +119,12 @@ enum Launch {
     /// in its web UI instead of anyone's inbox. The one service with a
     /// second listener, which is why [`ProcessService::web_port`] exists.
     Mailpit,
+    /// `postgres -D <datadir> -p 5432`, running whichever version is active
+    /// (see `services::postgres`) on that major's own data directory, which
+    /// is bootstrapped first when empty. A database like `Database`: waited
+    /// on until it accepts connections, and asked to shut down rather than
+    /// killed.
+    Postgres,
 }
 
 pub struct ProcessService {
@@ -294,6 +302,27 @@ impl ProcessService {
         })
     }
 
+    /// PostgreSQL. Optional like Mailpit: listed before it's installed, with
+    /// an Install action on its card — which installs the newest version
+    /// (`commands::binaries::install_binary`).
+    pub fn postgres(log_sink: LogSink) -> Self {
+        Self {
+            id: postgres::SERVICE_ID.to_string(),
+            name: postgres::SERVICE_NAME.to_string(),
+            category: "Database",
+            port: postgres::PORT,
+            workers: 1,
+            web_port: None,
+            launch: Launch::Postgres,
+            log_sink,
+            crash_sink: no_op_crash_sink(),
+            crashed: AtomicBool::new(false),
+            children: empty_slots(1),
+            sys: Mutex::new(System::new()),
+            cpu_history: Mutex::new(Vec::new()),
+        }
+    }
+
     /// Attaches the callback fired when this service is found to have
     /// crashed. A separate step from construction (rather than another
     /// constructor parameter) so the sixteen existing test call sites that
@@ -321,6 +350,7 @@ impl ProcessService {
             Launch::Database => db_profiles::active()
                 .map(|profile| profile.version)
                 .unwrap_or_default(),
+            Launch::Postgres => postgres::active_id(),
         }
     }
 
@@ -367,15 +397,23 @@ impl ProcessService {
         (0..self.workers).flat_map(|w| self.ports_for(w)).collect()
     }
 
-    /// See `ServiceInfo::install_id`. Only services a single manifest
-    /// download makes startable — PHP versions and database engines are
-    /// chosen on their own pages, not installed from a service card.
+    /// See `ServiceInfo::install_id`. Only services one download makes
+    /// startable — PHP versions and MySQL-family engines are chosen on their
+    /// own pages, not installed from a service card. PostgreSQL's card
+    /// installs the newest version; picking another is the Switch page's job.
     fn install_id(&self) -> Option<&'static str> {
         match self.launch {
             Launch::Nginx => Some("nginx"),
             Launch::Mailpit => Some("mailpit"),
+            Launch::Postgres => Some(postgres::SERVICE_ID),
             Launch::Php { .. } | Launch::Database => None,
         }
+    }
+
+    /// A database: waited on until it accepts connections, and asked to shut
+    /// down cleanly before anything is killed.
+    fn is_stateful(&self) -> bool {
+        matches!(self.launch, Launch::Database | Launch::Postgres)
     }
 
     fn web_url(&self) -> Option<String> {
@@ -417,6 +455,7 @@ impl ProcessService {
                     .ok_or_else(|| AppError::BinaryNotInstalled("Database".to_string()))?;
                 db_profiles::resolve_server_exe(&profile)
             }
+            Launch::Postgres => postgres::active_exe(),
         }
     }
 
@@ -522,6 +561,28 @@ impl ProcessService {
                     .arg("--disable-version-check");
                 cmd
             }
+            Launch::Postgres => {
+                // Refused before anything is written: started elevated,
+                // PostgreSQL exits at once, and that would only read as "the
+                // server exited during startup".
+                if elevation::is_elevated() {
+                    return Err(AppError::PostgresElevated);
+                }
+                let data_dir = postgres::data_dir(&postgres::active_id())?;
+                if db_engine::needs_bootstrap(&data_dir) {
+                    postgres::bootstrap(&exe, &data_dir)?;
+                }
+                let mut cmd = Command::new(&exe);
+                cmd.arg("-D")
+                    .arg(&data_dir)
+                    .arg("-p")
+                    .arg(port.to_string())
+                    // Loopback only, like the MariaDB service: `trust`
+                    // authentication is safe only because nothing off this
+                    // machine can connect.
+                    .args(["-c", "listen_addresses=127.0.0.1"]);
+                cmd
+            }
         };
 
         // Piped, not inherited: a GUI-subsystem build has no console handles
@@ -544,7 +605,9 @@ impl ProcessService {
     fn bind_addr(&self) -> &'static str {
         match self.launch {
             Launch::Nginx => "0.0.0.0",
-            Launch::Php { .. } | Launch::Database | Launch::Mailpit => "127.0.0.1",
+            Launch::Php { .. } | Launch::Database | Launch::Mailpit | Launch::Postgres => {
+                "127.0.0.1"
+            }
         }
     }
 
@@ -771,7 +834,10 @@ const READY_TIMEOUT: Duration = Duration::from_secs(45);
 ///
 /// Returns the process's own last words when it didn't come up, so the
 /// caller can say *why* rather than just that it didn't.
-fn wait_until_accepting(child: &mut Child, port: u16) -> Result<(), String> {
+///
+/// `ready` is the check itself — a TCP connect for MySQL, `pg_isready` for
+/// PostgreSQL, which takes connections on its port before it can serve them.
+fn wait_until_accepting(child: &mut Child, ready: impl Fn() -> bool) -> Result<(), String> {
     let deadline = Instant::now() + READY_TIMEOUT;
 
     while Instant::now() < deadline {
@@ -786,7 +852,7 @@ fn wait_until_accepting(child: &mut Child, port: u16) -> Result<(), String> {
             Ok(None) => {}
         }
 
-        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+        if ready() {
             return Ok(());
         }
         std::thread::sleep(Duration::from_millis(200));
@@ -854,6 +920,7 @@ impl Service for ProcessService {
             installed: self.resolved_exe().is_ok_and(|exe| exe.is_file()),
             install_id: self.install_id().map(str::to_string),
             web_url: self.web_url(),
+            endpoint: None,
         }
     }
 
@@ -898,13 +965,13 @@ impl Service for ProcessService {
             }
         }
 
-        // Only the database is waited on. nginx and `php-cgi` either bind or
+        // Only a database is waited on. nginx and `php-cgi` either bind or
         // die immediately, while a database does its riskiest work — opening
         // somebody's datadir — after the process already exists, so "spawned"
         // and "working" are genuinely different answers for it alone.
-        if matches!(self.launch, Launch::Database) {
+        if self.is_stateful() {
             if let Some((_, child)) = spawned.first_mut() {
-                if let Err(reason) = wait_until_accepting(child, self.current_port()) {
+                if let Err(reason) = wait_until_accepting(child, self.readiness()) {
                     // It never came up, so nothing should be tracking it as
                     // running — and a half-started server must not be left
                     // holding the datadir.
@@ -976,14 +1043,12 @@ impl ProcessService {
         let mut children = self.children.lock().unwrap();
         for mut child in children.iter_mut().filter_map(Option::take) {
             let stopped_cleanly = graceful
-                && matches!(self.launch, Launch::Database)
-                && self
-                    .resolved_exe()
-                    .is_ok_and(|exe| request_graceful_shutdown(&exe, self.current_port()))
+                && self.is_stateful()
+                && self.request_shutdown()
                 && wait_for_exit(&mut child, GRACEFUL_SHUTDOWN_TIMEOUT);
 
             if !stopped_cleanly {
-                if graceful && matches!(self.launch, Launch::Database) {
+                if graceful && self.is_stateful() {
                     log::warn!(
                         "{} did not shut down cleanly in {}s — force-killing it",
                         self.id,
@@ -1002,6 +1067,35 @@ impl ProcessService {
         }
         self.cpu_history.lock().unwrap().clear();
         Ok(self.info())
+    }
+
+    /// How [`wait_until_accepting`] tells a just-spawned database is ready.
+    fn readiness(&self) -> Box<dyn Fn() -> bool> {
+        let port = self.current_port();
+        match self.launch {
+            Launch::Postgres => {
+                let exe = self.resolved_exe();
+                Box::new(move || exe.as_ref().is_ok_and(|exe| postgres::is_ready(exe, port)))
+            }
+            _ => Box::new(move || std::net::TcpStream::connect(("127.0.0.1", port)).is_ok()),
+        }
+    }
+
+    /// Asks a running database to shut down cleanly; whether the request was
+    /// accepted. `false` for every other service, which has nothing to flush.
+    fn request_shutdown(&self) -> bool {
+        let Ok(exe) = self.resolved_exe() else {
+            return false;
+        };
+        match self.launch {
+            Launch::Database => request_graceful_shutdown(&exe, self.current_port()),
+            // The active version's data directory — which is the running
+            // one's, because switching versions stops the service first
+            // (`postgres::switch`).
+            Launch::Postgres => postgres::data_dir(&postgres::active_id())
+                .is_ok_and(|dir| postgres::request_shutdown(&exe, &dir)),
+            _ => false,
+        }
     }
 
     /// Spawns one worker on its own port and records its PID.
@@ -1152,6 +1246,7 @@ pub fn real_services(app: AppHandle) -> ServiceManager {
             "php" => "PHP".to_string(),
             "mariadb" => "Database".to_string(),
             "mailpit" => "Mailpit".to_string(),
+            postgres::SERVICE_ID => postgres::SERVICE_NAME.to_string(),
             other => match other.strip_prefix("php-") {
                 Some(version) => format!("PHP {version}"),
                 None => other.to_string(),
@@ -1194,10 +1289,14 @@ pub fn real_services(app: AppHandle) -> ServiceManager {
                 .with_crash_sink(crash_sink.clone()),
         ),
         Arc::new(
-            ProcessService::mailpit(sink)
+            ProcessService::mailpit(sink.clone())
                 .expect("mailpit must be in binaries::MANIFEST")
-                .with_crash_sink(crash_sink),
+                .with_crash_sink(crash_sink.clone()),
         ),
+        // Not a `ProcessService`: LocalDB runs its own process, which Rezure
+        // starts and stops through `SqlLocalDB.exe` — see its module docs.
+        Arc::new(super::mssql_localdb::LocalDbService),
+        Arc::new(ProcessService::postgres(sink).with_crash_sink(crash_sink)),
     ];
 
     let php_factory: super::PhpPoolFactory = Arc::new(move |version, port| {
@@ -1220,6 +1319,101 @@ mod tests {
         assert!(ProcessService::php(no_op_sink()).is_ok());
         assert!(ProcessService::mariadb(no_op_sink()).is_ok());
         assert!(ProcessService::mailpit(no_op_sink()).is_ok());
+    }
+
+    /// The real thing, against whichever PostgreSQL is active: bootstrap (on
+    /// a first start), start, sign in as `root`, then a clean stop — the
+    /// server removes its `postmaster.pid` only on a shutdown it finished
+    /// itself, never when killed. Run with
+    /// `cargo test --lib services::process::tests::postgres_starts_and_stops_cleanly -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn postgres_starts_and_stops_cleanly() {
+        let service = ProcessService::postgres(Arc::new(|_, _, line| println!("  | {line}")));
+        let info = service.start().unwrap();
+        assert_eq!(info.status, ServiceStatus::Running);
+
+        let psql = postgres::active_tool(postgres::CLIENT_EXE).unwrap();
+        let output = Command::new(psql)
+            .args(["-X", "-w", "-A", "-t", "-h", "127.0.0.1", "-p", "5432"])
+            .args(["-U", postgres::APP_ROLE, "-d", postgres::MAINTENANCE_DB])
+            .args(["-c", "SELECT current_user || ' ' || pg_encoding_to_char(encoding) FROM pg_database WHERE datname = 'postgres'"])
+            .output()
+            .unwrap();
+        let answer = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        println!("signed in as: {answer}");
+        assert_eq!(
+            answer,
+            "root UTF8",
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let data_dir = postgres::data_dir(&postgres::active_id()).unwrap();
+        assert!(data_dir.join("postmaster.pid").is_file());
+        let stopped = std::time::Instant::now();
+        let info = service.stop().unwrap();
+        println!("stopped in {:?}", stopped.elapsed());
+        assert_eq!(info.status, ServiceStatus::Stopped);
+        assert!(
+            !data_dir.join("postmaster.pid").exists(),
+            "a clean shutdown removes postmaster.pid; a kill leaves it"
+        );
+    }
+
+    /// Switching versions with the server running moves it across: a clean
+    /// stop on the old major's data, a start on the new one's. Needs two
+    /// versions installed. Run with
+    /// `cargo test --lib services::process::tests::postgres_switch_moves_a_running_server -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn postgres_switch_moves_a_running_server() {
+        let versions = postgres::list();
+        assert!(versions.len() >= 2, "install two PostgreSQL versions first");
+        let (from, to) = (versions[0].version.clone(), versions[1].version.clone());
+        postgres::set_active(&from).unwrap();
+
+        let manager = ServiceManager::new(vec![
+            Arc::new(ProcessService::postgres(no_op_sink())) as ServiceHandle
+        ]);
+        let service = manager.find(postgres::SERVICE_ID).unwrap();
+        service.start().unwrap();
+        let old_data = postgres::data_dir(&from).unwrap();
+        assert!(old_data.join("postmaster.pid").is_file());
+
+        assert!(postgres::switch(&manager, &to).unwrap(), "it was running");
+        let info = service.info();
+        println!("{from} -> {}: {:?}", info.version, info.status);
+        assert_eq!(
+            (info.version.as_str(), info.status),
+            (to.as_str(), ServiceStatus::Running)
+        );
+        assert!(
+            !old_data.join("postmaster.pid").exists(),
+            "the old server shut down cleanly"
+        );
+        assert!(postgres::data_dir(&to)
+            .unwrap()
+            .join("postmaster.pid")
+            .is_file());
+
+        service.stop().unwrap();
+        postgres::set_active(&from).unwrap();
+    }
+
+    /// A database like MariaDB — waited on, shut down cleanly — but one its
+    /// own card can install, on PostgreSQL's own port.
+    #[test]
+    fn postgres_is_a_database_its_card_can_install() {
+        let service = ProcessService::postgres(no_op_sink());
+        let info = service.info();
+        assert_eq!(info.id, postgres::SERVICE_ID);
+        assert_eq!(info.category, "Database");
+        assert_eq!(info.port, postgres::PORT);
+        assert_eq!(info.install_id.as_deref(), Some(postgres::SERVICE_ID));
+        assert!(service.is_stateful());
+        assert!(!service.restarts_on_crash());
+        assert_eq!(service.bind_addr(), "127.0.0.1");
     }
 
     /// Both listeners are reported, so a conflict on the web UI's port is

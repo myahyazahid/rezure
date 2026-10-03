@@ -706,9 +706,484 @@ sebagai JSON, dan tema dari komunitas.
 
 ---
 
+## Fase 3.14 — SQL Server Support
+
+**Tujuan:** Developer PHP yang database-nya SQL Server (umum di proyek korporat, pemerintahan,
+perbankan, rumah sakit, ERP) bisa memakai Rezure tanpa berburu DLL driver dan installer sendiri.
+Project PHP bisa konek ke SQL Server, halaman Databases bisa membaca server SQL Server, dan
+(opsional) ada SQL Server lokal yang dikelola Rezure. Tidak ada di roadmap awal, **ditambahkan atas
+permintaan maintainer** untuk menjangkau pengguna SQL Server.
+
+### Keputusan yang sudah diambil
+- **Urutan: SQL Server dulu, baru PostgreSQL (Fase 3.15)**, diputuskan maintainer. Secara teknis
+  PostgreSQL lebih murah (lihat 3.15), tapi SQL Server diprioritaskan
+- **Segmen yang dibidik: developer PHP yang memakai SQL Server, bukan developer .NET.** Developer
+  .NET sudah punya Visual Studio (yang membawa LocalDB) dan SSMS, dan Rezure tidak menawarkan apa
+  pun yang mereka butuhkan. Karena itu nilai terbesar fase ini ada di 3.14a (driver PHP), bukan di
+  menjalankan server
+- **SQL Server bukan profile dan bukan varian `Engine`.** Profile adalah "datadir mana yang dibaca
+  satu `mysqld`" (`config::profiles`). SQL Server tidak punya konsep itu: database-nya berupa
+  pasangan file `.mdf`/`.ldf` yang di-*attach* ke sebuah instance. `Engine` sengaja tipis karena
+  MariaDB dan MySQL memakai nama binary yang sama (lihat module docs `services::db_engine`), dan
+  `Engine::MsSql` akan meruntuhkan alasan itu. Alasannya sama dengan larangan
+  `ProfileSource::Remote` di [Fase 4.2](../v4/rezure-app-v4-phases-tasks.md#fase-42--remote-database-connections-list-export-import)
+- **Tidak di-bundle ke installer dan tidak di-host ulang.** Microsoft tidak menerbitkan SQL Server
+  maupun ODBC Driver sebagai zip portable, hanya installer (`.msi`/`.exe`) yang menulis ke
+  `Program Files` dan registry `HKLM` (Express juga mendaftarkan Windows service). Rezure mengunduh
+  installer resmi dari URL Microsoft saat user memintanya, lalu menjalankannya lewat UAC
+- **Lisensi Microsoft disetujui user sendiri** lewat checkbox + link EULA di UI. Flag
+  `IACCEPT…LICENSETERMS=YES` baru dipasang setelah checkbox itu dicentang, tidak pernah diam-diam
+- **Edisi lokal: LocalDB, bukan Express.** LocalDB jalan sebagai proses user biasa, jadi start/stop
+  tidak butuh admin. Express adalah Windows service; setiap klik Start/Stop akan memunculkan UAC
+- **Client halaman Databases: crate `odbc-api`** (diputuskan maintainer saat implementasi), bukan
+  `go-sqlcmd`. Alasannya: ODBC Driver memang sudah wajib untuk PHP, jadi tidak ada unduhan kedua,
+  hasil query terstruktur, dan Windows Auth serta LocalDB ditangani driver. Crate dipasang tanpa
+  fitur default `prompt` (yang menarik `winit` dan puluhan crate GUI), jadi hanya menambah
+  `odbc-api`, `odbc-sys`, dan `widestring`
+- **LocalDB di `Target`: connection bawaan**, bukan varian baru. Satu `Connection` dengan
+  `managed: true` dibuat otomatis begitu LocalDB terpasang (`connections::ensure_localdb`, saat
+  startup dan setelah install). Connection itu diperlakukan seperti server lokal: bisa ditulis,
+  kolom "Used by" tampil, dan tidak bisa dihapus manual. PostgreSQL di 3.15 bisa memakai keputusan
+  yang sama atau membuatnya ulang
+- **Export dari SQL Server remote dilewati.** Tombolnya nonaktif dengan penjelasan; `.bacpac` tidak
+  dikerjakan
+
+### Cara kerja (ringkas)
+
+```
+Project PHP (Laravel, dst.)
+   │  php_pdo_sqlsrv.dll / php_sqlsrv.dll      ← ekstensi PHP, zip, portable        (3.14a)
+   ▼
+Microsoft ODBC Driver 18 for SQL Server        ← MSI, terdaftar di registry, UAC    (3.14a)
+   │
+   ▼
+SQL Server: server kantor/remote               ← tidak menginstall apa pun          (3.14b)
+            atau LocalDB yang dikelola Rezure  ← MSI, UAC sekali                    (3.14c)
+```
+
+| Komponen | Bentuk distribusi | Di Rezure |
+|---|---|---|
+| `sqlsrv` / `pdo_sqlsrv` | zip per versi PHP | penuh, tanpa admin (pola PECL `redis`) |
+| ODBC Driver 18 | MSI | Rezure mengunduh dan menjalankan, 1x UAC |
+| LocalDB (opsional) | MSI | Rezure mengunduh dan menjalankan, 1x UAC |
+| Client untuk halaman Databases | crate `odbc-api`, lewat ODBC Driver yang sama | tanpa install tambahan |
+
+Hasilnya: user tidak pernah membuka situs Microsoft atau menjalankan installer sendiri, tapi juga
+**tidak** 100% portable seperti MariaDB. ODBC Driver dan LocalDB muncul di Settings → Apps Windows
+dan tidak ikut terhapus saat Rezure di-uninstall.
+
+### Fase 3.14a — Driver PHP (`sqlsrv`/`pdo_sqlsrv`) dan ODBC Driver
+Paling bernilai dan paling murah, jadi dikerjakan pertama. Sudah berguna sendiri untuk user yang
+SQL Server-nya ada di server kantor.
+
+- [x] Entri `sqlsrv` dan `pdo_sqlsrv` di katalog `services::php_ext`, dari area PECL php.net (pola
+      URL sama dengan `redis`). Ternyata tiap rilis driver Microsoft hanya menarget branch PHP yang
+      masih baru saat rilis, jadi `PeclBuild` sekarang bisa membawa `version` sendiri: 7.4/8.0 →
+      5.10.0, 8.1/8.2 → 5.12.0, 8.3–8.5 → 5.13.3. `ExtensionStatus.version` melaporkan versi untuk
+      branch PHP yang ditanya, dan field baru `requires_odbc` menandai keduanya
+- [x] Dua entri di `php_ext_toggle::CATALOG` (kategori Database). **Berbeda dari rencana awal:
+      `default_on: true`**, sama seperti `redis`. Driver ini hanya ada di `ext/` kalau user sengaja
+      menginstalnya, dan memuatnya tanpa ODBC Driver tidak merusak apa pun (baru gagal saat konek)
+- [x] `services::odbc` (baru). `detect()` bertanya langsung ke ODBC driver manager (`SQLDrivers`,
+      in-process lewat `odbc-api`), bukan membaca registry. Hanya "ODBC Driver 17/18 for SQL Server"
+      yang diterima; driver bawaan Windows bernama `SQL Server` (`sqlsrv32.dll`) diabaikan. Driver
+      yang dipasang tim IT dikenali, dan 17 dipakai kalau hanya itu yang ada
+- [x] `services::msi` (baru) untuk kedua installer Microsoft: URL `download.microsoft.com` yang
+      ber-versi (bukan `fwlink`), SHA-256 di-pin, signature Authenticode harus `Valid` dan dari
+      `O=Microsoft Corporation`, lalu `msiexec /qn /norestart <PROPERTY>=YES /l*v <log>` lewat UAC.
+      Sukses dinilai dari `is_installed()` setelahnya, bukan dari exit code. Exit code yang umum
+      (1602, 1618, 1638, dst.) diterjemahkan, dan log-nya tetap tersimpan di `data\installers\`.
+      Paket MSI ikut tampil di `list_binaries` dengan `license_url`, dan `install_binary` menerima
+      `accept_license`. **ODBC Driver 18.7.1.1** dipilih karena itu rilis pertama yang tidak butuh
+      Visual C++ Redistributable terpasang lebih dulu
+- [x] Logika elevasi dipindah dari `services::hosts` ke `utils::elevation` (`run_script` →
+      `Elevated::{Ran, Declined}`). Hosts memakainya tanpa perubahan perilaku
+- [x] UI lisensi: `LicenseConsentModal.vue` + composable `useLicensedInstall`. Satu-satunya tempat
+      `acceptLicense` menjadi `true` adalah setelah kotak persetujuan dicentang. Dipakai di semua
+      tombol Install untuk ODBC Driver dan LocalDB
+- [x] Halaman PHP Extensions: ekstensi PECL yang belum terpasang (`redis`, `sqlsrv`, `pdo_sqlsrv`)
+      sekarang punya tombol "Install <versi>" langsung di barisnya (sebelumnya hanya lewat
+      requirements check). Kalau driver SQL Server menyala tapi ODBC Driver belum ada, muncul banner
+      dengan tombol "Install ODBC Driver"
+- [x] Requirements check: `doctor::sql_server_setup` membaca `DB_CONNECTION=sqlsrv` dari `.env`
+      (aturan phpdotenv yang sama dengan `mail_setup`) dan `config/database.php`, lalu
+      `diagnose` mengisi `pdo_sqlsrv` termuat atau tidak, ODBC Driver yang terdaftar, dan status
+      LocalDB. Modal menampilkan langkah yang kurang (Install pdo_sqlsrv / ODBC Driver / LocalDB),
+      peringatan `DB_PORT`, dan catatan sertifikat
+- [x] Hint enkripsi: config default Laravel **memang** mengomentari baris `encrypt` dan
+      `trust_server_certificate` (dicek di beberapa project Laravel di mesin maintainer), jadi
+      `DB_TRUST_SERVER_CERTIFICATE=true` saja tidak berpengaruh. `trust_configured` hanya `true`
+      kalau baris config tidak dikomentari **dan** env var-nya true. Di halaman Databases, error
+      sertifikat dari ODBC mendapat hint yang sama (`mssql::hint_for`)
+- [x] `services::agent_docs` / `how-rezure-works.md`: bagian SQL Server baru, contoh `.env` LocalDB,
+      dan aturan untuk agent (jangan mematikan `sqlservr.exe`, jangan memasang/menghapus ODBC atau
+      LocalDB sendiri). `AGENTS.md` menyebut LocalDB hanya kalau terpasang
+
+### Fase 3.14b — SQL Server di halaman Databases
+Dibangun di atas `Target`/`Conn` dari
+[Fase 4.2](../v4/rezure-app-v4-phases-tasks.md#fase-42--remote-database-connections-list-export-import)
+yang sudah dikerjakan.
+
+- [x] Trait `DbClient` di `services::database` (list, collation, create, drop, export, import).
+      `Conn` menjadi implementasi keluarga MySQL **tanpa perubahan perilaku** (isi fungsinya
+      dipindah apa adanya), dan `mssql::Client` implementasi kedua. Fungsi publik dan command tetap
+      sama, dan validasi nama dilakukan sekali di fungsi publik untuk kedua jenis server. Catatan
+      untuk 3.15: `list_collations` masih bernama konsep MySQL; PostgreSQL bisa memakainya untuk
+      daftar encoding/locale, atau trait-nya diganti nama saat itu
+- [x] `Connection` dapat field `kind` (`mysql` | `sqlserver`) dengan `#[serde(default)]` =
+      `mysql`, plus `windows_auth`, `trust_server_certificate`, dan `managed`. `connections.json`
+      lama tetap terbaca (ada test-nya)
+- [x] `services::mssql` (baru): connection string ODBC dengan quoting nilai (`;`/`{`/`}`), Windows
+      Auth (`Trusted_Connection=yes`) atau SQL login (password dari Credential Manager, hanya di
+      memori proses), named instance (port 0 → host apa adanya), SSH tunnel (sama dengan MySQL), dan
+      `TlsMode` → `Encrypt` (Automatic = default driver). Error ODBC dibersihkan dari prefix
+      `[Microsoft][ODBC Driver 18…]`, dan "tidak bisa dijangkau" dijelaskan sendiri karena record
+      diagnostik pertama dari driver kadang cuma potongan (`SQL Server Network Interfaces:`)
+- [x] **Semua result dikuras** (`SQLMoreResults`) lewat `CursorImpl` di atas statement handle milik
+      sendiri. Tanpa ini `BACKUP`/`RESTORE` dibatalkan di tengah, dan error dari statement kedua
+      dalam satu batch tertelan. Keduanya terbukti di test lawan LocalDB
+- [x] List database dari `sys.databases` + `sys.master_files` (ukuran) dan jumlah tabel per database
+      dalam satu `UNION ALL` (best-effort). Database sistem (`master`, `tempdb`, `model`, `msdb`)
+      tidak tampil dan tidak bisa di-drop. Collation: default server dulu, lalu daftar pendek yang
+      ada di server (termasuk `_UTF8` untuk 2019+)
+- [x] Drop di LocalDB memakai `SET SINGLE_USER WITH ROLLBACK IMMEDIATE` dulu (sesi milik
+      developer sendiri). Di server lain, penolakan server dibiarkan apa adanya
+- [x] `AddConnectionModal.vue`: pilihan jenis server (port/user default ikut berganti hanya kalau
+      belum diubah), login SQL vs akun Windows, port boleh kosong untuk named instance, "Trust server
+      certificate", dan banner Install ODBC Driver. Test connection untuk SQL Server menjalankan
+      `SELECT @@VERSION`
+- [x] Export: `BACKUP … WITH COPY_ONLY, INIT, FORMAT, CHECKSUM` ke `dumps\<nama>-<waktu>.bak`, dengan
+      progress dari ukuran file (pola export MySQL). Tanpa tombol Cancel untuk SQL Server. Remote:
+      tombol Export nonaktif dengan alasan di tooltip, dan subtitle halaman tidak lagi menyebut export
+- [x] Import: `.bak` → `RESTORE FILELISTONLY`, lalu `RESTORE … WITH REPLACE, MOVE` setiap file ke
+      `data\mssql\` dengan nama database tujuan. Modal import menyebutnya "Restore" dan memperingatkan
+      bahwa database yang ada akan diganti seluruhnya. `.sql` → dibuat dulu kalau belum ada, lalu
+      dipecah di baris `GO` (termasuk `GO n`) dan dijalankan per batch; file UTF-16 dari SSMS dibaca
+      dengan benar. Restore `.bak` ke server remote ditolak, karena server membaca file dari disknya
+      sendiri
+- [x] `services::db_clients`: kandidat client difilter per jenis server, lewat satu nilai
+      `Target` yang di-resolve sekali lalu dioper ke fungsi murni (test tidak lagi bergantung pada
+      koneksi yang sedang dipilih di mesin). Untuk SQL Server, setelah diuji lawan client asli di
+      mesin maintainer:
+      - **SSMS**: `-S`, `-d`, `-E`/`-U`, langsung ke pipe LocalDB. **Belum dicoba**, karena SSMS tidak
+        terpasang di mesin maintainer
+      - **TablePlus**: `sqlserver://rezure@127.0.0.1:14330/testing` **terbukti**. TablePlus for Windows
+        (aplikasi .NET, sesinya tercatat sebagai `.Net SqlClient Data Provider`) membuka URL itu
+        walaupun sedang berjalan, dan konek ke database yang benar. Hanya ditawarkan untuk SQL login
+        dengan port yang diketahui, karena TablePlus tidak bisa Windows Authentication
+      - **DBeaver**: `-con "driver=microsoft|host|port|database|user|save=false|connect=true"`, plus
+        `prop.encrypt=false` untuk LocalDB. **`driver=sqlserver` (ID provider) diam-diam diabaikan**;
+        ID driver yang benar dibaca dari `plugin.xml` DBeaver 26.1. Koneksinya terbentuk dengan host,
+        port, dan database yang benar. Pertama kali, DBeaver meminta mengunduh driver JDBC-nya sendiri,
+        sekali per workspace
+      - **Client diluncurkan dari foldernya sendiri** (`db_clients::client_command`), seperti
+        shortcut Start menu. Ditemukan saat maintainer mengklik Open → DBeaver dan Rezure tampak
+        crash: DBeaver versi zip (bawaan Laragon) membuat `workspace\` di working directory Rezure,
+        yaitu `src-tauri\` saat `tauri dev`, dan file watcher-nya me-restart app. Di Rezure yang
+        terinstall, working directory itu folder install yang tidak bisa ditulisi. Sekarang
+        workspace-nya di `C:\laragon\bin\dbeaver\workspace`, sama dengan saat DBeaver dibuka sendiri
+      - **HeidiSQL tidak ditawarkan untuk SQL Server**: versi 12.8 membuka session manager pada sesi
+        terakhir untuk setiap bentuk command line MSSQL (`-n=4`, bentuk panjang, `-l=SQLOLEDB`, host
+        dikutip), dan tidak pernah konek. Urutan `nettype` (4 = MSSQL TCP/IP) dibaca dari exe-nya
+- [x] **Jembatan TCP untuk LocalDB** (`services::localdb_bridge`, baru). Ditemukan saat maintainer
+      mencoba TablePlus: `sqlservr.exe` milik LocalDB **tidak membuka port TCP sama sekali**, hanya
+      named pipe yang namanya berganti setiap start, sehingga client yang hanya bicara TCP tidak bisa
+      menjangkaunya. Selama Rezure berjalan, `127.0.0.1:14330` di-relay byte per byte ke pipe yang
+      aktif. Pipe di-resolve ulang per koneksi, dan instance dinyalakan dulu kalau sedang berhenti.
+      Port 14330, bukan 1433, supaya SQL Server yang dipasang belakangan tetap bisa memakai 1433.
+      Prototipe lebih dulu dibuktikan dengan nilai 300.000 karakter dan 100.000 baris ter-stream.
+      **Lewat relay, LocalDB tidak menawarkan TLS**, jadi client harus memakai enkripsi off
+      (ODBC Driver 18 menolak dengan "Encryption not supported on SQL Server" kalau tidak)
+- [x] **Login `rezure` tanpa password, `sysadmin`**, dibuat Rezure di instance LocalDB-nya
+      (`mssql::ensure_localdb_login`, sekali per run, lewat koneksi Windows Auth), atas keputusan
+      maintainer. Sikapnya sama dengan `root` tanpa password di MariaDB Rezure: server dev lokal yang
+      hanya terjangkau dari mesin ini. Dibutuhkan karena TablePlus tidak bisa Windows Auth. Terbukti
+      login lewat jembatan maupun pipe
+
+### Fase 3.14c — SQL Server LocalDB sebagai service
+- [x] Ubin "SQL Server LocalDB" di `InstallVersionModal.vue` dan baris di halaman Switch (pola
+      Mailpit), keduanya lewat dialog lisensi. Versi yang di-pin: SQL Server 2022 LocalDB
+      16.0.1000.6
+- [x] `services::mssql_localdb::LocalDbService` mengimplementasikan `Service` (bukan
+      `ProcessService`, karena prosesnya milik LocalDB): start/stop/force stop lewat
+      `SqlLocalDB start|stop [-k] Rezure`, status dari `SqlLocalDB info Rezure` (cache 1,5 detik),
+      `restarts_on_crash` tetap `false`
+- [x] **Ditemukan saat pengujian nyata: `SqlLocalDB.exe` selalu keluar dengan exit code 0**,
+      termasuk saat gagal (mis. `start` untuk instance yang belum ada). Kegagalan dibaca dari
+      teksnya ("…failed because of the following error"), dan instance dianggap ada hanya kalau
+      `info` mengembalikan record `Name:`. Versi bawaan Rezure yang pertama melewatkan ini, sehingga
+      instance tidak pernah dibuat padahal Start melaporkan sukses
+- [x] Field generik baru `ServiceInfo.endpoint`: kartu service menampilkan `(localdb)\Rezure` di
+      tempat port, plus port jembatan (`· :14330`) selama jembatannya mendengarkan
+- [x] **Instance dibuat segera setelah LocalDB terpasang** (dan saat startup), tidak menunggu
+      Start. Terbukti di mesin nyata: instance yang dihentikan menyala sendiri begitu PHP konek,
+      jadi project jalan walaupun tombol Start tidak pernah ditekan, asal instance-nya sudah ada
+- [x] Database yang dibuat lewat Rezure, atau di-restore dari `.bak`, diberi `FILENAME` eksplisit di
+      `data\mssql\`. Setelah drop, folder itu bersih dan tidak ada file yang bocor ke folder profil
+      user
+- [x] Windows Auth tanpa password **terbukti** untuk PHP: `pdo_sqlsrv` 5.13.3 dari katalog, di
+      PHP 8.3.33 dan 8.5.10, konek ke `sqlsrv:Server=(localdb)\Rezure` dengan user/password `null`
+      maupun string kosong (yang dioper Laravel untuk `DB_USERNAME=` kosong). `(localdb)\Rezure,1433`
+      gagal, yang membenarkan peringatan `DB_PORT` di requirements check (Laravel menambahkan
+      `,1433` kalau `DB_PORT` tidak ada)
+- [x] **LocalDB tidak butuh `TrustServerCertificate`**: ODBC Driver 18 konek dengan maupun tanpa
+      itu (test `print_localdb_encryption_behaviour`). Connection bawaan LocalDB tidak menyalakannya,
+      dan requirements check tidak menyarankannya untuk LocalDB
+- [ ] `services::telemetry::stack_context`: key versi SQL Server **belum dikerjakan**. Ini mengubah
+      kontrak telemetry, dan belum dicek apakah `laravel-api` menerima key `payload` yang belum
+      dikenal (lihat Dependency di bawah). Lebih aman ditunda daripada berisiko membuat event ditolak
+- [x] `scripts/uninstall-clean.ps1`: langkah 1b menghentikan dan menghapus instance `Rezure`, dan
+      langkah 6 melaporkan bahwa ODBC Driver dan LocalDB tetap terpasang. Dry run sudah dicoba
+
+### Verifikasi
+- `cargo fmt`, `cargo clippy --all-targets -D warnings`, `cargo test --lib` (436 lolos),
+  `vue-tsc`, `prettier --check`, `oxlint`, `eslint`: semua bersih
+- Pin diverifikasi lawan unduhan asli: 21 build PECL (`every_pinned_build_matches_its_download`,
+  checksum dan DLL di dalam arsip cocok) dan 2 MSI (`every_pinned_installer_matches_its_download`,
+  checksum dan signature Microsoft)
+- **Install sungguhan di mesin maintainer**, lewat jalur yang sama dengan tombol Install
+  (`msi::tests::installs_for_real` → `run_installer`, dengan UAC yang di-approve maintainer): ODBC
+  Driver 18.7.1.1 dan LocalDB 16.0.1000.6, keduanya terdeteksi sesudahnya
+- `mssql::tests::round_trip_against_localdb` lawan LocalDB sungguhan: create, script `.sql` dengan
+  `GO` (termasuk `CREATE PROCEDURE`), list (jumlah tabel dan ukuran), backup `.bak`, restore dengan
+  nama lain (data Unicode utuh, file di `data\mssql\`), error dari statement kedua tetap muncul,
+  lalu drop
+- UI dirender di Edge headless dengan `invoke` di-mock, lewat harness sementara yang sudah dihapus:
+  kartu LocalDB (Install → dialog lisensi → `install_binary` dengan `acceptLicense: true` → Start),
+  PHP Extensions (Install `pdo_sqlsrv` → banner ODBC), switcher Databases (badge SQL Server, alasan
+  koneksi tidak tersedia), LocalDB (Import `.sql / .bak`, Export `.bak`, collation default server),
+  SQL Server remote (Export nonaktif dengan alasan, menu client menyarankan SSMS), form Add
+  connection, requirements check (tiap langkah hilang setelah di-install), halaman Switch, dan modal
+  Install version
+- Di app sungguhan (`tauri dev` maintainer): LocalDB tampil dan berjalan, koneksi bawaan membaca
+  database yang dibuat maintainer, dan jembatan Rust di app itu melayani login `rezure` lewat ODBC.
+  TablePlus dan DBeaver diluncurkan dengan argumen yang sama dengan menu Open, lalu diverifikasi
+  lewat `sys.dm_exec_sessions` dan screenshot jendela
+- **Belum**: tombol Open sendiri diklik di app (argumennya sudah diuji dengan meluncurkan client
+  langsung), DBeaver sampai benar-benar terhubung setelah driver JDBC-nya terunduh, SSMS, dan alur
+  install dari UI dengan unduhan nyata (installer-nya sendiri sudah terbukti lewat test di atas)
+
+### Batasan
+- **Butuh admin minimal sekali** untuk ODBC Driver, dan untuk LocalDB kalau dipakai. User di laptop
+  kantor tanpa hak admin hanya terlayani kalau tim IT sudah memasang ODBC Driver, dan
+  `odbc::detect()` mengenali driver itu
+- **Terpasang di level sistem** dan tidak ikut terhapus bersama Rezure
+- **Driver Microsoft sering telat** mendukung versi PHP terbaru. Branch tanpa build tampil "not
+  available for PHP x yet"
+- **LocalDB = edisi Express**, dengan batas 10 GB per database
+- `.bak` tidak bisa di-restore ke SQL Server yang lebih lama
+- Script `.sql` dari SSMS "Generate Scripts" biasanya berisi `USE [db_asal]`, yang akan memindahkan
+  eksekusi ke database itu (masalah yang sama dengan `--databases` di `mysqldump`). Belum ditangani
+
+---
+
+## Fase 3.15 — PostgreSQL Support
+
+**Tujuan:** PostgreSQL tersedia sebagai service lokal seperti MariaDB (install dari katalog, Start,
+dipakai project PHP/Node) dan bisa dibaca dari halaman Databases. Tidak ada di roadmap awal,
+**ditambahkan atas permintaan maintainer**, dikerjakan setelah Fase 3.14.
+
+**Status: dikerjakan** (3.15a–d). Sisa: key telemetry (lihat 3.15b) dan klik manual beberapa alur
+UI di app sungguhan (lihat Verifikasi).
+
+### Keputusan yang sudah diambil
+- **Dikerjakan setelah SQL Server**, diputuskan maintainer
+- **All-in-one seperti MariaDB.** PostgreSQL untuk Windows tersedia sebagai zip binary dari EDB
+  (sumber yang juga dipakai Laragon). Tidak ada installer, admin, UAC, maupun EULA yang perlu
+  disetujui. Uninstall cukup hapus folder
+- **Service sendiri, bukan bagian profile switcher.** Aturan "satu server database sekaligus" di
+  [`database-profiles.md`](../v1/database-profiles.md) adalah aturan keluarga MySQL (satu `mysqld`
+  per datadir). PostgreSQL di port 5432 boleh jalan bersamaan dengan MariaDB; dokumen itu sudah
+  diperjelas
+- **Datadir per versi major:** `data\postgres\<major>\`. Datadir PostgreSQL hanya bisa dibuka oleh
+  major yang sama, jadi install major baru mendapat datadir baru alih-alih membuka yang lama
+  (`pg_upgrade` di luar cakupan). Sejalan dengan catatan "MariaDB itu stateful" di Fase 3.10
+- **Auth lokal `trust`, hanya listen di `127.0.0.1`**, konsisten dengan MariaDB Rezure yang
+  root-nya tanpa password
+- **Adopsi datadir PostgreSQL milik tool lain (Laragon) tidak masuk fase ini.** Itu butuh
+  generalisasi `Profile`/`Engine` dulu, jadi kandidat v4
+- **Role `postgres` + `root`**, diputuskan maintainer: `config/database.php` Laravel memakai
+  `root` sebagai default `DB_USERNAME` untuk `pgsql`, jadi project baru langsung konek
+- **Major yang ditawarkan: 18, 17, 16**, diputuskan maintainer (18.6, 17.11, 16.15)
+- **Spawn `postgres.exe` langsung, bukan lewat `pg_ctl start`.** LogSink, PID file, deteksi crash,
+  dan force stop jadi sama dengan service lain. Harganya: PostgreSQL menolak jalan dari proses
+  elevated, jadi Rezure yang dijalankan "as administrator" ditolak di depan dengan pesan yang jelas
+  (`utils::elevation::is_elevated`, lewat `windows-sys` yang sudah ada di dependency tree)
+
+### Fase 3.15a — Katalog dan binary
+- [x] Dicek dulu: EDB **masih** menerbitkan zip Windows x64 untuk 18.6, 17.11, 16.15, 15.19, dan
+      14.24 (`get.enterprisedb.com/postgresql/postgresql-<versi>-<build>-windows-x64-binaries.zip`)
+- [x] `services::postgres_catalog` (baru): daftar versi di-pin, **bukan** index live. EDB tidak
+      menerbitkan index maupun checksum, jadi tiap zip diunduh dan di-hash manual (alasan yang
+      sama dengan `php_ext.rs`). Test `#[ignore]` `every_pin_matches_its_download` untuk saat
+      menambah atau menaikkan versi
+- [x] Ekstrak hanya `pgsql/bin`, `lib`, `share`, dan file lisensinya. Zip-nya ~380 MB karena
+      membawa pgAdmin 4 (814 MB setelah diekstrak); yang tersisa ~145 MB
+- [x] **Download sekarang di-stream ke file sementara** sambil di-hash, untuk semua runtime
+      (`binaries::install_archive`). Sebelumnya seluruh zip ditampung di RAM, yang untuk 380 MB
+      tidak masuk akal. Event progres juga dibatasi maksimal 10 per detik; sebelumnya satu event
+      per chunk jaringan, puluhan ribu untuk zip PostgreSQL. Ekstraksi yang gagal kini menghapus
+      folder setengah jadi, bukan hanya saat exe tidak ditemukan
+- [x] Ubin PostgreSQL di `InstallVersionModal.vue`, dan baris PostgreSQL di halaman Switch dengan
+      versi aktif (pola Node.js), disimpan di `settings.json` (`activePostgresVersion`)
+- [x] Tombol **Install** di kartu Services memasang versi terbaru (`install_binary("postgres")`)
+
+### Fase 3.15b — Service
+- [x] `Launch::Postgres` di `ProcessService`, terdaftar di `process::real_services`. Ikut muncul di
+      Manage services (Fase 3.16) seperti service lain
+- [x] Bootstrap saat datadir kosong: `initdb -D <datadir> -U postgres -A trust -E UTF8
+      --no-locale`, lalu role `root` dibuat lewat `postgres --single` (single-user mode: tanpa
+      server, tanpa port). Semuanya atau tidak sama sekali: kalau gagal, datadir dihapus
+- [x] Start: `postgres.exe -D <datadir> -p 5432 -c listen_addresses=127.0.0.1`
+- [x] Siap = `pg_isready`, bukan TCP connect: PostgreSQL sudah menerima koneksi di port-nya
+      sebelum bisa melayaninya ("the database system is starting up")
+- [x] Stop: `pg_ctl stop -m fast --no-wait`, lalu ditunggu dengan batas 30 detik yang sama dengan
+      `mysqladmin shutdown`; baru di-kill kalau lewat. "fast", bukan "smart", karena "smart"
+      menunggu semua client putus, termasuk worker PHP yang memegang koneksi
+- [x] **Pindah versi saat server jalan**: `postgres::switch` menghentikan server di versi lama
+      (satu-satunya yang bisa diminta shutdown bersih di datadir-nya), mengganti versi aktif, lalu
+      menyalakannya di versi baru
+- [x] Port conflict 5432 (pola yang sama), log viewer (`LOG_SERVICES`), `restarts_on_crash` tetap
+      `false` seperti MariaDB, notifikasi crash bernama "PostgreSQL"
+- [ ] `services::telemetry::stack_context`: key `postgres_version`. **Sengaja belum**, sama seperti
+      versi SQL Server: perubahan kontrak payload yang menunggu pengecekan `laravel-api` (lihat
+      Dependency di bawah). Untuk sekarang `service.start` PostgreSQL membawa versi PHP dan MariaDB
+      seperti service lain
+- [x] `scripts/uninstall-clean.ps1`: `postgres` ikut dihentikan, **hanya yang berjalan dari folder
+      Rezure**. PostgreSQL yang dipasang dengan installer biasa berjalan sebagai Windows service
+      dengan nama proses yang sama, dan bukan milik Rezure
+
+### Fase 3.15c — PHP dan requirements check
+- [x] `pdo_pgsql`/`pgsql` sudah ada di zip PHP (bersama `libpq.dll`) dan di
+      `php_ext_toggle::CATALOG`, **off secara default**, jadi tidak ada driver yang perlu diunduh
+- [x] Requirements check (`doctor::PostgresSetup`): `DB_CONNECTION=pgsql` → `pdo_pgsql` termuat
+      (tombol **Turn on pdo_pgsql**), PostgreSQL terpasang (tombol Install) dan jalan (tombol
+      Start), `DB_PORT` = 5432, dan `DB_USERNAME` role yang ada (`postgres`/`root`). Default yang
+      dipakai saat kosong sama dengan Laravel: `127.0.0.1`, 5432, `root`. Untuk host lain hanya
+      driver yang dicek
+- [x] `services::agent_docs` / `how-rezure-works.md`: baris PostgreSQL di `AGENTS.md` (hanya kalau
+      terpasang), bagian PostgreSQL, contoh `.env`, dan larangan menjalankan `pg_ctl`/`initdb`
+      sendiri
+
+### Fase 3.15d — PostgreSQL di halaman Databases
+- [x] `services::postgres_client` (baru), implementasi `DbClient` lewat `psql`/`pg_dump`. Koneksi
+      **PostgreSQL** (managed) ditambahkan sendiri begitu ada versi terpasang, seperti LocalDB;
+      server lokal dipakai dengan build-nya sendiri, server lain dengan build terbaru (`pg_dump`
+      menolak server yang lebih baru dari dirinya)
+- [x] **SQL lewat stdin, bukan `-c`.** Ditemukan saat uji nyata: Windows memberi argv ke program
+      console dalam code page ANSI, jadi `é` di `psql -c` sampai ke server sebagai byte CP1252
+      `0xE9` dan ditolak sebagai UTF-8 tidak valid. Script import juga lewat stdin, dan `pg_dump`
+      menulis ke stdout yang diarahkan ke file, jadi tidak ada path yang di-encode ulang
+- [x] Password lewat file temp `PGPASSFILE` yang dihapus saat `Drop`, tidak pernah lewat argv
+      maupun `PGPASSWORD`. Selalu `-w`, jadi server yang minta password tidak membuat `psql`
+      menunggu prompt yang tidak terlihat. Nama database lewat `PGDATABASE`, karena argumen yang
+      berisi `=` dibaca `psql` sebagai connection string
+- [x] Identifier dikutip `"…"` dan tetap divalidasi `validate_identifier`. Drop `postgres`,
+      `template0`, dan `template1` ditolak sebelum sampai ke server; ketiganya juga tidak
+      ditampilkan
+- [x] Create: `CREATE DATABASE "…" ENCODING 'UTF8' TEMPLATE template0`. Modal New database
+      menampilkan **Encoding**, bukan Collation
+- [x] Drop di server Rezure sendiri memakai `WITH (FORCE)` (menutup sesi worker PHP, seperti
+      `SINGLE_USER` di LocalDB); di server lain penolakan server tetap berlaku
+- [x] Export `pg_dump --no-owner --no-privileges` ke `.sql` biasa, dengan progres ukuran file.
+      Import lewat `psql -v ON_ERROR_STOP=1`, membuat database dulu kalau belum ada; error
+      menyebut nomor barisnya (`line 12: relation "users" does not exist`). Export tidak bisa
+      di-cancel di tengah jalan, sama seperti SQL Server
+- [x] Server lokal yang belum di-start tampil sebagai banner "start it from Services", bukan error
+      mentah
+- [x] Connection remote `kind: postgres` di Add connection (port 5432, user `postgres`), `TlsMode`
+      dipetakan ke `sslmode` (`disable`/`prefer`/`require`). Tanpa build PostgreSQL terpasang,
+      form menawarkan tombol Install PostgreSQL
+- [x] `services::db_clients`: TablePlus (`postgresql://…`), DBeaver (`driver=postgres-jdbc`, dibaca
+      dari `plugin.xml` DBeaver; `postgresql` di sana driver "(Old)"), pgAdmin 4 kalau terpasang
+      (hanya membuka app, tanpa argumen koneksi), dan console `psql` selalu ada. **HeidiSQL tidak
+      ditawarkan** sampai command line-nya diuji lawan server sungguhan, alasan yang sama dengan
+      SQL Server
+
+### Verifikasi
+- `cargo fmt`, `cargo clippy --all-targets -D warnings`, `cargo test --lib` (463 lolos), `vue-tsc`,
+  `npm run lint`
+- Ketiga zip diunduh dan di-hash di mesin maintainer. Install 18.6 dan 17.11 dari zip itu lewat
+  fungsi ekstraksi yang sama dengan install di app: 145 MB, tanpa pgAdmin
+  (`postgres_catalog::tests::installs_from_a_local_archive`)
+- Service sungguhan (`process::tests::postgres_starts_and_stops_cleanly`): bootstrap, start,
+  login sebagai `root`, encoding `UTF8`, lalu fast shutdown bersih dalam ~250 ms
+  (`postmaster.pid` terhapus, yang hanya terjadi kalau server mematikan dirinya sendiri)
+- Pindah versi saat jalan (`process::tests::postgres_switch_moves_a_running_server`):
+  18.6 → 17.11 tetap Running, server lama berhenti bersih, datadir 17 dibuat sendiri
+- Client Databases (`postgres_client::tests::round_trip_against_local_postgres`): create, list
+  (UTF8, 1 tabel, ukuran), export, import ke database lain dengan `héllo`/`wörld` utuh, drop
+- Di app sungguhan (`tauri dev` maintainer): koneksi PostgreSQL muncul sendiri saat startup, dan
+  PostgreSQL 18.6 berjalan sebagai child `rezureapp.exe` di `data\postgres\18`
+- **Belum**: download dari dalam app (jalur streaming baru; hashing dan ekstraksinya sudah diuji
+  terpisah), Open di TablePlus/DBeaver/pgAdmin/`psql`, tombol-tombol di requirements check, dan
+  Add connection ke PostgreSQL remote
+
+### Batasan
+- **Tidak bisa jalan kalau Rezure dibuka "as administrator"** (aturan PostgreSQL sendiri)
+- **Data tidak ikut pindah antar major**; export lalu import
+- Versi baru EDB tidak muncul sendiri: tiap versi butuh entri dan hash baru di
+  `postgres_catalog::RELEASES`
+- Dump PostgreSQL dari `pg_dump` default tidak berisi `DROP`, jadi import ke database yang sudah
+  berisi tabel yang sama berhenti di tabel pertama. Dialog import menyarankan nama baru
+- Satu baris `FATAL: the database system is starting up` muncul di Logs pada setiap start: itu
+  `pg_isready` yang bertanya terlalu cepat, bukan kegagalan
+
+---
+
+## Fase 3.16 — Manage Services
+
+**Tujuan:** user memilih service mana yang tampil di halaman Services. User MySQL tidak butuh kartu
+SQL Server (dan PostgreSQL setelah 3.15), sebaliknya user SQL Server tidak butuh MariaDB. Tidak ada
+di roadmap awal, **ditambahkan atas permintaan maintainer** setelah 3.14 menambah kartu LocalDB
+untuk semua orang. Mirip Preferences → Services & Ports di Laragon.
+
+### Keputusan yang sudah diambil
+- **Remove = sembunyikan, bukan uninstall.** Binary, data, dan koneksi tetap. Add mengembalikan
+  kartunya persis seperti sebelumnya
+- **Yang disimpan adalah id yang di-remove** (`Settings::hidden_services`), bukan yang dipertahankan,
+  supaya service yang ditambahkan versi Rezure berikutnya (PostgreSQL) langsung tampil alih-alih
+  tersembunyi tanpa ada yang tahu. Default install baru: semua tampil, sama dengan sebelumnya
+- **Semua service boleh di-remove**, termasuk Nginx dan PHP. Daftar Manage services menandai
+  keduanya "Your project sites need it"
+- **Remove service yang sedang jalan menghentikannya dulu** (stop bersih, bukan force). Kalau stop
+  gagal, service tetap tampil dan error-nya ditampilkan
+- Versi PHP ter-pool (`php-<versi>`) tidak muncul sendiri di daftar, tapi ikut PHP
+
+### Tasks
+- [x] `services::service_visibility` (baru): `visible()` untuk `list_services`, `catalog()` untuk
+      daftar Manage services, `set_shown()` yang memvalidasi id, menghentikan service (beserta pool
+      PHP-nya), lalu menyimpan `settings.json`. Settings disimpan sebagai salinan baru dulu, jadi
+      state di memori tidak berubah kalau penulisan file gagal
+- [x] Service yang di-remove tapi **sedang jalan tetap tampil** sampai berhenti. Requirements check
+      bisa menyalakan Mailpit walaupun kartunya di-remove, dan service yang jalan tanpa kartu tidak
+      bisa dihentikan dari halaman
+- [x] Command `list_managed_services` dan `set_service_shown` (lewat `spawn_blocking`, karena stop
+      MariaDB bisa makan waktu sampai batas shutdown-nya)
+- [x] Start all, Restart all, dan Stop all otomatis mengikuti, karena bekerja atas daftar dari
+      `list_services`. Badge sidebar `n/total` juga
+- [x] Tombol **Manage services** di samping toolbar Start all, modal `ManageServicesModal.vue`
+      dengan dua kelompok (On the Services page / Not added), plus empty state kalau semua di-remove
+- [x] Test: penyaringan, PHP ter-pool ikut PHP, service jalan tetap tampil, id yang tidak ada atau
+      id pool ditolak, round-trip `hiddenServices` di settings
+- [ ] Belum dicoba diklik di jendela app sungguhan
+
+### Di luar fase ini
+- Halaman Switch, Databases (koneksi LocalDB bawaan), dan Logs **tidak** ikut disaring. Yang
+  diminta hanya halaman Services; menyembunyikan di tempat lain bisa jadi fase lanjutan kalau
+  ternyata dibutuhkan
+
+---
+
 ## Dependency ke Proyek Lain
 
 Fase 3.4: `GET /api/v1/version/latest` di `laravel-api` **sudah** mengembalikan manifest bertanda tangan sesuai [`docs/version-contract.md`](../version-contract.md) (`VersionController`, kolom `signature`/`download_url` di `releases`). Yang masih tersisa cuma verifikasi end-to-end lawan rilis nyata — repo ini belum punya pipeline yang build+sign installer, jadi belum ada rilis sungguhan buat diuji; sementara kode sisi app sudah bisa diuji lokal lawan manifest tiruan (prosedur ada di doc kontrak itu). Fase 3.1, 3.5, 3.6, 3.10, 3.11, dan 3.13 sepenuhnya independen, tidak bergantung pada backend.
+
+Fase 3.14 dan 3.15 juga tidak bergantung pada backend, kecuali key telemetry baru di payload
+`service.start` (`postgres_version`, dan versi SQL Server untuk LocalDB — keduanya sengaja
+belum dikirim, lihat task terbuka di 3.14c dan 3.15b). `docs/telemetry-contract.md`
+harus diperbarui, dan perlu dicek apakah `laravel-api` menerima key `payload` yang belum dikenal
+serta apakah grafik "top stack combos" di dashboard ikut menampilkannya.
 
 **Catatan soal analytics lanjutan (v3 `rezure-dashboard`):** fitur traffic by hour, breakdown negara, cohort retention, dll di dashboard **tidak membutuhkan perubahan apapun di app ini** — semua data granular yang dibutuhkan (timestamp, OS version, metadata service) sudah terkirim sejak fondasi telemetry v2. Geolocation negara diproses di sisi server dari IP request yang masuk, bukan dikirim dari client.
 
@@ -724,6 +1199,12 @@ Fase 3.4: `GET /api/v1/version/latest` di `laravel-api` **sudah** mengembalikan 
 6. Fase 3.13 (Appearance) — 3.13a dan 3.13b sudah dikerjakan di branch `glassmorph` (bersama
    redesain glassmorphism, karena 3.13a menyentuh file yang sama). Sisa verifikasi manual ada di
    daftar task 3.13b. 3.13c ditunda
+7. Fase 3.14 (SQL Server): 3.14a → 3.14b → 3.14c — **dikerjakan**. Sisa: key telemetry
+   (menunggu pengecekan `laravel-api`) dan pengujian manual di jendela app sungguhan
+8. Fase 3.15 (PostgreSQL): 3.15a → 3.15b → 3.15c → 3.15d — **dikerjakan**. Sisa: key telemetry
+   (bersama SQL Server) dan pengujian manual beberapa alur UI
+9. Fase 3.16 (Manage Services) — **dikerjakan** sebelum 3.15, karena kecil dan langsung
+   dibutuhkan begitu kartu LocalDB muncul untuk semua user. Kartu PostgreSQL ikut otomatis
 
 **Fase 3.3 (Project Health Dashboard) dipindah ke v4** (jadi Fase 4.5) atas permintaan maintainer
 — lihat `docs/v4/rezure-app-v4-phases-tasks.md`.

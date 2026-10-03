@@ -22,6 +22,17 @@ const connectionsStore = useDbConnectionsStore()
 const remote = computed(() => store.server?.remote === true)
 /** Writes are refused for the target: a read-only connection. */
 const readOnly = computed(() => store.server?.readOnly === true)
+/** SQL Server exports a `.bak`, can't stop one half-way, and imports either a
+ *  script or a backup. */
+const isSqlServer = computed(() => store.server?.kind === 'sqlserver')
+/** PostgreSQL's export runs `pg_dump` to the end; there's no cancelling it
+ *  half-way, as there is a MySQL dump. */
+const isPostgres = computed(() => store.server?.kind === 'postgres')
+const exportSupported = computed(() => store.server?.exportSupported !== false)
+const importExtensions = computed(() => store.server?.importExtensions ?? ['sql'])
+const importLabel = computed(() =>
+  importExtensions.value.map((extension) => `.${extension}`).join(' / '),
+)
 
 const showNewDatabaseModal = ref(false)
 const importFile = ref<string | null>(null)
@@ -41,7 +52,8 @@ const subtitle = computed(() => {
   // The local promise ("never asks you for credentials") isn't one this page
   // can make about somebody else's server, so it isn't made.
   if (remote.value) {
-    return `Reading ${store.server?.label ?? 'a remote server'} — list, export and ${handoff}.`
+    const actions = exportSupported.value ? `list, export and ${handoff}` : `list and ${handoff}`
+    return `Reading ${store.server?.label ?? 'a remote server'} — ${actions}.`
   }
   return `Import or Export your database with one click`
 })
@@ -59,7 +71,12 @@ async function pickSqlFile() {
   const picked = await openFileDialog({
     multiple: false,
     directory: false,
-    filters: [{ name: 'SQL dump', extensions: ['sql'] }],
+    filters: [
+      {
+        name: importExtensions.value.includes('bak') ? 'SQL script or backup' : 'SQL dump',
+        extensions: importExtensions.value,
+      },
+    ],
   })
   if (typeof picked === 'string') importFile.value = picked
 }
@@ -100,6 +117,7 @@ const busyDetail = computed(() => {
   if (store.importingInto) return `Reading the dump into ${store.server?.label ?? 'the server'}.`
   // Worth saying for a remote dump: it crosses the network and can take
   // minutes, where a local one is effectively instant.
+  if (isSqlServer.value) return 'Writing a .bak backup to C:\\rezure\\dumps.'
   return remote.value
     ? `Pulling a .sql dump from ${store.server?.label} to C:\\rezure\\dumps.`
     : 'Writing a .sql dump to C:\\rezure\\dumps.'
@@ -201,6 +219,18 @@ const exporting = computed(
         <button type="button" class="font-semibold underline" @click="store.fetchAll">retry</button
         >.
       </template>
+      <template v-else-if="isPostgres">
+        Rezure's PostgreSQL isn't running, so there's nothing to list yet. Start it from
+        <RouterLink to="/" class="font-semibold underline">Services</RouterLink>, then
+        <button type="button" class="font-semibold underline" @click="store.fetchAll">retry</button
+        >.
+      </template>
+      <template v-else-if="isSqlServer">
+        Rezure's LocalDB couldn't be reached. Start it from
+        <RouterLink to="/" class="font-semibold underline">Services</RouterLink>, then
+        <button type="button" class="font-semibold underline" @click="store.fetchAll">retry</button
+        >.
+      </template>
       <template v-else>
         MariaDB isn't running, so there's nothing to list yet. Start it from
         <RouterLink to="/" class="font-semibold underline">Services</RouterLink>, then
@@ -234,7 +264,7 @@ const exporting = computed(
       :label="busyLabel"
       :detail="busyDetail"
       :percent="exporting ? store.exportPercent : null"
-      :on-cancel="exporting ? store.cancelExport : undefined"
+      :on-cancel="exporting && !isSqlServer && !isPostgres ? store.cancelExport : undefined"
     />
 
     <!-- Search, import and the totals sit above the table so the table itself
@@ -261,7 +291,7 @@ const exporting = computed(
             d="M12 4v11m0 0-4-4m4 4 4-4M5 19h14"
           />
         </svg>
-        Import .sql
+        Import {{ importLabel }}
       </button>
 
       <span class="shrink-0 text-sm text-neutral-500">
@@ -353,11 +383,18 @@ const exporting = computed(
 
           <div class="flex w-52 shrink-0 items-center justify-end gap-1.5">
             <OpenInClientMenu :database="db.name" />
+            <!-- Disabled rather than hidden where it can't work, with the
+                 reason in reach: a remote SQL Server's BACKUP lands on its own
+                 disk, not this one. -->
             <button
               type="button"
               :class="ACTION_BUTTON_CLASS"
-              :disabled="store.busy === db.name"
-              :title="`Export ${db.name} to a timestamped .sql file`"
+              :disabled="store.busy === db.name || !exportSupported"
+              :title="
+                !exportSupported
+                  ? `Export isn't available here — SQL Server writes a backup onto its own disk, and ${store.server?.label} isn't this machine`
+                  : `Export ${db.name} to a timestamped ${isSqlServer ? '.bak' : '.sql'} file`
+              "
               @click="store.exportDatabase(db.name)"
             >
               <svg

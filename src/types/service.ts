@@ -26,6 +26,24 @@ export interface ServiceInfo {
   installId: string | null
   /** A web UI to open in the browser while the service runs (Mailpit). */
   webUrl: string | null
+  /** How to reach a service with no TCP port — SQL Server LocalDB's named
+   *  pipe, `(localdb)\Rezure`. Shown in place of the port. */
+  endpoint: string | null
+}
+
+/** One row of the Manage services list — mirrors
+ *  `services::service_visibility::ManagedService`. */
+export interface ManagedService {
+  id: string
+  name: string
+  category: string
+  /** On the Services page. */
+  shown: boolean
+  installed: boolean
+  /** Running, or for PHP any pooled version is. Removing it stops it. */
+  running: boolean
+  /** Project sites stop loading without it (Nginx, PHP). */
+  servesSites: boolean
 }
 
 /** How many of a multi-process service's workers are up. */

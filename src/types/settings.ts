@@ -86,6 +86,8 @@ export interface Settings {
   defaultPort: number
   shareUsageData: boolean
   activePhpVersion: string | null
+  activeNodeVersion: string | null
+  activePostgresVersion: string | null
   startWithWindows: boolean
   keepInTrayOnClose: boolean
   notifyOnCrash: boolean
@@ -93,6 +95,8 @@ export interface Settings {
   /** `null` until an appearance has been saved — see `stores/appearance.ts`. */
   appearance: AppearanceSettings | null
   decorations: Decorations
+  /** Ids removed from the Services page with Manage services. */
+  hiddenServices: string[]
 }
 
 export interface SettingsPatch {

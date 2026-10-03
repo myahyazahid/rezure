@@ -14,13 +14,17 @@ const NAME_PATTERN = /^[A-Za-z0-9_-]+$/
 function suggestedName(path: string) {
   const base = path.split(/[\\/]/).pop() ?? ''
   return base
-    .replace(/\.sql$/i, '')
+    .replace(/\.(sql|bak)$/i, '')
     .replace(/-\d{8}-\d{6}$/, '') // strip Rezure's own export timestamp
     .replace(/[^A-Za-z0-9_-]/g, '_')
     .slice(0, 64)
 }
 
 const name = ref(suggestedName(props.file))
+
+/** A SQL Server backup is restored whole, not run statement by statement —
+ *  which changes what "already exists" means. */
+const isBackup = computed(() => /\.bak$/i.test(props.file))
 
 const existing = computed(() =>
   store.databases.some((db) => db.name.toLowerCase() === name.value.trim().toLowerCase()),
@@ -39,6 +43,11 @@ const nameError = computed(() => {
 /** True when the dump is about to be loaded into a server Rezure doesn't
  *  run. Everything below that reads `remote` exists because of it. */
 const remote = computed(() => store.server?.remote === true)
+
+/** A `pg_dump` script has no DROP statements unless it was taken with
+ *  `--clean` — Rezure's own exports aren't — so into an existing database it
+ *  stops at the first table that's already there. */
+const isPostgres = computed(() => store.server?.kind === 'postgres')
 
 /** Typed back by the user before a remote import runs.
  *
@@ -84,7 +93,9 @@ watch(name, () => {
     @click.self="close"
   >
     <div class="glass-strong w-full max-w-md rounded-3xl p-6">
-      <h2 class="text-xl font-bold tracking-tight">Import .sql</h2>
+      <h2 class="text-xl font-bold tracking-tight">
+        {{ isBackup ? 'Restore .bak' : 'Import .sql' }}
+      </h2>
       <p class="mt-0.5 truncate font-mono text-xs text-neutral-500" :title="props.file">
         {{ props.file }}
       </p>
@@ -101,6 +112,21 @@ watch(name, () => {
       />
       <p v-if="nameError" class="mt-1.5 text-xs text-red-600 dark:text-red-400">{{ nameError }}</p>
 
+      <p
+        v-else-if="existing && isBackup"
+        class="mt-2 rounded-xl bg-amber-100/50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+      >
+        <strong>{{ name.trim() }}</strong> already exists. Restoring replaces it entirely — every
+        table and row in it now is gone afterwards.
+      </p>
+      <p
+        v-else-if="existing && isPostgres"
+        class="mt-2 rounded-xl bg-amber-100/50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+      >
+        <strong>{{ name.trim() }}</strong> already exists. A PostgreSQL dump usually creates its
+        tables without dropping them first, so the import stops at the first one that's already
+        there — import into a new name to be safe.
+      </p>
       <p
         v-else-if="existing"
         class="mt-2 rounded-xl bg-amber-100/50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
@@ -151,7 +177,8 @@ watch(name, () => {
           :disabled="!canImport || store.importing"
           @click="submit"
         >
-          {{ store.importing ? 'Importing…' : 'Import' }}
+          <template v-if="isBackup">{{ store.importing ? 'Restoring…' : 'Restore' }}</template>
+          <template v-else>{{ store.importing ? 'Importing…' : 'Import' }}</template>
         </button>
       </div>
     </div>

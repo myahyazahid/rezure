@@ -4,6 +4,7 @@ import { useDbProfilesStore } from '@/stores/dbProfiles'
 import { useDbConnectionsStore } from '@/stores/dbConnections'
 import { useServicesStore } from '@/stores/services'
 import { useDatabasesStore } from '@/stores/databases'
+import { useBinariesStore } from '@/stores/binaries'
 import { ENGINE_LABEL, SOURCE_LABEL } from '@/types/dbProfile'
 import type { DbProfileStatus } from '@/types/dbProfile'
 import type { DbConnectionStatus } from '@/types/dbConnection'
@@ -15,6 +16,7 @@ const profiles = useDbProfilesStore()
 const connections = useDbConnectionsStore()
 const servicesStore = useServicesStore()
 const databasesStore = useDatabasesStore()
+const binariesStore = useBinariesStore()
 
 const open = ref(false)
 const showAddProfile = ref(false)
@@ -53,6 +55,13 @@ function describeProfile(profile: DbProfileStatus) {
 }
 
 function describeConnection(connection: DbConnectionStatus) {
+  if (connection.kind === 'sqlserver') {
+    // Port 0 is a named instance, whose port SQL Server Browser hands out.
+    const server = connection.port ? `${connection.host}:${connection.port}` : connection.host
+    const who = connection.windowsAuth ? 'Windows sign-in' : connection.user
+    const endpoint = `${who} · ${server}`
+    return connection.ssh ? `${endpoint} via ${connection.ssh.host}` : endpoint
+  }
   const endpoint = `${connection.user}@${connection.host}:${connection.port}`
   // The SSH host is the one a user recognises: every tunnelled connection's
   // database host reads as 127.0.0.1, which identifies nothing on its own.
@@ -100,6 +109,23 @@ async function chooseConnection(connection: DbConnectionStatus) {
   await databasesStore.fetchAll()
 }
 
+/** Why a connection can't be selected, said where it can be fixed. */
+function unavailableReason(connection: DbConnectionStatus) {
+  if (connection.kind === 'postgres') {
+    return 'Needs a PostgreSQL build for psql — install one from the Switch page'
+  }
+  if (connection.kind !== 'sqlserver') {
+    return `No ${ENGINE_LABEL[connection.engine]} client installed to reach it`
+  }
+  // The driver is the usual gap; LocalDB itself going missing is the rarer
+  // one, and only possible for Rezure's own connection.
+  const odbc = binariesStore.binaries.find((b) => b.id === 'msodbcsql')
+  if (!connection.managed || !odbc?.installed) {
+    return 'Needs the Microsoft ODBC Driver — install it from PHP Extensions'
+  }
+  return 'LocalDB is no longer installed'
+}
+
 /** Runs once the password has been accepted, continuing the selection the
  *  user already asked for. */
 async function afterUnlock() {
@@ -138,6 +164,8 @@ const ROW_CLASS =
 onMounted(() => {
   profiles.fetchAll()
   connections.fetchAll()
+  // Only to say which piece a SQL Server connection is missing.
+  if (binariesStore.binaries.length === 0) binariesStore.fetchAll()
 })
 </script>
 
@@ -302,6 +330,18 @@ onMounted(() => {
               </span>
               <span class="mt-0.5 flex flex-wrap gap-1.5">
                 <span
+                  v-if="connection.kind === 'sqlserver'"
+                  class="glass-inset rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-neutral-500 dark:text-neutral-400"
+                >
+                  {{ connection.managed ? 'SQL Server · this PC' : 'SQL Server' }}
+                </span>
+                <span
+                  v-else-if="connection.kind === 'postgres'"
+                  class="glass-inset rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-neutral-500 dark:text-neutral-400"
+                >
+                  {{ connection.managed ? 'PostgreSQL · this PC' : 'PostgreSQL' }}
+                </span>
+                <span
                   v-if="connection.readOnly"
                   class="glass-inset rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-neutral-500 dark:text-neutral-400"
                 >
@@ -320,7 +360,7 @@ onMounted(() => {
                 v-if="!connection.clientAvailable"
                 class="mt-0.5 block text-xs text-amber-600 dark:text-amber-400"
               >
-                No {{ ENGINE_LABEL[connection.engine] }} client installed to reach it
+                {{ unavailableReason(connection) }}
               </span>
             </span>
             <span
@@ -333,8 +373,11 @@ onMounted(() => {
 
           <!-- Deleting is the only way to get rid of a connection, so it has
                to be reachable — but never the thing a mis-click hits, hence
-               hover-only and out of the row's own click target. -->
+               hover-only and out of the row's own click target. Rezure's own
+               LocalDB connection isn't the user's to remove: it comes and goes
+               with LocalDB itself. -->
           <button
+            v-if="!connection.managed"
             type="button"
             class="absolute top-3 right-3 hidden rounded-lg p-1.5 text-neutral-400 transition group-hover:block hover:bg-white/60 hover:text-red-600 dark:hover:bg-white/10"
             :title="`Remove ${connection.name}`"

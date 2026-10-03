@@ -195,6 +195,7 @@ pub async fn install(app: &AppHandle, version: &str) -> Result<Vec<PhpVersionSta
             sha256: &release.sha256,
             dest_dir,
             exe_relative_path: EXE,
+            keep: &[],
         },
     )
     .await?;

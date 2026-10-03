@@ -59,6 +59,30 @@ export interface NodeVersion {
   npm: string | null
 }
 
+/** One PostgreSQL version on disk — mirrors
+ *  `services::postgres::PostgresVersionStatus`. */
+export interface PostgresVersion {
+  id: string
+  version: string
+  /** Decides the data directory: each major keeps its own databases. */
+  major: string
+  installed: boolean
+  active: boolean
+  /** False for anything under the drop-in folder. */
+  managed: boolean
+  path: string
+}
+
+/** A PostgreSQL version Rezure can install — a pinned EDB build, see
+ *  `services::postgres_catalog`. */
+export interface PostgresRelease {
+  version: string
+  major: string
+  downloadUrl: string
+  latest: boolean
+  installed: boolean
+}
+
 /** A version nodejs.org currently publishes for Windows x64 — the newest
  *  patch of each LTS line, plus the newest Current release. */
 export interface NodeRelease {

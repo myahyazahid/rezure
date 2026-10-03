@@ -5,6 +5,7 @@ import { listen } from '@tauri-apps/api/event'
 import type { BinaryStatus, InstallProgress } from '@/types/binary'
 import type { InstalledVersion, MariaDbRelease } from '@/types/runtime'
 import { useServicesStore } from '@/stores/services'
+import { useDbConnectionsStore } from '@/stores/dbConnections'
 
 // Keep in sync with `PROGRESS_EVENT` in src-tauri/src/services/binaries.rs
 const PROGRESS_EVENT = 'binary://install-progress'
@@ -47,10 +48,15 @@ export const useBinariesStore = defineStore('binaries', () => {
     }
   }
 
-  async function install(id: string) {
+  /**
+   * Installs a package. `acceptLicense` is only for the Microsoft installers
+   * (those with a `licenseUrl`), and must only be passed once the user has
+   * ticked the box beside the license — see `useLicensedInstall`.
+   */
+  async function install(id: string, acceptLicense = false) {
     installingIds.value.add(id)
     try {
-      const updated = await invoke<BinaryStatus>('install_binary', { id })
+      const updated = await invoke<BinaryStatus>('install_binary', { id, acceptLicense })
       const index = binaries.value.findIndex((b) => b.id === id)
       if (index !== -1) binaries.value[index] = updated
       // A service card's Install/Start button reads `installed` from the
@@ -59,6 +65,13 @@ export const useBinariesStore = defineStore('binaries', () => {
       await useServicesStore()
         .fetchAll()
         .catch(() => {})
+      // The ODBC Driver makes SQL Server connections usable, and LocalDB and
+      // PostgreSQL bring their own connection — all show in the switcher.
+      if (updated.licenseUrl || id === 'postgres') {
+        await useDbConnectionsStore()
+          .fetchAll()
+          .catch(() => {})
+      }
     } finally {
       installingIds.value.delete(id)
       delete progress.value[id]

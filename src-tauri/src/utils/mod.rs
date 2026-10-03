@@ -1,6 +1,7 @@
 //! Shared helper functions.
 
 pub mod command;
+pub mod elevation;
 pub mod error;
 pub mod migrate;
 pub mod paths;
