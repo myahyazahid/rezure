@@ -135,6 +135,15 @@ onUnmounted(() => {
         >
           Open {{ props.database }} with
         </p>
+        <!-- Nothing found for this kind of server — say what would work
+             rather than show an empty list. -->
+        <p v-if="store.clients.length === 0" class="px-4 py-3 text-xs text-neutral-500">
+          <template v-if="store.server?.kind === 'sqlserver'">
+            No SQL Server client found. Install SQL Server Management Studio to open databases from
+            here.
+          </template>
+          <template v-else>No SQL client found on this machine.</template>
+        </p>
         <button
           v-for="client in store.clients"
           :key="client.id"

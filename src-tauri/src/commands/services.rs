@@ -1,13 +1,54 @@
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
+use crate::config::settings::SettingsState;
 use crate::services::ports::{self, PortHolder};
+use crate::services::service_visibility::{self, ManagedService};
 use crate::services::telemetry;
 use crate::services::{ServiceInfo, ServiceManager, ServiceStatus};
 use crate::utils::error::AppError;
 
+/// The Services page's rows — every service not removed with Manage
+/// services.
 #[tauri::command]
-pub fn list_services(manager: State<'_, ServiceManager>) -> Vec<ServiceInfo> {
-    manager.list()
+pub fn list_services(
+    manager: State<'_, ServiceManager>,
+    settings: State<'_, SettingsState>,
+) -> Vec<ServiceInfo> {
+    service_visibility::visible(manager.list(), &service_visibility::hidden(&settings))
+}
+
+/// The Manage services list: every service, and whether it's on the page.
+#[tauri::command]
+pub fn list_managed_services(
+    manager: State<'_, ServiceManager>,
+    settings: State<'_, SettingsState>,
+) -> Vec<ManagedService> {
+    service_visibility::catalog(&manager.list(), &service_visibility::hidden(&settings))
+}
+
+/// Adds a service to the Services page or removes it, returning the updated
+/// Manage services list. Removing a running service stops it, which for a
+/// database can take a while — hence off the async runtime.
+#[tauri::command]
+pub async fn set_service_shown(
+    id: String,
+    shown: bool,
+    app: AppHandle,
+) -> Result<Vec<ManagedService>, AppError> {
+    tokio::task::spawn_blocking(move || {
+        let manager = app.state::<ServiceManager>();
+        let settings = app.state::<SettingsState>();
+        service_visibility::set_shown(&manager, &settings, &id, shown)?;
+        Ok(service_visibility::catalog(
+            &manager.list(),
+            &service_visibility::hidden(&settings),
+        ))
+    })
+    .await
+    .map_err(|e| AppError::ProcessSpawnFailed {
+        name: "manage services".to_string(),
+        reason: format!("background task panicked: {e}"),
+    })?
 }
 
 // Spawning/killing a real process (and, for MariaDB's first run, waiting on

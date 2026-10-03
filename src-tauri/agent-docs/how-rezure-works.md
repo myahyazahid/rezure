@@ -22,15 +22,20 @@ they serve the projects.** Rezure's projects are served by Rezure. See
 | PHP (a version a project pins) | 4 × `php-cgi.exe` each | `127.0.0.1:9110`–`9113`, then `9120`–`9123`, ... |
 | Database (MariaDB or MySQL) | `mysqld.exe` | `127.0.0.1:3306`, or the active profile's port |
 | Mailpit | `mailpit.exe` | SMTP `127.0.0.1:1025`, web inbox `http://127.0.0.1:8025` |
+| SQL Server LocalDB (optional) | `sqlservr.exe`, run by LocalDB itself | A named pipe, addressed as `(localdb)\Rezure`; Rezure also relays `127.0.0.1:14330` to it |
+| PostgreSQL (optional) | `postgres.exe` (one process per connection) | `127.0.0.1:5432` |
 
 - Services are started and stopped **from the Rezure app** (Services page: Start
   all / Stop all / Restart all, or each service's own button). Rezure starts
   nothing on its own when it opens, and stops everything when it quits.
+- A service missing from the Services page was removed there with **Manage
+  services**. It's still installed; adding it back from the same button
+  restores its card.
 - Don't start, stop or kill these processes yourself. Rezure tracks them by PID
   file (`{{home}}\data\<service>\service.pid`) and regenerates their config
   before each start. A process started by hand won't have that config.
 - To check what's running without the app:
-  `Get-Process nginx, php-cgi, mysqld, mailpit -ErrorAction SilentlyContinue`.
+  `Get-Process nginx, php-cgi, mysqld, mailpit, postgres -ErrorAction SilentlyContinue`.
 - PHP is restarted automatically if it crashes (with backoff; it gives up after 5
   crashes in 5 minutes). Nginx and the database are not.
 - If a port is taken by another program (IIS or Laragon on 80, another MySQL on
@@ -42,7 +47,7 @@ they serve the projects.** Rezure's projects are served by Rezure. See
 | Path | What it is |
 |---|---|
 | `{{home}}\www\` | Projects. Each top-level folder is one project. |
-| `{{home}}\bin\<runtime>\<version>\` | Runtimes Rezure downloaded (php, nginx, mariadb, node, composer, mailpit, cloudflared). |
+| `{{home}}\bin\<runtime>\<version>\` | Runtimes Rezure downloaded (php, nginx, mariadb, postgres, node, composer, mailpit, cloudflared). |
 | `{{home}}\custom\<runtime>\<name>\` | Runtimes added by hand. They're used, but Rezure didn't verify them. |
 | `{{home}}\current\php` | A junction to the active PHP version's folder. |
 | `{{home}}\data\` | Runtime state: generated Nginx and PHP config, the default database's data, PID files. |
@@ -129,8 +134,10 @@ they serve the projects.** Rezure's projects are served by Rezure. See
 
 ## Database
 
-- One database server at a time, service id `mariadb`, running either MariaDB or
-  MySQL depending on the **active profile** (Databases page).
+- One MySQL-family server at a time, service id `mariadb`, running either
+  MariaDB or MySQL depending on the **active profile** (Databases page).
+  PostgreSQL is a separate service on its own port and can run beside it — see
+  [PostgreSQL](#postgresql).
 - The default profile is Rezure's own MariaDB, with its data in
   `{{home}}\data\mariadb\data` on port 3306.
 - Other profiles can adopt an existing data folder, such as Laragon's or XAMPP's.
@@ -144,6 +151,56 @@ they serve the projects.** Rezure's projects are served by Rezure. See
 - Manage profiles from the Databases page, not by editing `profiles.json`: the app
   keeps it in memory and saves over it.
 - SQL exports go to `{{home}}\dumps\`.
+
+## SQL Server
+
+Only for projects whose database is SQL Server. Two parts, installed from the app
+on request, and both are real Windows installs (Settings > Apps), not files under
+`{{home}}`:
+
+- **Microsoft ODBC Driver for SQL Server** (17 or 18) plus PHP's `pdo_sqlsrv` /
+  `sqlsrv` extensions (PHP Extensions page). PHP loads `pdo_sqlsrv` fine without
+  the ODBC driver; it only fails on connect with "This extension requires the
+  Microsoft ODBC Driver for SQL Server".
+- **SQL Server Express LocalDB**, optional: a local SQL Server shown on the
+  Services page (service id `sqlserver`). Rezure creates one instance, `Rezure`,
+  reached as `(localdb)\Rezure` over a named pipe. There is no TCP port.
+- **Login to LocalDB:** Windows Authentication. Leave `DB_USERNAME` and
+  `DB_PASSWORD` empty. The instance belongs to the Windows user running Rezure.
+- **Over TCP** (for tools that can't open a pipe): `127.0.0.1,14330`, SQL login
+  `rezure` with an empty password, encryption off (LocalDB offers no TLS through
+  the relay). Only while the Rezure app is running.
+- Databases Rezure creates or restores on LocalDB keep their files in
+  `{{home}}\data\mssql\`. Exports from LocalDB are `.bak` backups in
+  `{{home}}\dumps\`.
+- A SQL Server on another machine is a connection on the Databases page; Rezure
+  lists its databases but doesn't start, stop or back it up.
+- **ODBC Driver 18 encrypts by default** and refuses a self-signed certificate,
+  which most development and office servers have. In Laravel, uncomment
+  `'trust_server_certificate'` in `config/database.php` **and** set
+  `DB_TRUST_SERVER_CERTIFICATE=true` (the env var alone does nothing, because the
+  line ships commented out). LocalDB doesn't need this.
+
+## PostgreSQL
+
+Optional, installed from the app (Services page, or Switch > Install version).
+Service id `postgres`, on `127.0.0.1:5432`. Portable builds from EDB under
+`{{home}}\bin\postgres\<version>\`, nothing installed into Windows.
+
+- **Login:** superusers `postgres` and `root`, any password (authentication is
+  `trust`, and the server only listens on `127.0.0.1`). `root` exists because
+  it's Laravel's default `DB_USERNAME`.
+- **Versions:** the active one is picked on the **Switch** page. Each major
+  version keeps its own databases in `{{home}}\data\postgres\<major>\`;
+  switching from 17 to 18 starts on 18's data, it doesn't upgrade 17's. Move
+  data across with an export and an import.
+- **Databases page:** a connection called **PostgreSQL** appears by itself.
+  Exports are plain `.sql` files from `pg_dump` (`--no-owner`), imports run a
+  `.sql` file with `psql`, stopping at the first error.
+- **PHP:** `pdo_pgsql` / `pgsql` ship with every PHP build but are **off by
+  default** — turn `pdo_pgsql` on in PHP Extensions, or Laravel fails with
+  "could not find driver".
+- A PostgreSQL on another machine is a connection on the Databases page.
 
 ## Mail (Mailpit)
 
@@ -169,6 +226,28 @@ MAIL_PORT=1025
 
 `MAIL_HOST=mailpit` (Laravel Sail's default) doesn't resolve outside Docker. Use
 `127.0.0.1`.
+
+For a project on SQL Server LocalDB instead:
+
+```dotenv
+DB_CONNECTION=sqlsrv
+DB_HOST='(localdb)\Rezure'
+DB_PORT=                   # must be empty: Laravel appends any port, even its 1433 default
+DB_DATABASE=<project>
+DB_USERNAME=               # empty = Windows Authentication
+DB_PASSWORD=
+```
+
+For a project on Rezure's PostgreSQL:
+
+```dotenv
+DB_CONNECTION=pgsql
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_DATABASE=<project>
+DB_USERNAME=root           # or postgres
+DB_PASSWORD=               # anything: authentication is trust
+```
 
 ## Node and Composer
 
@@ -218,8 +297,12 @@ person you shared it with.
 - Don't edit anything under `{{home}}\data\` (generated), the hosts file's Rezure
   block, `{{home}}\current\`, or the JSON files in `{{home}}\etc\` while the app is
   running.
-- Don't start, stop or kill `nginx.exe`, `php-cgi.exe`, `mysqld.exe` or
-  `mailpit.exe` yourself.
+- Don't start, stop or kill `nginx.exe`, `php-cgi.exe`, `mysqld.exe`,
+  `postgres.exe`, `mailpit.exe` or LocalDB's `sqlservr.exe` yourself. Don't run
+  `pg_ctl` or `initdb` against `{{home}}\data\postgres\`. Don't run `SqlLocalDB` to
+  delete or recreate the `Rezure` instance.
+- Don't install or uninstall the ODBC Driver or LocalDB yourself. The app does
+  both, after the user accepts Microsoft's license.
 - Don't expect HTTPS on `.test` domains. There is none.
 
 ## Making agents find this

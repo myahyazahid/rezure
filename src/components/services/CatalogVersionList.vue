@@ -77,7 +77,7 @@ function progressPercent(version: string) {
             </span>
             <span
               v-if="release.latest"
-              class="rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] font-bold tracking-wide text-red-600 uppercase dark:bg-red-500/15 dark:text-red-400"
+              class="rounded-full bg-accent-500/15 px-2 py-0.5 text-[10px] font-bold tracking-wide text-accent-600 uppercase dark:bg-accent-500/15 dark:text-accent-400"
             >
               Latest
             </span>
@@ -128,7 +128,7 @@ function progressPercent(version: string) {
         class="mt-3 h-1.5 overflow-hidden rounded-full bg-neutral-900/10 dark:bg-white/10"
       >
         <div
-          class="h-full rounded-full bg-linear-to-r from-red-500 to-orange-400 transition-all"
+          class="h-full rounded-full bg-linear-to-r from-accent-500 to-accent-alt transition-all"
           :class="progressPercent(release.version) === null ? 'w-1/3 animate-pulse' : ''"
           :style="
             progressPercent(release.version) !== null

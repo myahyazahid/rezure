@@ -25,7 +25,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::db::projects::{ProjectInfo, ProjectKind};
 use crate::db::{self, DbState};
-use crate::services::{db_profiles, php, projects};
+use crate::services::{db_profiles, mssql_localdb, php, postgres, projects};
 use crate::utils::paths;
 
 /// The full guide, with `{{home}}` and `{{version}}` filled in on write.
@@ -47,6 +47,11 @@ struct MachineState {
     /// Empty when no PHP is installed.
     active_php: String,
     database: Option<DatabaseState>,
+    /// SQL Server LocalDB is installed, so `(localdb)\Rezure` is there for
+    /// projects on SQL Server.
+    localdb: bool,
+    /// The active PostgreSQL version, when one is installed.
+    postgres: Option<String>,
     projects: Vec<ProjectState>,
 }
 
@@ -134,6 +139,8 @@ fn gather(app: &AppHandle, home: &Path) -> MachineState {
             profile: profile.name,
             is_rezures_own: profile.is_default,
         }),
+        localdb: mssql_localdb::is_installed(),
+        postgres: Some(postgres::active_id()).filter(|version| !version.is_empty()),
     }
 }
 
@@ -206,6 +213,30 @@ fn render_agents_md(state: &MachineState) -> String {
         }
         None => out.push_str("- **Database:** no profile set up yet.\n"),
     }
+    if state.localdb {
+        out.push_str(&format!(
+            "- **SQL Server:** LocalDB, instance `{}`, Windows Authentication (empty \
+             `DB_USERNAME`/`DB_PASSWORD`). Laravel: `DB_CONNECTION=sqlsrv`, `DB_HOST='{}'`, \
+             and `DB_PORT=` left empty. Tools that need TCP: `127.0.0.1,{}`, login `{}`, \
+             no password, encryption off.\n",
+            mssql_localdb::SERVER_ADDRESS,
+            mssql_localdb::SERVER_ADDRESS,
+            super::localdb_bridge::PORT,
+            super::mssql::LOCALDB_LOGIN
+        ));
+    }
+    if let Some(version) = &state.postgres {
+        out.push_str(&format!(
+            "- **PostgreSQL:** {version} on `{}:{}`, superusers `{}` and `{}`, no password \
+             (trust). Laravel: `DB_CONNECTION=pgsql`, `DB_PORT={}`. Each major version keeps \
+             its own databases, in `{home}\\data\\postgres\\<major>\\`.\n",
+            postgres::HOST,
+            postgres::PORT,
+            postgres::SUPERUSER,
+            postgres::APP_ROLE,
+            postgres::PORT,
+        ));
+    }
     out.push_str(
         "- **Web:** Nginx on port 80, plain HTTP. Each project is `http://<name>.test`.\n\
          - **Mail:** Mailpit, SMTP `127.0.0.1:1025`, inbox `http://127.0.0.1:8025`.\n\
@@ -243,7 +274,7 @@ fn render_agents_md(state: &MachineState) -> String {
         "\n## Rules\n\n\
          - Start, stop and restart services, switch PHP versions and sync the hosts file \
          **from the Rezure app**. Don't launch or kill `nginx.exe`, `php-cgi.exe`, \
-         `mysqld.exe` or `mailpit.exe` yourself.\n\
+         `mysqld.exe`, `postgres.exe` or `mailpit.exe` yourself.\n\
          - PHP settings go in `{home}\\etc\\php\\conf.d\\*.ini`. Everything under \
          `{home}\\data\\` is regenerated, so edits there don't last.\n\
          - Run `php artisan`, `composer` and `npm` from the terminal a project card opens, \
@@ -332,8 +363,42 @@ mod tests {
                 profile: "Rezure".to_string(),
                 is_rezures_own: true,
             }),
+            localdb: false,
+            postgres: None,
             projects,
         }
+    }
+
+    /// Like LocalDB: described only where it's installed, with the two
+    /// things a project needs and can't guess — the roles and the port.
+    #[test]
+    fn postgres_is_described_only_when_it_is_installed() {
+        let mut machine = state(Vec::new());
+        assert!(!render_agents_md(&machine).contains("PostgreSQL"));
+        machine.postgres = Some("18.6".to_string());
+        let rendered = render_agents_md(&machine);
+        assert!(
+            rendered.contains("PostgreSQL:** 18.6 on `127.0.0.1:5432`"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("`postgres` and `root`"), "{rendered}");
+        assert!(
+            rendered.contains(r"C:\rezure\data\postgres\<major>\"),
+            "{rendered}"
+        );
+    }
+
+    /// The SQL Server line appears only where LocalDB is installed — and
+    /// then carries the one `.env` detail that isn't guessable, the empty
+    /// `DB_PORT`.
+    #[test]
+    fn localdb_is_described_only_when_it_is_installed() {
+        let mut machine = state(Vec::new());
+        assert!(!render_agents_md(&machine).contains("SQL Server"));
+        machine.localdb = true;
+        let rendered = render_agents_md(&machine);
+        assert!(rendered.contains(r"(localdb)\Rezure"), "{rendered}");
+        assert!(rendered.contains("`DB_PORT=` left empty"), "{rendered}");
     }
 
     #[test]

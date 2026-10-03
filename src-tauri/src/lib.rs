@@ -32,6 +32,8 @@ pub fn run() {
             .plugin(tauri_plugin_notification::init())
             .invoke_handler(tauri::generate_handler![
                 commands::services::list_services,
+                commands::services::list_managed_services,
+                commands::services::set_service_shown,
                 commands::services::start_service,
                 commands::services::stop_service,
                 commands::services::force_stop_service,
@@ -91,6 +93,10 @@ pub fn run() {
                 commands::node::set_active_node_version,
                 commands::node::list_node_catalog,
                 commands::node::install_node_version,
+                commands::postgres::list_postgres_versions,
+                commands::postgres::set_active_postgres_version,
+                commands::postgres::list_postgres_catalog,
+                commands::postgres::install_postgres_version,
                 commands::database::list_databases,
                 commands::database::database_server_info,
                 commands::database::list_collations,
@@ -249,6 +255,16 @@ pub fn run() {
                 // enough to do synchronously here.
                 services::binaries::seed_bundled(app.handle());
 
+                // LocalDB may have been installed outside Rezure (Visual
+                // Studio brings it along), or by Rezure in a session that
+                // closed before the connection was saved. A folder scan, so
+                // cheap enough for every start.
+                services::connections::ensure_localdb();
+                // TablePlus, DBeaver and HeidiSQL reach LocalDB through this.
+                services::localdb_bridge::start();
+                // Same for Rezure's own PostgreSQL, once a version is on disk.
+                services::connections::ensure_postgres();
+
                 // Needs a live `AppHandle` (to emit `service://log` events),
                 // which only exists once the app is actually starting up.
                 app.manage(services::real_services(app.handle().clone()));
@@ -269,6 +285,12 @@ pub fn run() {
                 // fallback picks the newest installed one instead.
                 if let Some(version) = &settings.active_node_version {
                     let _ = services::node::set_active(version);
+                }
+                // And PostgreSQL. Before anything can start the service, so it
+                // comes up on the version — and the data directory — it was
+                // last on.
+                if let Some(version) = &settings.active_postgres_version {
+                    let _ = services::postgres::set_active(version);
                 }
                 // Restoring the choice is only half of it: `services::php`'s
                 // `set_active` moves in-memory state, while the junction on the

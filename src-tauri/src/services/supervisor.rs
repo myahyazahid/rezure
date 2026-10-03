@@ -297,6 +297,7 @@ mod tests {
                 installed: true,
                 install_id: None,
                 web_url: None,
+                endpoint: None,
             }
         }
         fn start(&self) -> Result<ServiceInfo, AppError> {

@@ -159,7 +159,7 @@ onBeforeUnmount(() => {
       :height="props.size"
       viewBox="0 0 100 100"
       aria-hidden="true"
-      class="text-red-600 dark:text-red-500"
+      class="text-accent-600 dark:text-accent-500"
       :class="{ 'animate-pulse': reduceMotion }"
     >
       <path

@@ -41,7 +41,7 @@ watch(
         {{ store.config.message }}
         <RouterLink
           to="/about"
-          class="font-semibold text-red-600 hover:underline dark:text-red-400"
+          class="font-semibold text-accent-600 hover:underline dark:text-accent-400"
         >
           Read the story
         </RouterLink>

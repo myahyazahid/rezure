@@ -1,3 +1,5 @@
+import type { ServerKind } from './dbConnection'
+
 export interface DatabaseInfo {
   name: string
   collation: string
@@ -25,6 +27,12 @@ export interface DatabaseServerInfo {
   label: string
   /** True when writes — create, drop, import — are refused for this target. */
   readOnly: boolean
+  kind: ServerKind
+  /** False where Export can't work — a SQL Server Rezure doesn't run, whose
+   *  BACKUP would land on that server's own disk. */
+  exportSupported: boolean
+  /** What Import accepts, without the dot: `sql`, plus `bak` on LocalDB. */
+  importExtensions: string[]
 }
 
 /** Emitted on `database://export-progress` while `exportDatabase` runs. See

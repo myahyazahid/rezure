@@ -5,8 +5,11 @@ import { usePhpStore } from '@/stores/php'
 import { useBinariesStore } from '@/stores/binaries'
 import { useComposerStore } from '@/stores/composer'
 import { useNodeStore } from '@/stores/node'
+import { usePostgresStore } from '@/stores/postgres'
 import TechIcon from '@/components/common/TechIcon.vue'
 import CatalogVersionList from '@/components/services/CatalogVersionList.vue'
+import LicenseConsentModal from '@/components/common/LicenseConsentModal.vue'
+import { useLicensedInstall } from '@/composables/useLicensedInstall'
 
 const emit = defineEmits<{ close: [] }>()
 
@@ -14,22 +17,29 @@ const phpStore = usePhpStore()
 const binariesStore = useBinariesStore()
 const composerStore = useComposerStore()
 const nodeStore = useNodeStore()
+const postgresStore = usePostgresStore()
 
-type Runtime = 'php' | 'nginx' | 'mariadb' | 'mailpit' | 'composer' | 'node'
+type Runtime =
+  'php' | 'nginx' | 'mariadb' | 'postgres' | 'mailpit' | 'sqllocaldb' | 'composer' | 'node'
 
 const RUNTIMES: { id: Runtime; label: string; icon: string }[] = [
   { id: 'php', label: 'PHP', icon: 'php' },
   { id: 'nginx', label: 'Nginx', icon: 'nginx' },
   { id: 'mariadb', label: 'MariaDB', icon: 'mariadb' },
+  { id: 'postgres', label: 'PostgreSQL', icon: 'postgres' },
   { id: 'mailpit', label: 'Mailpit', icon: 'mailpit' },
+  { id: 'sqllocaldb', label: 'SQL Server LocalDB', icon: 'sqlserver' },
   { id: 'composer', label: 'Composer', icon: 'composer' },
   { id: 'node', label: 'Node.js', icon: 'node' },
 ]
 
-/** Runtimes with exactly one build, pinned and checksummed in
- *  `binaries::MANIFEST` rather than read from a live catalog. Their id is
- *  also their package id. */
-const PINNED: Runtime[] = ['nginx', 'mailpit']
+/** Runtimes with exactly one build, pinned and checksummed rather than read
+ *  from a live catalog — in `binaries::MANIFEST`, or for LocalDB in
+ *  `services::msi`. Their id is also their package id. */
+const PINNED: Runtime[] = ['nginx', 'mailpit', 'sqllocaldb']
+
+/** LocalDB is a Microsoft installer: it asks for license consent first. */
+const licensed = useLicensedInstall()
 
 const selected = ref<Runtime | null>(null)
 
@@ -48,7 +58,8 @@ const busy = computed(
     PINNED.some((id) => binariesStore.isInstalling(id)) ||
     binariesStore.installingMariaDbVersion !== null ||
     composerStore.installingVersion !== null ||
-    nodeStore.installingVersion !== null,
+    nodeStore.installingVersion !== null ||
+    postgresStore.installingVersion !== null,
 )
 
 function close() {
@@ -71,6 +82,7 @@ watch(selected, (runtime) => {
   }
   if (runtime === 'composer' && composerStore.catalog.length === 0) composerStore.fetchCatalog()
   if (runtime === 'node' && nodeStore.catalog.length === 0) nodeStore.fetchCatalog()
+  if (runtime === 'postgres') postgresStore.fetchCatalog()
 })
 
 async function pickFolder() {
@@ -79,7 +91,8 @@ async function pickFolder() {
 }
 
 function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape') close()
+  // Escape belongs to the license dialog while it's open on top of this one.
+  if (e.key === 'Escape' && !licensed.pending.value) close()
 }
 
 onMounted(() => {
@@ -126,9 +139,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
           </div>
           <p class="mt-0.5 text-sm text-neutral-500">
             {{
-              selected
-                ? 'Rezure downloads the build and verifies its checksum — nothing else on your machine changes.'
-                : 'Pick a runtime to see what can be installed.'
+              !selected
+                ? 'Pick a runtime to see what can be installed.'
+                : pinnedPackage?.licenseUrl
+                  ? 'Rezure downloads Microsoft’s installer, verifies it, and runs it — a Windows install, listed in Settings → Apps.'
+                  : 'Rezure downloads the build and verifies its checksum — nothing else on your machine changes.'
             }}
           </p>
         </div>
@@ -158,7 +173,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
             v-for="runtime in RUNTIMES"
             :key="runtime.id"
             type="button"
-            class="glass-inset flex flex-col items-center gap-2 rounded-2xl p-4 text-center transition hover:border-red-500/30 hover:bg-red-500/10 dark:hover:border-red-500/40 dark:hover:bg-red-500/10"
+            class="glass-inset flex flex-col items-center gap-2 rounded-2xl p-4 text-center transition hover:border-accent-500/30 hover:bg-accent-500/10 dark:hover:border-accent-500/40 dark:hover:bg-accent-500/10"
             @click="selected = runtime.id"
           >
             <span class="glass-inset flex h-10 w-10 items-center justify-center rounded-full">
@@ -249,7 +264,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                   {{ pinnedPackage.version }}
                 </span>
                 <p class="mt-0.5 text-xs text-neutral-500">
-                  Only one build is offered for now — there's nothing to pick between yet.
+                  {{
+                    pinnedPackage.licenseUrl
+                      ? 'A local SQL Server for projects that use one, reached as (localdb)\\Rezure. Windows asks for administrator permission once.'
+                      : "Only one build is offered for now — there's nothing to pick between yet."
+                  }}
                 </p>
               </div>
               <button
@@ -257,7 +276,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                 type="button"
                 class="glass-accent shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition disabled:opacity-50"
                 :disabled="busy"
-                @click="binariesStore.install(selected)"
+                @click="licensed.request(selected)"
               >
                 {{ binariesStore.isInstalling(selected) ? 'Installing…' : 'Install' }}
               </button>
@@ -269,6 +288,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
               </span>
             </div>
           </div>
+          <p v-if="licensed.error.value" class="mt-2 text-sm text-red-600 dark:text-red-400">
+            {{ licensed.error.value }}
+          </p>
         </template>
 
         <!-- Step 2c: MariaDB — live catalog across a fixed branch list -->
@@ -283,6 +305,25 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
             @install="binariesStore.installMariaDbVersion"
             @retry="binariesStore.fetchMariaDbCatalog(true)"
           />
+        </template>
+
+        <!-- Step 2c': PostgreSQL — a pinned list of EDB builds -->
+        <template v-else-if="selected === 'postgres'">
+          <CatalogVersionList
+            :releases="postgresStore.catalog"
+            :loading="postgresStore.catalogLoading"
+            :error="postgresStore.catalogError"
+            :installing-version="postgresStore.installingVersion"
+            :progress="postgresStore.progressFor"
+            source-label="Rezure's PostgreSQL list"
+            @install="postgresStore.installVersion"
+            @retry="postgresStore.fetchCatalog()"
+          />
+          <p class="mt-4 text-xs text-neutral-500">
+            EDB's Windows builds — the server and its tools, about 150 MB each (pgAdmin isn't
+            included). Each major keeps its own databases. Pick the active version on the Switch
+            page.
+          </p>
         </template>
 
         <!-- Step 2d: Composer -->
@@ -324,7 +365,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         </span>
         <button
           type="button"
-          class="glass-btn shrink-0 rounded-full px-5 py-2.5 text-sm font-semibold text-neutral-700 transition disabled:opacity-50 dark:text-neutral-200"
+          class="glass-btn shrink-0 rounded-full px-4 py-2 text-sm font-semibold text-neutral-700 transition disabled:opacity-50 dark:text-neutral-200"
           :disabled="busy"
           @click="close"
         >
@@ -332,5 +373,12 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         </button>
       </div>
     </div>
+
+    <LicenseConsentModal
+      v-if="licensed.pending.value"
+      :pkg="licensed.pending.value"
+      @confirm="licensed.confirm"
+      @close="licensed.cancel"
+    />
   </div>
 </template>

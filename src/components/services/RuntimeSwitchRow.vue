@@ -104,7 +104,7 @@ function pick(entry: RuntimeVersionEntry) {
             class="font-mono"
             :class="
               installing
-                ? 'text-red-600 dark:text-red-400'
+                ? 'text-accent-600 dark:text-accent-400'
                 : !disabled && activeVersion
                   ? 'text-emerald-600 dark:text-emerald-400'
                   : 'text-neutral-500'
@@ -167,7 +167,7 @@ function pick(entry: RuntimeVersionEntry) {
                 class="h-1.5 w-1.5 shrink-0 rounded-full"
                 :class="
                   entry.id === activeVersion || entry.version === activeVersion
-                    ? 'bg-red-500'
+                    ? 'bg-accent-500'
                     : 'bg-transparent'
                 "
               ></span>
@@ -187,7 +187,7 @@ function pick(entry: RuntimeVersionEntry) {
       class="mt-3 h-1.5 overflow-hidden rounded-full bg-neutral-900/10 dark:bg-white/10"
     >
       <div
-        class="h-full rounded-full bg-linear-to-r from-red-500 to-orange-400 transition-all"
+        class="h-full rounded-full bg-linear-to-r from-accent-500 to-accent-alt transition-all"
         :class="percent === null ? 'w-1/3 animate-pulse' : ''"
         :style="percent !== null ? { width: `${percent}%` } : undefined"
       ></div>

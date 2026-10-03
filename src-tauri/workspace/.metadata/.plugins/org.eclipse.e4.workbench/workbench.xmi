@@ -37,9 +37,10 @@
           <tags>persp.editorOnboardingCommand:Open File...$$$Ctrl+O</tags>
           <tags>persp.editorOnboardingCommand:Show Key Assist$$$Ctrl+Shift+L</tags>
           <tags>persp.editorOnboardingCommand:Find Actions$$$Ctrl+3</tags>
-          <children xsi:type="basic:PartSashContainer" xmi:id="_30EjYbjcEfGmqMlQzHBdpA" selectedElement="_30EjarjcEfGmqMlQzHBdpA" horizontal="true">
+          <children xsi:type="basic:PartSashContainer" xmi:id="_30EjYbjcEfGmqMlQzHBdpA" selectedElement="_30EjYrjcEfGmqMlQzHBdpA" horizontal="true">
             <children xsi:type="basic:PartSashContainer" xmi:id="_30EjYrjcEfGmqMlQzHBdpA" containerData="2500" selectedElement="_30EjY7jcEfGmqMlQzHBdpA">
               <children xsi:type="basic:PartStack" xmi:id="_30EjY7jcEfGmqMlQzHBdpA" elementId="navigation" containerData="7000" selectedElement="_30EjZLjcEfGmqMlQzHBdpA">
+                <tags>active</tags>
                 <children xsi:type="advanced:Placeholder" xmi:id="_30EjZLjcEfGmqMlQzHBdpA" elementId="org.jkiss.dbeaver.core.databaseNavigator" ref="_3z8AgLjcEfGmqMlQzHBdpA" closeable="true">
                   <tags>View</tags>
                   <tags>categoryTag:Database</tags>
@@ -147,14 +148,11 @@
       <children xsi:type="basic:PartStack" xmi:id="_3z6yYbjcEfGmqMlQzHBdpA" elementId="org.eclipse.e4.primaryDataStack" selectedElement="_F1EY8LjdEfGz15tPzcNByQ">
         <tags>EditorStack</tags>
         <tags>org.eclipse.e4.primaryDataStack</tags>
-        <tags>active</tags>
-        <children xsi:type="basic:Part" xmi:id="_F1EY8LjdEfGz15tPzcNByQ" elementId="org.eclipse.e4.ui.compatibility.editor" contributionURI="bundleclass://org.eclipse.ui.workbench/org.eclipse.ui.internal.e4.compatibility.CompatibilityEditor" label="&lt;Ext: MariaDB - chatbot> Script" iconURI="platform:/plugin/org.jkiss.dbeaver.model/icons/tree/script.svg" closeable="true">
-          <persistedState key="memento" value="&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?>&#xD;&#xA;&lt;editor id=&quot;org.jkiss.dbeaver.ui.editors.sql.SQLEditor&quot; name=&quot;Script.sql&quot; partName=&quot;&amp;lt;Ext: MariaDB - chatbot&amp;gt; Script&quot; title=&quot;&amp;lt;Ext: MariaDB - chatbot&amp;gt; Script&quot; tooltip=&quot;Script: /General/Scripts/Script.sql&amp;#x0A;Connection: Ext: MariaDB - chatbot&amp;#x0A;Type: MariaDB&amp;#x0A;URL: null&amp;#x0A;Database: chatbot&quot;>&#xD;&#xA;&lt;input factoryID=&quot;org.eclipse.ui.part.FileEditorInputFactory&quot; path=&quot;/General/Scripts/Script.sql&quot;/>&#xD;&#xA;&lt;editorState selectionHorizontalPixel=&quot;0&quot; selectionLength=&quot;0&quot; selectionOffset=&quot;21&quot; selectionTopPixel=&quot;0&quot;/>&#xD;&#xA;&lt;/editor>"/>
+        <children xsi:type="basic:Part" xmi:id="_F1EY8LjdEfGz15tPzcNByQ" elementId="org.eclipse.e4.ui.compatibility.editor" contributionURI="bundleclass://org.eclipse.ui.workbench/org.eclipse.ui.internal.e4.compatibility.CompatibilityEditor" label="&lt;none> Script" iconURI="platform:/plugin/org.jkiss.dbeaver.model/icons/tree/script.svg" closeable="true">
+          <persistedState key="memento" value="&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?>&#xD;&#xA;&lt;editor id=&quot;org.jkiss.dbeaver.ui.editors.sql.SQLEditor&quot; name=&quot;Script.sql&quot; partName=&quot;&amp;lt;none&amp;gt; Script&quot; title=&quot;&amp;lt;none&amp;gt; Script&quot; tooltip=&quot;General/Scripts/Script.sql&quot;>&#xD;&#xA;&lt;input factoryID=&quot;org.eclipse.ui.part.FileEditorInputFactory&quot; path=&quot;/General/Scripts/Script.sql&quot;/>&#xD;&#xA;&lt;editorState selectionHorizontalPixel=&quot;0&quot; selectionLength=&quot;0&quot; selectionOffset=&quot;21&quot; selectionTopPixel=&quot;0&quot;/>&#xD;&#xA;&lt;/editor>"/>
           <tags>Editor</tags>
           <tags>removeOnHide</tags>
           <tags>org.jkiss.dbeaver.ui.editors.sql.SQLEditor</tags>
-          <tags>active</tags>
-          <tags>activeOnClose</tags>
         </children>
       </children>
     </sharedElements>
@@ -164,6 +162,8 @@
       <persistedState key="memento" value="&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?>&#xD;&#xA;&lt;view filterType=&quot;connection&quot;/>"/>
       <tags>View</tags>
       <tags>categoryTag:Database</tags>
+      <tags>active</tags>
+      <tags>activeOnClose</tags>
       <menus xmi:id="_32p9ULjcEfGmqMlQzHBdpA" elementId="org.jkiss.dbeaver.core.databaseNavigator">
         <tags>ViewMenu</tags>
         <tags>menuContribution:menu</tags>
@@ -1923,7 +1923,7 @@
   <addons xmi:id="_ysxSc7jcEfGmqMlQzHBdpA" elementId="MinMax Addon" contributorURI="platform:/plugin/org.jkiss.dbeaver.ui.app.standalone" contributionURI="bundleclass://org.eclipse.e4.ui.workbench.addons.swt/org.eclipse.e4.ui.workbench.addons.minmax.MinMaxAddon"/>
   <addons xmi:id="_ysxSdLjcEfGmqMlQzHBdpA" elementId="org.eclipse.ui.workbench.addon.0" contributorURI="platform:/plugin/org.jkiss.dbeaver.ui.app.standalone" contributionURI="bundleclass://org.eclipse.e4.ui.workbench/org.eclipse.e4.ui.internal.workbench.addons.HandlerProcessingAddon"/>
   <addons xmi:id="_ytd18LjcEfGmqMlQzHBdpA" elementId="SplitterAddon" contributionURI="bundleclass://org.eclipse.e4.ui.workbench.addons.swt/org.eclipse.e4.ui.workbench.addons.splitteraddon.SplitterAddon"/>
-  <addons xmi:id="_AW_msbjdEfGz15tPzcNByQ" elementId="org.eclipse.ui.ide.addon.0" contributionURI="bundleclass://org.eclipse.ui.ide/org.eclipse.ui.internal.ide.addons.SaveAllDirtyPartsAddon"/>
+  <addons xmi:id="_8vFK4b8pEfGphp0m0p_JjQ" elementId="org.eclipse.ui.ide.addon.0" contributionURI="bundleclass://org.eclipse.ui.ide/org.eclipse.ui.internal.ide.addons.SaveAllDirtyPartsAddon"/>
   <addons xmi:id="_dz0JgGOlEeSMMaPQU2nlzw" elementId="org.eclipse.ui.ide.application.addon.0" contributorURI="platform:/plugin/org.eclipse.ui.ide.application" contributionURI="bundleclass://org.eclipse.ui.ide.application/org.eclipse.ui.internal.ide.application.addons.ModelCleanupAddon"/>
   <categories xmi:id="_yvsDgLjcEfGmqMlQzHBdpA" elementId="org.eclipse.team.ui.category.team" name="Version control (Team)" description="Actions that apply when working with a version control system"/>
   <categories xmi:id="_yvsDgbjcEfGmqMlQzHBdpA" elementId="org.eclipse.ui.category.views" name="Views" description="Commands for opening views"/>

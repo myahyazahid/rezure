@@ -15,8 +15,9 @@
 //! `.exe`. [`seed_bundled`] is what copies it into the real install root on
 //! first launch. MariaDB and every other PHP version stay purely on-demand.
 
-use std::io::Cursor;
+use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use serde::Serialize;
@@ -409,6 +410,10 @@ pub struct BinaryStatus {
     pub name: String,
     pub version: String,
     pub installed: bool,
+    /// Set for a package installed under a license the user has to accept
+    /// first — the Microsoft installers in `services::msi`. `None` for the
+    /// portable zips, which carry no such step.
+    pub license_url: Option<String>,
 }
 
 fn status_of(pkg: &BinaryPackage) -> BinaryStatus {
@@ -417,11 +422,19 @@ fn status_of(pkg: &BinaryPackage) -> BinaryStatus {
         name: pkg.name.to_string(),
         version: pkg.version.to_string(),
         installed: is_installed(pkg),
+        license_url: None,
     }
 }
 
+/// Every installable package: the portable zips in [`MANIFEST`], then the
+/// Windows installers `services::msi` runs — listed together because the UI
+/// offers both the same way, an Install button with progress.
 pub fn list_status() -> Vec<BinaryStatus> {
-    MANIFEST.iter().map(status_of).collect()
+    MANIFEST
+        .iter()
+        .map(status_of)
+        .chain(super::msi::PACKAGES.iter().map(super::msi::status_of))
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -430,6 +443,9 @@ pub enum InstallStage {
     Downloading,
     Verifying,
     Extracting,
+    /// Running a Windows installer (`services::msi`) — the one stage with no
+    /// byte count, and the one waiting on the user's UAC prompt.
+    Installing,
     Done,
 }
 
@@ -445,7 +461,7 @@ pub struct InstallProgress {
 /// Event name the frontend subscribes to via `listen()` for install progress.
 pub const PROGRESS_EVENT: &str = "binary://install-progress";
 
-fn emit_progress(app: &AppHandle, progress: &InstallProgress) {
+pub(crate) fn emit_progress(app: &AppHandle, progress: &InstallProgress) {
     // Best-effort — a dropped event shouldn't abort an otherwise-fine install.
     if let Err(err) = app.emit(PROGRESS_EVENT, progress) {
         log::warn!("failed to emit binary install progress: {err}");
@@ -467,41 +483,65 @@ pub struct ArchiveInstall<'a> {
     pub dest_dir: PathBuf,
     /// Checked after extraction, relative to `dest_dir`.
     pub exe_relative_path: &'a str,
+    /// The archive paths worth extracting, as prefixes (`pgsql/bin/`);
+    /// everything else in the zip is skipped. Empty extracts all of it.
+    ///
+    /// For an archive that carries far more than Rezure runs — PostgreSQL's
+    /// ships pgAdmin 4, 800 MB of it once unpacked, beside a 150 MB server.
+    pub keep: &'a [&'a str],
 }
 
 /// Downloads, checksum-verifies, and extracts a portable binary package,
 /// emitting [`PROGRESS_EVENT`] as it goes.
+///
+/// The archive goes to a temporary file, hashed as it arrives, rather than
+/// into memory: PostgreSQL's is close to 400 MB.
 pub async fn install_archive(app: &AppHandle, spec: &ArchiveInstall<'_>) -> Result<(), AppError> {
     std::fs::create_dir_all(&spec.dest_dir)
         .map_err(|e| AppError::Io(format!("could not create {}: {e}", spec.dest_dir.display())))?;
 
-    let archive_bytes = download(app, spec.id, spec.download_url).await?;
+    let archive = TempDownload::new(spec.id);
+    let (digest, size) = download_to_file(app, spec.id, spec.download_url, &archive.path).await?;
 
     emit_progress(
         app,
         &InstallProgress {
             id: spec.id.to_string(),
             stage: InstallStage::Verifying,
-            downloaded_bytes: archive_bytes.len() as u64,
-            total_bytes: Some(archive_bytes.len() as u64),
+            downloaded_bytes: size,
+            total_bytes: Some(size),
         },
     );
-    verify_checksum(spec.id, spec.sha256, &archive_bytes)?;
+    check_digest(spec.id, spec.sha256, &digest)?;
 
     emit_progress(
         app,
         &InstallProgress {
             id: spec.id.to_string(),
             stage: InstallStage::Extracting,
-            downloaded_bytes: archive_bytes.len() as u64,
-            total_bytes: Some(archive_bytes.len() as u64),
+            downloaded_bytes: size,
+            total_bytes: Some(size),
         },
     );
 
+    let archive_path = archive.path.clone();
     let extract_dir = spec.dest_dir.clone();
-    tokio::task::spawn_blocking(move || extract(&archive_bytes, &extract_dir))
-        .await
-        .map_err(|e| AppError::Extract(format!("extraction task panicked: {e}")))??;
+    let keep: Vec<String> = spec.keep.iter().map(|prefix| prefix.to_string()).collect();
+    let extracted = tokio::task::spawn_blocking(move || {
+        let file = std::fs::File::open(&archive_path).map_err(|e| {
+            AppError::Extract(format!("could not reopen the downloaded archive: {e}"))
+        })?;
+        extract(std::io::BufReader::new(file), &extract_dir, &keep)
+    })
+    .await
+    .map_err(|e| AppError::Extract(format!("extraction task panicked: {e}")))?;
+    drop(archive);
+    if let Err(err) = extracted {
+        // Same as a missing executable below: a half-extracted folder would
+        // read as an installed version on the next scan.
+        let _ = std::fs::remove_dir_all(&spec.dest_dir);
+        return Err(err);
+    }
 
     if !spec.dest_dir.join(spec.exe_relative_path).is_file() {
         // A half-extracted folder would otherwise read as an installed
@@ -544,6 +584,7 @@ pub async fn install(app: &AppHandle, id: &str) -> Result<BinaryStatus, AppError
             sha256: pkg.sha256,
             dest_dir: package_dir(pkg)?,
             exe_relative_path: pkg.exe_relative_path,
+            keep: &[],
         },
     )
     .await?;
@@ -571,22 +612,136 @@ pub(crate) async fn download(app: &AppHandle, id: &str, url: &str) -> Result<Vec
     let total_bytes = response.content_length();
     let mut downloaded = Vec::with_capacity(total_bytes.unwrap_or(0) as usize);
     let mut stream = response.bytes_stream();
+    let mut progress = DownloadProgress::new(app, id, total_bytes);
 
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| AppError::Download(format!("{url}: {e}")))?;
         downloaded.extend_from_slice(&chunk);
-        emit_progress(
+        progress.report(downloaded.len() as u64);
+    }
+    progress.finish(downloaded.len() as u64);
+
+    Ok(downloaded)
+}
+
+/// Downloads `url` into `dest`, hashing it on the way, and returns its
+/// SHA-256 (lowercase hex) and size. [`download`]'s counterpart for archives
+/// too large to hold in memory.
+async fn download_to_file(
+    app: &AppHandle,
+    id: &str,
+    url: &str,
+    dest: &Path,
+) -> Result<(String, u64), AppError> {
+    let response = reqwest::get(url)
+        .await
+        .map_err(|e| AppError::Download(format!("{url}: {e}")))?;
+    if !response.status().is_success() {
+        return Err(AppError::Download(format!(
+            "{url} responded with {}",
+            response.status()
+        )));
+    }
+
+    let mut file = std::io::BufWriter::new(
+        std::fs::File::create(dest)
+            .map_err(|e| AppError::Io(format!("could not create {}: {e}", dest.display())))?,
+    );
+    let mut hasher = Sha256::new();
+    let mut written = 0u64;
+    let mut progress = DownloadProgress::new(app, id, response.content_length());
+    let mut stream = response.bytes_stream();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| AppError::Download(format!("{url}: {e}")))?;
+        hasher.update(&chunk);
+        file.write_all(&chunk)
+            .map_err(|e| AppError::Io(format!("could not write {}: {e}", dest.display())))?;
+        written += chunk.len() as u64;
+        progress.report(written);
+    }
+    file.flush()
+        .map_err(|e| AppError::Io(format!("could not write {}: {e}", dest.display())))?;
+    progress.finish(written);
+
+    Ok((hex::encode(hasher.finalize()), written))
+}
+
+/// How often a download reports progress at most.
+///
+/// Every network chunk used to be an event — a few kilobytes each, so tens of
+/// thousands of them for PostgreSQL's archive, every one crossing into the
+/// webview to move a bar that can't show the difference.
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
+
+/// Emits [`InstallStage::Downloading`] events for one download, at most every
+/// [`PROGRESS_INTERVAL`].
+struct DownloadProgress<'a> {
+    app: &'a AppHandle,
+    id: &'a str,
+    total_bytes: Option<u64>,
+    last: Option<Instant>,
+}
+
+impl<'a> DownloadProgress<'a> {
+    fn new(app: &'a AppHandle, id: &'a str, total_bytes: Option<u64>) -> Self {
+        Self {
             app,
+            id,
+            total_bytes,
+            last: None,
+        }
+    }
+
+    fn report(&mut self, downloaded_bytes: u64) {
+        if self
+            .last
+            .is_some_and(|last| last.elapsed() < PROGRESS_INTERVAL)
+        {
+            return;
+        }
+        self.last = Some(Instant::now());
+        self.emit(downloaded_bytes);
+    }
+
+    /// The last count, whenever the throttle swallowed it — so the bar
+    /// reaches the end before the next stage replaces it.
+    fn finish(&self, downloaded_bytes: u64) {
+        self.emit(downloaded_bytes);
+    }
+
+    fn emit(&self, downloaded_bytes: u64) {
+        emit_progress(
+            self.app,
             &InstallProgress {
-                id: id.to_string(),
+                id: self.id.to_string(),
                 stage: InstallStage::Downloading,
-                downloaded_bytes: downloaded.len() as u64,
-                total_bytes,
+                downloaded_bytes,
+                total_bytes: self.total_bytes,
             },
         );
     }
+}
 
-    Ok(downloaded)
+/// A downloaded archive's temporary file, deleted when dropped — on success
+/// once it's extracted, and on every early return before that.
+struct TempDownload {
+    path: PathBuf,
+}
+
+impl TempDownload {
+    fn new(id: &str) -> Self {
+        Self {
+            path: std::env::temp_dir()
+                .join(format!("rezure-{id}-{}.download", uuid::Uuid::new_v4())),
+        }
+    }
+}
+
+impl Drop for TempDownload {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
 }
 
 /// `pub(crate)` for the same reason as [`download`] — shared with
@@ -594,29 +749,46 @@ pub(crate) async fn download(app: &AppHandle, id: &str, url: &str) -> Result<Vec
 pub(crate) fn verify_checksum(id: &str, expected: &str, bytes: &[u8]) -> Result<(), AppError> {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    let actual = hex::encode(hasher.finalize());
+    check_digest(id, expected, &hex::encode(hasher.finalize()))
+}
 
-    if actual != expected {
+/// Compares a computed SHA-256 against the pinned one.
+fn check_digest(id: &str, expected: &str, actual: &str) -> Result<(), AppError> {
+    if !actual.eq_ignore_ascii_case(expected) {
         return Err(AppError::ChecksumMismatch {
             id: id.to_string(),
             expected: expected.to_string(),
-            actual,
+            actual: actual.to_string(),
         });
     }
-
     Ok(())
 }
 
+/// Whether an archive entry is one `keep` asks for — see
+/// [`ArchiveInstall::keep`].
+fn wanted(entry_name: &str, keep: &[String]) -> bool {
+    keep.is_empty()
+        || keep
+            .iter()
+            .any(|prefix| entry_name.starts_with(prefix.as_str()))
+}
+
 /// Extracts a zip archive into `dest_dir`, rejecting any entry whose path
-/// would escape it (zip-slip).
-fn extract(bytes: &[u8], dest_dir: &Path) -> Result<(), AppError> {
-    let mut archive =
-        zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| AppError::Extract(e.to_string()))?;
+/// would escape it (zip-slip), and skipping any `keep` doesn't ask for.
+pub(crate) fn extract<R: Read + Seek>(
+    reader: R,
+    dest_dir: &Path,
+    keep: &[String],
+) -> Result<(), AppError> {
+    let mut archive = zip::ZipArchive::new(reader).map_err(|e| AppError::Extract(e.to_string()))?;
 
     for i in 0..archive.len() {
         let mut entry = archive
             .by_index(i)
             .map_err(|e| AppError::Extract(e.to_string()))?;
+        if !wanted(entry.name(), keep) {
+            continue;
+        }
 
         let relative_path = match entry.enclosed_name() {
             Some(path) => path.to_path_buf(),
@@ -839,6 +1011,34 @@ mod tests {
     }
 
     #[test]
+    fn keep_limits_extraction_to_the_listed_prefixes() {
+        let keep = vec![
+            "pgsql/bin/".to_string(),
+            "pgsql/server_license.txt".to_string(),
+        ];
+        assert!(wanted("pgsql/bin/postgres.exe", &keep));
+        assert!(wanted("pgsql/server_license.txt", &keep));
+        assert!(!wanted("pgsql/pgAdmin 4/runtime/psql.exe", &keep));
+        assert!(
+            !wanted("pgsql/binaries.txt", &keep),
+            "a prefix ends at its slash"
+        );
+        assert!(
+            wanted("anything/at/all", &[]),
+            "no list means the whole archive"
+        );
+    }
+
+    #[test]
+    fn a_digest_matches_regardless_of_hex_case() {
+        assert!(check_digest("x", "ABCDEF", "abcdef").is_ok());
+        assert!(matches!(
+            check_digest("x", "abcdef", "abcdee"),
+            Err(AppError::ChecksumMismatch { .. })
+        ));
+    }
+
+    #[test]
     fn find_returns_the_matching_package() {
         assert_eq!(find("nginx").unwrap().id, "nginx");
         assert!(find("does-not-exist").is_err());
@@ -849,10 +1049,18 @@ mod tests {
         // `installed` reflects real local disk state, not something this
         // test controls, so only structure/ordering is asserted here.
         let statuses = list_status();
-        assert_eq!(statuses.len(), MANIFEST.len());
+        let msi = &super::super::msi::PACKAGES;
+        assert_eq!(statuses.len(), MANIFEST.len() + msi.len());
         for (status, pkg) in statuses.iter().zip(MANIFEST) {
             assert_eq!(status.id, pkg.id);
             assert_eq!(status.version, pkg.version);
+            assert!(status.license_url.is_none(), "{}", pkg.id);
+        }
+        // The Windows installers follow, each carrying the license the UI
+        // has to show before installing it.
+        for (status, pkg) in statuses[MANIFEST.len()..].iter().zip(msi.iter()) {
+            assert_eq!(status.id, pkg.id);
+            assert!(status.license_url.is_some(), "{}", pkg.id);
         }
     }
 

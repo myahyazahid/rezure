@@ -2,6 +2,14 @@
 //! pointed at — the local server (see `services::db_profiles`) or a remote
 //! connection (see `services::connections`).
 //!
+//! # Two kinds of server
+//!
+//! Everything the Databases page can do goes through [`DbClient`], which has
+//! two implementations: [`Conn`] here, for MySQL and MariaDB, and
+//! `services::mssql::Client`, for SQL Server. The public functions resolve
+//! the active target once and hand the call to whichever it is. The rest of
+//! this module's docs are about the MySQL side.
+//!
 //! There's no MySQL driver crate in the dependency tree on purpose: every
 //! server build Rezure runs ships its own client binaries (`mysql.exe`,
 //! `mysqldump.exe`) next to it, so this module drives those instead of
@@ -38,10 +46,12 @@ use tauri::{AppHandle, Emitter};
 use super::connections;
 use super::db_engine::{self, Engine};
 use super::db_profiles;
+use super::mssql;
+use super::postgres_client;
 use super::projects::scan_projects;
 use super::secrets;
 use super::tunnel;
-use crate::config::connections::{Connection, SshTunnel, TlsMode};
+use crate::config::connections::{Connection, ServerKind, SshTunnel, TlsMode};
 use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
 use crate::utils::paths;
@@ -139,10 +149,32 @@ pub struct ServerInfo {
     pub label: String,
     /// Whether writes (create, drop, import) are refused for this target.
     pub read_only: bool,
+    /// Which kind of server this is — decides what the page offers: SQL
+    /// Server has no collation-per-database dump to cancel half-way, and
+    /// imports `.bak` files as well as scripts.
+    pub kind: ServerKind,
+    /// Whether Export works here. Always on MySQL; on SQL Server only for
+    /// Rezure's own LocalDB — see `mssql::Client::export_database`.
+    pub export_supported: bool,
+    /// The file extensions Import accepts, without the dot.
+    pub import_extensions: Vec<String>,
+}
+
+/// The kind of server the Databases page is reading right now.
+pub fn active_kind() -> ServerKind {
+    connections::active()
+        .map(|connection| connection.kind)
+        .unwrap_or_default()
 }
 
 pub fn server_info() -> ServerInfo {
     match connections::active() {
+        Some(connection) if connection.kind == ServerKind::Sqlserver => {
+            mssql::server_info(&connection)
+        }
+        Some(connection) if connection.kind == ServerKind::Postgres => {
+            postgres_client::server_info(&connection)
+        }
         Some(connection) => {
             let has_password = secrets::resolve(&connection.id).is_some();
             ServerInfo {
@@ -157,6 +189,9 @@ pub fn server_info() -> ServerInfo {
                 remote: true,
                 label: connection.name,
                 read_only: connection.read_only,
+                kind: ServerKind::Mysql,
+                export_supported: true,
+                import_extensions: vec!["sql".to_string()],
             }
         }
         None => ServerInfo {
@@ -170,6 +205,9 @@ pub fn server_info() -> ServerInfo {
                 .map(|profile| profile.name)
                 .unwrap_or_default(),
             read_only: false,
+            kind: ServerKind::Mysql,
+            export_supported: true,
+            import_extensions: vec!["sql".to_string()],
         },
     }
 }
@@ -328,7 +366,38 @@ impl Conn {
     }
 }
 
-/// The connection every operation below runs through.
+/// What the Databases page can ask of whichever server it's pointed at.
+///
+/// Names arrive already validated (`validate_identifier`) — the public
+/// functions below do that once, for both kinds of server. Everything an
+/// implementation checks beyond that is specific to its own server: which
+/// schemas are its system ones, what "read-only" protects.
+pub(super) trait DbClient {
+    fn list_databases(&self) -> Result<Vec<DatabaseInfo>, AppError>;
+    /// The collations offered in the "New database" dialog.
+    fn list_collations(&self) -> Result<Vec<String>, AppError>;
+    fn create_database(&self, name: &str, collation: &str) -> Result<(), AppError>;
+    fn drop_database(&self, name: &str) -> Result<(), AppError>;
+    /// Writes a dump of `name` to the dumps folder and returns its path.
+    fn export_database(&self, app: Option<&AppHandle>, name: &str) -> Result<PathBuf, AppError>;
+    /// Loads `file` into `name`, creating it if need be.
+    fn import(&self, name: &str, file: &Path) -> Result<(), AppError>;
+}
+
+/// The client for whatever the Databases page is reading right now.
+fn active_client() -> Result<Box<dyn DbClient>, AppError> {
+    match connections::active() {
+        Some(connection) if connection.kind == ServerKind::Sqlserver => {
+            Ok(Box::new(mssql::Client::for_connection(connection)?))
+        }
+        Some(connection) if connection.kind == ServerKind::Postgres => Ok(Box::new(
+            postgres_client::Client::for_connection(connection)?,
+        )),
+        _ => Ok(Box::new(active_conn()?)),
+    }
+}
+
+/// The MySQL-family connection every operation below runs through.
 ///
 /// A remote connection wins when one is selected; otherwise this is the
 /// local server, exactly as before remote connections existed.
@@ -410,7 +479,7 @@ fn remote_conn(connection: Connection) -> Result<Conn, AppError> {
 /// rules (which allow almost anything inside backticks): nothing a local
 /// dev database legitimately needs is excluded, and no quoting or escaping
 /// question can arise downstream.
-fn validate_identifier(name: &str, kind: &str) -> Result<(), AppError> {
+pub(super) fn validate_identifier(name: &str, kind: &str) -> Result<(), AppError> {
     let valid = !name.is_empty()
         && name.len() <= 64
         && name
@@ -557,10 +626,6 @@ fn connect_failure(conn: &Conn, detail: &str) -> Option<AppError> {
 ///
 /// `--skip-column-names` drops the header, so a caller's row indexes line
 /// up with its `SELECT` list and nothing has to be skipped.
-fn query(sql: &str) -> Result<Vec<Vec<String>>, AppError> {
-    query_on(&active_conn()?, sql)
-}
-
 fn query_on(conn: &Conn, sql: &str) -> Result<Vec<Vec<String>>, AppError> {
     let output = Command::new(conn.client(db_engine::CLIENT_EXE)?)
         .args(conn.args())
@@ -581,7 +646,8 @@ fn query_on(conn: &Conn, sql: &str) -> Result<Vec<Vec<String>>, AppError> {
 }
 
 /// Runs a statement that returns no rows, refusing it on a read-only
-/// target.
+/// target. Only the integration tests below still need it on its own.
+#[cfg(test)]
 fn execute(sql: &str) -> Result<(), AppError> {
     let conn = active_conn()?;
     conn.check_writable()?;
@@ -665,7 +731,7 @@ pub fn probe(request: Probe<'_>) -> Result<String, AppError> {
 /// named `shop-api` needs backticks in every query a developer writes — so
 /// in practice the two spellings drift apart for the same project, and
 /// matching them up is the whole point of the column.
-fn used_by(schema: &str, projects: &[(String, String)]) -> Option<String> {
+pub(super) fn used_by(schema: &str, projects: &[(String, String)]) -> Option<String> {
     let normalize = |s: &str| s.to_lowercase().replace('-', "_");
     let schema = normalize(schema);
     projects
@@ -675,53 +741,7 @@ fn used_by(schema: &str, projects: &[(String, String)]) -> Option<String> {
 }
 
 pub fn list_databases() -> Result<Vec<DatabaseInfo>, AppError> {
-    let conn = active_conn()?;
-
-    // Local projects say nothing about the schemas on somebody else's
-    // server: a name that happens to match is a coincidence, and claiming
-    // a staging database is "used by" a folder on this machine would be a
-    // false statement, not a helpful one.
-    //
-    // Best-effort even locally: a project-scan hiccup should cost the
-    // "used by" column, not the whole database list.
-    let projects: Vec<(String, String)> = if conn.is_remote() {
-        Vec::new()
-    } else {
-        scan_projects()
-            .map(|found| found.into_iter().map(|p| (p.id, p.domain)).collect())
-            .unwrap_or_default()
-    };
-
-    let excluded = SYSTEM_SCHEMAS
-        .map(|schema| format!("'{schema}'"))
-        .join(", ");
-
-    // LEFT JOIN, not an inner one: a schema with no tables yet still has to
-    // appear in the list (with a count of 0) rather than vanish from it.
-    let rows = query_on(
-        &conn,
-        &format!(
-            "SELECT s.schema_name, s.default_collation_name, COUNT(t.table_name), \
-             COALESCE(SUM(t.data_length + t.index_length), 0) \
-             FROM information_schema.schemata s \
-             LEFT JOIN information_schema.tables t ON t.table_schema = s.schema_name \
-             WHERE s.schema_name NOT IN ({excluded}) \
-             GROUP BY s.schema_name, s.default_collation_name \
-             ORDER BY s.schema_name"
-        ),
-    )?;
-
-    Ok(rows
-        .into_iter()
-        .filter(|row| row.len() >= 4)
-        .map(|row| DatabaseInfo {
-            used_by: used_by(&row[0], &projects),
-            name: row[0].clone(),
-            collation: row[1].clone(),
-            table_count: row[2].parse().unwrap_or(0),
-            size_bytes: row[3].parse().unwrap_or(0),
-        })
-        .collect())
+    active_client()?.list_databases()
 }
 
 /// The collations offered in the "New database" dialog, newest-friendly
@@ -729,31 +749,218 @@ pub fn list_databases() -> Result<Vec<DatabaseInfo>, AppError> {
 /// bundled MariaDB version — or pointing at somebody else's server — can't
 /// leave a stale list behind.
 pub fn list_collations() -> Result<Vec<String>, AppError> {
-    let rows = query(
-        "SELECT collation_name FROM information_schema.collations \
-         WHERE character_set_name IN ('utf8mb4', 'utf8mb3') \
-         ORDER BY character_set_name DESC, collation_name",
-    )?;
-    Ok(rows
-        .into_iter()
-        .filter_map(|row| row.into_iter().next())
-        .collect())
+    active_client()?.list_collations()
 }
 
 pub fn create_database(name: &str, collation: &str) -> Result<(), AppError> {
     validate_identifier(name, "database")?;
     validate_identifier(collation, "collation")?;
-    execute(&format!("CREATE DATABASE `{name}` COLLATE {collation}"))
+    active_client()?.create_database(name, collation)
 }
 
 pub fn drop_database(name: &str) -> Result<(), AppError> {
     validate_identifier(name, "database")?;
-    if SYSTEM_SCHEMAS.contains(&name) {
-        return Err(AppError::DatabaseQueryFailed(format!(
-            "`{name}` is one of MariaDB's own schemas and can't be dropped"
-        )));
+    active_client()?.drop_database(name)
+}
+
+/// Dumps `name` and returns the path of the file written.
+///
+/// `app` is `None` only from the `#[ignore]`d integration test at the bottom
+/// of this module, which has no running Tauri app to emit progress through.
+/// Every real caller goes through `commands::database::export_database`,
+/// which always has one.
+pub fn export_database(app: Option<&AppHandle>, name: &str) -> Result<PathBuf, AppError> {
+    validate_identifier(name, "database")?;
+    active_client()?.export_database(app, name)
+}
+
+/// Loads a dump into `name`, creating the database if it isn't there yet —
+/// importing a dump into a database you have to remember to create first is
+/// a papercut with no upside.
+///
+/// Refused outright on a read-only connection: this is the one operation
+/// here that can destroy data on a server Rezure doesn't own, and the
+/// confirmation the UI asks for is a second gate, not this one.
+pub fn import_sql(name: &str, file: &Path) -> Result<(), AppError> {
+    validate_identifier(name, "database")?;
+    if !file.is_file() {
+        return Err(AppError::Io(format!("no such file: {}", file.display())));
     }
-    execute(&format!("DROP DATABASE `{name}`"))
+    active_client()?.import(name, file)
+}
+
+impl DbClient for Conn {
+    fn list_databases(&self) -> Result<Vec<DatabaseInfo>, AppError> {
+        // Local projects say nothing about the schemas on somebody else's
+        // server: a name that happens to match is a coincidence, and claiming
+        // a staging database is "used by" a folder on this machine would be a
+        // false statement, not a helpful one.
+        //
+        // Best-effort even locally: a project-scan hiccup should cost the
+        // "used by" column, not the whole database list.
+        let projects: Vec<(String, String)> = if self.is_remote() {
+            Vec::new()
+        } else {
+            scan_projects()
+                .map(|found| found.into_iter().map(|p| (p.id, p.domain)).collect())
+                .unwrap_or_default()
+        };
+
+        let excluded = SYSTEM_SCHEMAS
+            .map(|schema| format!("'{schema}'"))
+            .join(", ");
+
+        // LEFT JOIN, not an inner one: a schema with no tables yet still has to
+        // appear in the list (with a count of 0) rather than vanish from it.
+        let rows = query_on(
+            self,
+            &format!(
+                "SELECT s.schema_name, s.default_collation_name, COUNT(t.table_name), \
+                 COALESCE(SUM(t.data_length + t.index_length), 0) \
+                 FROM information_schema.schemata s \
+                 LEFT JOIN information_schema.tables t ON t.table_schema = s.schema_name \
+                 WHERE s.schema_name NOT IN ({excluded}) \
+                 GROUP BY s.schema_name, s.default_collation_name \
+                 ORDER BY s.schema_name"
+            ),
+        )?;
+
+        Ok(rows
+            .into_iter()
+            .filter(|row| row.len() >= 4)
+            .map(|row| DatabaseInfo {
+                used_by: used_by(&row[0], &projects),
+                name: row[0].clone(),
+                collation: row[1].clone(),
+                table_count: row[2].parse().unwrap_or(0),
+                size_bytes: row[3].parse().unwrap_or(0),
+            })
+            .collect())
+    }
+
+    fn list_collations(&self) -> Result<Vec<String>, AppError> {
+        let rows = query_on(
+            self,
+            "SELECT collation_name FROM information_schema.collations \
+             WHERE character_set_name IN ('utf8mb4', 'utf8mb3') \
+             ORDER BY character_set_name DESC, collation_name",
+        )?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|row| row.into_iter().next())
+            .collect())
+    }
+
+    fn create_database(&self, name: &str, collation: &str) -> Result<(), AppError> {
+        self.check_writable()?;
+        query_on(
+            self,
+            &format!("CREATE DATABASE `{name}` COLLATE {collation}"),
+        )
+        .map(|_| ())
+    }
+
+    fn drop_database(&self, name: &str) -> Result<(), AppError> {
+        if SYSTEM_SCHEMAS.contains(&name) {
+            return Err(AppError::DatabaseQueryFailed(format!(
+                "`{name}` is one of MariaDB's own schemas and can't be dropped"
+            )));
+        }
+        self.check_writable()?;
+        query_on(self, &format!("DROP DATABASE `{name}`")).map(|_| ())
+    }
+
+    /// Dumps `name` to a timestamped `.sql` file and returns its path.
+    ///
+    /// A remote dump is prefixed with the connection's name: a `blog-*.sql`
+    /// pulled from staging and one taken locally are otherwise
+    /// indistinguishable in the dumps folder, and importing the wrong one is
+    /// silent.
+    fn export_database(&self, app: Option<&AppHandle>, name: &str) -> Result<PathBuf, AppError> {
+        let dir = dumps_dir()?;
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| AppError::Io(format!("could not create {}: {e}", dir.display())))?;
+        let prefix = self
+            .remote
+            .as_ref()
+            .map(|connection| format!("{}-", slugify(&connection.name)))
+            .unwrap_or_default();
+        let dest = dir.join(format!("{prefix}{name}-{}.sql", timestamp()));
+
+        // Best-effort: a database whose size can't be re-read here still
+        // exports, just without a percentage to show for it.
+        let estimated_total_bytes = schema_size_bytes(self, name).ok();
+
+        // `mariadb-dump` writes the dump to stdout, so this redirects it into
+        // the file rather than passing a path the client would have to quote.
+        let file = std::fs::File::create(&dest)
+            .map_err(|e| AppError::Io(format!("could not create {}: {e}", dest.display())))?;
+        let mut command = Command::new(self.client(db_engine::DUMP_EXE)?);
+        command.args(self.dump_args());
+        if self.is_remote() {
+            command.args(remote_dump_args(self));
+        }
+        // Deliberately *not* `--databases name`: that flag makes `mysqldump`
+        // embed its own `CREATE DATABASE`/`USE \`name\`` at the top of the
+        // file, and a dump imported into a *different* database name — the
+        // whole point of the "Import into" field — would run every statement
+        // in it under that embedded `USE` instead, silently writing into the
+        // original database (creating it first if it happens not to exist) and
+        // leaving the one the user actually asked for empty. Passing `name`
+        // bare dumps just that database's tables, with no `USE` to fight the
+        // one `import` already selects.
+        let child = command
+            .arg(name)
+            .stdout(file)
+            .stderr(Stdio::piped())
+            .hidden()
+            .spawn()
+            .map_err(|e| AppError::DatabaseQueryFailed(e.to_string()))?;
+
+        exports().insert(
+            name.to_string(),
+            RunningExport {
+                child,
+                cancelled: false,
+            },
+        );
+
+        // The registry entry is this function's own, start to finish — removed
+        // here regardless of how `watch_export` returned, so a failed or
+        // cancelled dump can't leave a dead entry that shadows the next export
+        // of the same database.
+        let result = watch_export(app, self, name, &dest, estimated_total_bytes);
+        exports().remove(name);
+        result
+    }
+
+    /// Pipes a `.sql` file into `name`.
+    fn import(&self, name: &str, file: &Path) -> Result<(), AppError> {
+        self.check_writable()?;
+
+        query_on(self, &format!("CREATE DATABASE IF NOT EXISTS `{name}`"))?;
+
+        let input = std::fs::File::open(file)
+            .map_err(|e| AppError::Io(format!("could not read {}: {e}", file.display())))?;
+        let mut command = Command::new(self.client(db_engine::CLIENT_EXE)?);
+        command.args(self.args());
+        if self.is_remote() {
+            // The counterpart to the dump side: a statement holding one large
+            // row is rejected by the server's own limit otherwise.
+            command.arg("--max-allowed-packet=512M");
+        }
+        let output = command
+            .arg(name)
+            .stdin(input)
+            .hidden()
+            .output()
+            .map_err(|e| AppError::DatabaseQueryFailed(e.to_string()))?;
+
+        if !output.status.success() {
+            return Err(client_error(self, &output.stderr, "the import failed"));
+        }
+        Ok(())
+    }
 }
 
 /// `C:\rezure\dumps` — where exports land.
@@ -826,7 +1033,7 @@ pub struct ExportProgress {
 /// Event name the frontend subscribes to via `listen()` for export progress.
 pub const EXPORT_PROGRESS_EVENT: &str = "database://export-progress";
 
-fn emit_export_progress(app: &AppHandle, progress: &ExportProgress) {
+pub(super) fn emit_export_progress(app: &AppHandle, progress: &ExportProgress) {
     // Best-effort — a dropped event shouldn't abort an otherwise-fine
     // export, it just costs the progress bar one tick.
     if let Err(err) = app.emit(EXPORT_PROGRESS_EVENT, progress) {
@@ -885,77 +1092,6 @@ fn schema_size_bytes(conn: &Conn, name: &str) -> Result<u64, AppError> {
         .and_then(|row| row.first())
         .and_then(|value| value.parse().ok())
         .ok_or_else(|| AppError::DatabaseQueryFailed("no size reported".to_string()))
-}
-
-/// Dumps `name` to a timestamped `.sql` file and returns its path.
-///
-/// A remote dump is prefixed with the connection's name: a `blog-*.sql`
-/// pulled from staging and one taken locally are otherwise indistinguishable
-/// in the dumps folder, and importing the wrong one is silent.
-///
-/// `app` is `None` only from the `#[ignore]`d integration test at the bottom
-/// of this module, which has no running Tauri app to emit progress through.
-/// Every real caller goes through `commands::database::export_database`,
-/// which always has one.
-pub fn export_database(app: Option<&AppHandle>, name: &str) -> Result<PathBuf, AppError> {
-    validate_identifier(name, "database")?;
-    let conn = active_conn()?;
-
-    let dir = dumps_dir()?;
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| AppError::Io(format!("could not create {}: {e}", dir.display())))?;
-    let prefix = conn
-        .remote
-        .as_ref()
-        .map(|connection| format!("{}-", slugify(&connection.name)))
-        .unwrap_or_default();
-    let dest = dir.join(format!("{prefix}{name}-{}.sql", timestamp()));
-
-    // Best-effort: a database whose size can't be re-read here still
-    // exports, just without a percentage to show for it.
-    let estimated_total_bytes = schema_size_bytes(&conn, name).ok();
-
-    // `mariadb-dump` writes the dump to stdout, so this redirects it into
-    // the file rather than passing a path the client would have to quote.
-    let file = std::fs::File::create(&dest)
-        .map_err(|e| AppError::Io(format!("could not create {}: {e}", dest.display())))?;
-    let mut command = Command::new(conn.client(db_engine::DUMP_EXE)?);
-    command.args(conn.dump_args());
-    if conn.is_remote() {
-        command.args(remote_dump_args(&conn));
-    }
-    // Deliberately *not* `--databases name`: that flag makes `mysqldump`
-    // embed its own `CREATE DATABASE`/`USE \`name\`` at the top of the
-    // file, and a dump imported into a *different* database name — the
-    // whole point of the "Import into" field — would run every statement
-    // in it under that embedded `USE` instead, silently writing into the
-    // original database (creating it first if it happens not to exist) and
-    // leaving the one the user actually asked for empty. Passing `name`
-    // bare dumps just that database's tables, with no `USE` to fight the
-    // one `import_sql` already selects.
-    let child = command
-        .arg(name)
-        .stdout(file)
-        .stderr(Stdio::piped())
-        .hidden()
-        .spawn()
-        .map_err(|e| AppError::DatabaseQueryFailed(e.to_string()))?;
-
-    exports().insert(
-        name.to_string(),
-        RunningExport {
-            child,
-            cancelled: false,
-        },
-    );
-
-    // The registry entry is this function's own, start to finish — removed
-    // here regardless of how `watch_export` returned, so a failed or
-    // cancelled dump can't leave a dead entry that shadows the next export
-    // of the same database.
-    let result = watch_export(app, &conn, name, &dest, estimated_total_bytes);
-    exports().remove(name);
-    result
 }
 
 /// Polls the running dump until it exits, emitting [`ExportProgress`] as the
@@ -1027,7 +1163,7 @@ fn watch_export(
 /// Connection names are free text — "Staging (EU)" is a reasonable thing to
 /// call one — and `:` or `/` in a Windows filename fails the export at the
 /// point where the dump has already been taken.
-fn slugify(name: &str) -> String {
+pub(super) fn slugify(name: &str) -> String {
     let slug: String = name
         .chars()
         .map(|c| {
@@ -1046,50 +1182,11 @@ fn slugify(name: &str) -> String {
     }
 }
 
-/// Pipes a `.sql` file into `name`, creating the database if it isn't
-/// there yet — importing a dump into a database you have to remember to
-/// create first is a papercut with no upside.
-///
-/// Refused outright on a read-only connection: this is the one operation
-/// here that can destroy data on a server Rezure doesn't own, and the
-/// confirmation the UI asks for is a second gate, not this one.
-pub fn import_sql(name: &str, file: &Path) -> Result<(), AppError> {
-    validate_identifier(name, "database")?;
-    if !file.is_file() {
-        return Err(AppError::Io(format!("no such file: {}", file.display())));
-    }
-    let conn = active_conn()?;
-    conn.check_writable()?;
-
-    query_on(&conn, &format!("CREATE DATABASE IF NOT EXISTS `{name}`"))?;
-
-    let input = std::fs::File::open(file)
-        .map_err(|e| AppError::Io(format!("could not read {}: {e}", file.display())))?;
-    let mut command = Command::new(conn.client(db_engine::CLIENT_EXE)?);
-    command.args(conn.args());
-    if conn.is_remote() {
-        // The counterpart to the dump side: a statement holding one large
-        // row is rejected by the server's own limit otherwise.
-        command.arg("--max-allowed-packet=512M");
-    }
-    let output = command
-        .arg(name)
-        .stdin(input)
-        .hidden()
-        .output()
-        .map_err(|e| AppError::DatabaseQueryFailed(e.to_string()))?;
-
-    if !output.status.success() {
-        return Err(client_error(&conn, &output.stderr, "the import failed"));
-    }
-    Ok(())
-}
-
 /// `YYYYMMDD-HHMMSS` in UTC, for export filenames.
 ///
 /// Hand-rolled from a Unix timestamp rather than pulling in a date crate
 /// for one format string — it's only ever read as "which dump is newer".
-fn timestamp() -> String {
+pub(super) fn timestamp() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -1139,7 +1236,11 @@ mod tests {
             host: "db.example.com".to_string(),
             port: 3307,
             user: "app".to_string(),
+            kind: crate::config::connections::ServerKind::Mysql,
             engine: Engine::MySql,
+            windows_auth: false,
+            trust_server_certificate: false,
+            managed: false,
             tls_mode: TlsMode::Required,
             read_only,
             save_password: false,
@@ -1182,8 +1283,12 @@ mod tests {
 
     #[test]
     fn dropping_a_system_schema_is_refused_before_it_reaches_the_server() {
+        // A fixture pointing at a client that doesn't exist: anything that
+        // got as far as running it would fail differently.
+        let conn = conn_for(TlsMode::Preferred, Engine::MariaDb, None);
         for schema in SYSTEM_SCHEMAS {
-            assert!(drop_database(schema).is_err(), "{schema}");
+            let err = conn.drop_database(schema).expect_err(schema);
+            assert!(err.to_string().contains("own schemas"), "{err}");
         }
     }
 

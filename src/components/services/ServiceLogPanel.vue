@@ -22,9 +22,9 @@ const lines = computed(() =>
       Log — {{ serviceId }}
     </p>
     <div
-      class="rounded-lg bg-neutral-950/85 p-3 font-mono text-xs text-neutral-300 ring-1 ring-white/10 dark:bg-black/40"
+      class="glass-inset rounded-xl p-3 font-mono text-xs text-neutral-700 dark:text-neutral-300"
     >
-      <p v-if="lines.length === 0" class="text-neutral-500">
+      <p v-if="lines.length === 0" class="text-neutral-400">
         No log output yet — start the service to see it here.
       </p>
       <p v-for="(line, i) in lines" :key="i">{{ line }}</p>

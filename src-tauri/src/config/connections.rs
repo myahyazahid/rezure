@@ -52,6 +52,26 @@ pub enum TlsMode {
     Required,
 }
 
+/// Which kind of server a connection points at — and so which client
+/// `services::database` talks to it with.
+///
+/// Older files have no such field and were all MySQL-family, which is what
+/// the default keeps them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ServerKind {
+    /// MySQL or MariaDB, reached with the client binaries that ship beside
+    /// a local server build — see `engine`.
+    #[default]
+    Mysql,
+    /// Microsoft SQL Server, reached through the ODBC driver
+    /// (`services::mssql`).
+    Sqlserver,
+    /// PostgreSQL, reached with the `psql`/`pg_dump` of an installed
+    /// PostgreSQL build (`services::postgres_client`).
+    Postgres,
+}
+
 /// How the SSH session authenticates.
 ///
 /// A key is the better answer and stays the default the UI offers, but a
@@ -91,13 +111,37 @@ pub struct Connection {
     pub host: String,
     pub port: u16,
     pub user: String,
-    /// Which engine the *server* runs.
+    #[serde(default)]
+    pub kind: ServerKind,
+    /// Which engine the *server* runs, for a [`ServerKind::Mysql`]
+    /// connection. Ignored for every other kind.
     ///
     /// Not cosmetic: the client binary is picked from this. A MariaDB client
     /// cannot authenticate against a MySQL 8 account using
     /// `caching_sha2_password` — no flag works around it — so guessing here
     /// produces a login failure with no obvious cause.
     pub engine: Engine,
+    /// SQL Server only: sign in as the Windows user Rezure runs as, with no
+    /// password — how LocalDB and most office domain servers are reached.
+    /// `user` is then empty and nothing is filed in Credential Manager.
+    #[serde(default)]
+    pub windows_auth: bool,
+    /// SQL Server only: accept the server's certificate without checking who
+    /// issued it.
+    ///
+    /// ODBC Driver 18 encrypts by default and refuses a self-signed
+    /// certificate, which is what nearly every development and in-house
+    /// server has. Off unless the user turns it on: it trades away the check
+    /// that the server is the one they meant to reach.
+    #[serde(default)]
+    pub trust_server_certificate: bool,
+    /// True only for the connections Rezure creates for servers it runs
+    /// itself — its LocalDB instance (`services::mssql_localdb`) and its
+    /// PostgreSQL service (`services::postgres`): reached on this machine,
+    /// owned by Rezure, so they're treated like the local server — writable,
+    /// "used by" shown, and not removable by hand.
+    #[serde(default)]
+    pub managed: bool,
     #[serde(default)]
     pub tls_mode: TlsMode,
     /// Refuses every write Rezure can issue — create, drop and import.
@@ -220,7 +264,10 @@ pub struct NewConnection {
     pub host: String,
     pub port: u16,
     pub user: String,
+    pub kind: ServerKind,
     pub engine: Engine,
+    pub windows_auth: bool,
+    pub trust_server_certificate: bool,
     pub tls_mode: TlsMode,
     pub read_only: bool,
     pub save_password: bool,
@@ -245,7 +292,11 @@ mod tests {
             host: host.to_string(),
             port,
             user: user.to_string(),
+            kind: ServerKind::Mysql,
             engine: Engine::MySql,
+            windows_auth: false,
+            trust_server_certificate: false,
+            managed: false,
             tls_mode: TlsMode::default(),
             read_only: true,
             save_password: false,
@@ -367,5 +418,22 @@ mod tests {
         .expect("the older shape must still parse");
         assert!(parsed.read_only);
         assert_eq!(parsed.tls_mode, TlsMode::Preferred);
+        // Every connection saved before SQL Server existed was MySQL-family.
+        assert_eq!(parsed.kind, ServerKind::Mysql);
+        assert!(!parsed.windows_auth && !parsed.managed);
+    }
+
+    #[test]
+    fn a_sql_server_connection_round_trips_through_json() {
+        let mut connection = connection("a", r"(localdb)\Rezure", 0, "");
+        connection.kind = ServerKind::Sqlserver;
+        connection.windows_auth = true;
+        connection.managed = true;
+        let json = serde_json::to_string(&connection).unwrap();
+        assert!(json.contains(r#""kind":"sqlserver""#), "{json}");
+        let parsed: Connection = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.kind, ServerKind::Sqlserver);
+        assert!(parsed.windows_auth && parsed.managed);
+        assert_eq!(parsed.host, r"(localdb)\Rezure");
     }
 }

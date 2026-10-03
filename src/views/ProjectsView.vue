@@ -68,15 +68,17 @@ const TOGGLE_BUTTON_CLASS =
 
 function toggleClass(mode: 'grid' | 'list') {
   return viewMode.value === mode
-    ? 'glass-selected text-red-600 dark:text-red-400'
+    ? 'glass-selected text-neutral-900 dark:text-neutral-50'
     : 'border border-transparent text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-100'
 }
 
-/** An unresolved domain is shown muted rather than in the usual red — the
+/** An unresolved domain is shown muted rather than in the usual accent colour — the
  *  link colour is a promise that clicking it reaches the site, and until
  *  the hosts file has the entry, it doesn't. */
 function domainClass(hasHostsEntry: boolean) {
-  return hasHostsEntry ? 'text-red-600 dark:text-red-400' : 'text-neutral-400 dark:text-neutral-500'
+  return hasHostsEntry
+    ? 'text-accent-600 dark:text-accent-400'
+    : 'text-neutral-400 dark:text-neutral-500'
 }
 
 function domainTitle(hasHostsEntry: boolean) {
@@ -113,7 +115,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
       <div class="flex flex-wrap items-center gap-2">
         <button
           type="button"
-          class="glass-btn flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold text-neutral-700 transition disabled:opacity-50 dark:text-neutral-200"
+          class="glass-btn flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-neutral-700 transition disabled:opacity-50 dark:text-neutral-200"
           :disabled="store.syncingHosts || store.unresolvedProjects.length === 0"
           :title="
             store.unresolvedProjects.length === 0
@@ -140,7 +142,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
 
         <button
           type="button"
-          class="glass-btn flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold text-neutral-700 transition dark:text-neutral-200"
+          class="glass-btn flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-neutral-700 transition dark:text-neutral-200"
           title="Serve a project from a folder outside your www directory"
           @click="showLinkProjectModal = true"
         >
@@ -162,7 +164,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
 
         <button
           type="button"
-          class="glass-accent flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition"
+          class="glass-accent flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition"
           @click="showNewProjectModal = true"
         >
           <svg
@@ -226,7 +228,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
           </button>
           <button
             type="button"
-            class="glass-accent rounded-full px-5 py-2 text-sm font-semibold transition"
+            class="glass-accent rounded-full px-4 py-2 text-sm font-semibold text-red-600 transition dark:text-red-400"
             @click="unlink(confirmingUnlink)"
           >
             Remove
@@ -346,7 +348,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
             class="min-w-0 truncate rounded-full px-3 py-1.5 font-mono text-xs"
             :class="
               project.hasHostsEntry
-                ? 'glass-selected text-red-600 dark:text-red-400'
+                ? 'glass-selected text-accent-600 dark:text-accent-400'
                 : 'glass-inset text-neutral-400 dark:text-neutral-500'
             "
             :title="domainTitle(project.hasHostsEntry)"
@@ -365,7 +367,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
             v-if="project.kind === 'linked'"
             type="button"
             title="Remove from Rezure (the folder is left alone)"
-            class="glass-btn flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:border-red-400/50 hover:text-red-600 dark:hover:border-red-500/40 dark:hover:text-red-400"
+            class="glass-ghost flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition hover:text-red-600 dark:hover:text-red-400"
             @click="confirmingUnlink = project.id"
           >
             <svg
@@ -385,11 +387,11 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
     <div v-else class="glass mt-5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl">
       <!-- Column headings stay put; only the rows below them move. -->
       <div
-        class="glass-divider flex shrink-0 items-center gap-3 border-b bg-white/40 px-5 py-3 text-[11px] font-semibold tracking-wide text-neutral-400 uppercase dark:bg-white/4"
+        class="glass-divider flex shrink-0 items-center gap-3 border-b bg-white/40 px-4 py-3 text-[11px] font-semibold tracking-wide text-neutral-400 uppercase dark:bg-white/4"
       >
         <span class="flex-1">Project</span>
-        <span class="w-44 shrink-0">Domain</span>
-        <span class="w-28 shrink-0">Stack</span>
+        <span class="w-36 shrink-0">Domain</span>
+        <span class="w-24 shrink-0">Stack</span>
         <span class="w-80 shrink-0 text-right">Actions</span>
       </div>
 
@@ -397,7 +399,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
         <div
           v-for="project in filteredProjects"
           :key="project.id"
-          class="glass-divider flex items-center gap-3 border-b px-5 py-3.5 transition last:border-b-0 hover:bg-white/50 dark:hover:bg-white/5"
+          class="glass-divider flex items-center gap-3 border-b px-4 py-3.5 transition last:border-b-0 hover:bg-white/50 dark:hover:bg-white/5"
         >
           <div class="min-w-0 flex-1">
             <p
@@ -433,13 +435,13 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
             </p>
           </div>
           <span
-            class="w-44 shrink-0 truncate font-mono text-xs"
+            class="w-36 shrink-0 truncate font-mono text-xs"
             :class="domainClass(project.hasHostsEntry)"
             :title="domainTitle(project.hasHostsEntry)"
           >
             {{ project.domain }}
           </span>
-          <span class="w-28 shrink-0">
+          <span class="w-24 shrink-0">
             <BasePill>{{ project.stack }}</BasePill>
           </span>
           <!-- Every control keeps its column across all rows. The buttons used
@@ -458,12 +460,12 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
             <!-- Unlink only exists for linked projects: a scanned one is
                removed by moving its folder out of www, not from here. The
                empty slot keeps the button column aligned on the other rows.
-               `h-9 w-9` matches its siblings — it used to be a size smaller. -->
+               `h-9 w-9` matches the height of the actions toolbar beside it. -->
             <button
               v-if="project.kind === 'linked'"
               type="button"
               title="Remove from Rezure (the folder is left alone)"
-              class="glass-btn flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:border-red-400/50 hover:text-red-600 dark:hover:border-red-500/40 dark:hover:text-red-400"
+              class="glass-ghost flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition hover:text-red-600 dark:hover:text-red-400"
               @click="confirmingUnlink = project.id"
             >
               <svg

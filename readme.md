@@ -8,10 +8,12 @@ Rezure lets you spin up local web development environments (Apache/Nginx, PHP, M
 
 ## ✨ Features
 
-- One-click start/stop for local services (Apache, Nginx, MySQL/MariaDB, PHP-FPM)
+- One-click start/stop for local services (Apache, Nginx, MySQL/MariaDB, PHP-FPM), with **Manage services** to keep only the ones you use on the Services page — a MySQL user can drop SQL Server, and the reverse
 - Automatic virtual host & `hosts` file configuration
 - Multi-version PHP switching — install a version from php.net inside the app, or drop one you downloaded into a folder Laragon-style (see [`docs/php-versions.md`](docs/php-versions.md))
 - Database management for the bundled MariaDB — create, export, import, and open a database in whichever SQL client you already have installed (see [`docs/databases.md`](docs/databases.md))
+- SQL Server for PHP projects — Microsoft's `pdo_sqlsrv`/`sqlsrv` drivers, the ODBC Driver, and an optional local SQL Server (LocalDB), all installed from inside Rezure; SQL Server connections on the Databases page (see [`docs/v1/databases.md`](docs/v1/databases.md#sql-server))
+- PostgreSQL as a local service — 18, 17 or 16, installed from inside Rezure (EDB's portable builds, nothing installed into Windows), beside MariaDB rather than instead of it; a `pgsql` Laravel project connects as `root` with no `.env` changes (see [`docs/v1/databases.md`](docs/v1/databases.md#postgresql))
 - Local mail catcher (Mailpit) — point a project's `.env` at `127.0.0.1:1025` and every email it sends lands in an inbox at `http://127.0.0.1:8025` instead of anyone's real mailbox
 - Portable bundled binaries — no manual installation required
 - Lightweight footprint thanks to Tauri (native webview, small binary size)

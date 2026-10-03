@@ -18,9 +18,14 @@ use serde::Serialize;
 
 use super::db_engine::{self, Engine, SERVER_EXE};
 use super::db_profiles;
+use super::mssql_localdb;
+use super::odbc;
+use super::postgres;
 use super::secrets;
 use super::tunnel;
-use crate::config::connections::{self, Connection, ConnectionStore, NewConnection};
+use crate::config::connections::{
+    self, Connection, ConnectionStore, NewConnection, ServerKind, TlsMode,
+};
 use crate::utils::error::AppError;
 
 fn store_cell() -> &'static Mutex<ConnectionStore> {
@@ -61,25 +66,51 @@ pub struct ConnectionStatus {
     #[serde(flatten)]
     pub connection: Connection,
     pub active: bool,
-    /// Whether a client binary that can talk to this server is installed.
-    /// Resolved per row so the switcher can grey one out and say why,
-    /// rather than letting the selection fail later.
+    /// Whether a client that can talk to this server is installed — a MySQL
+    /// or MariaDB build for a MySQL-family server, the ODBC Driver (and, for
+    /// Rezure's own instance, LocalDB itself) for SQL Server. Resolved per
+    /// row so the switcher can grey one out and say why, rather than letting
+    /// the selection fail later.
     pub client_available: bool,
     /// Whether a password is known — saved in Credential Manager, or
-    /// entered earlier this session. Drives the "unlock" prompt.
+    /// entered earlier this session — or none is needed at all (Windows
+    /// Authentication). Drives the "unlock" prompt.
     pub has_password: bool,
+}
+
+/// Whether `connection` signs in without a password Rezure has to supply:
+/// Windows Authentication, or Rezure's own PostgreSQL, which trusts every
+/// local connection.
+pub fn needs_no_password(connection: &Connection) -> bool {
+    match connection.kind {
+        ServerKind::Sqlserver => connection.windows_auth,
+        ServerKind::Postgres => connection.managed,
+        ServerKind::Mysql => false,
+    }
 }
 
 pub fn list() -> Vec<ConnectionStatus> {
     let store = store();
     let active_id = store.active_id.clone();
+    // Asked once for the whole list: each answer is a call into the ODBC
+    // driver manager or a folder scan, and they can't differ between rows.
+    let odbc_installed = odbc::is_installed();
+    let localdb_installed = mssql_localdb::is_installed();
+    let psql_installed = postgres::client_bin_dir().is_ok();
     store
         .connections
         .iter()
         .map(|connection| ConnectionStatus {
             active: Some(&connection.id) == active_id.as_ref(),
-            client_available: client_dir(connection.engine).is_ok(),
-            has_password: secrets::resolve(&connection.id).is_some(),
+            client_available: match connection.kind {
+                ServerKind::Mysql => client_dir(connection.engine).is_ok(),
+                ServerKind::Sqlserver => {
+                    odbc_installed && (!connection.managed || localdb_installed)
+                }
+                ServerKind::Postgres => psql_installed,
+            },
+            has_password: needs_no_password(connection)
+                || secrets::resolve(&connection.id).is_some(),
             connection: connection.clone(),
         })
         .collect()
@@ -160,19 +191,37 @@ pub fn add(request: NewConnection, password: Option<String>) -> Result<Connectio
         host,
         port,
         user,
+        kind,
         engine,
+        windows_auth,
+        trust_server_certificate,
         tls_mode,
         read_only,
         save_password,
         ssh,
     } = request;
 
+    // Windows Authentication is a SQL Server idea; on a MySQL connection the
+    // flag would only hide the user box for no reason.
+    let windows_auth = windows_auth && kind == ServerKind::Sqlserver;
     let name = name.trim().to_string();
     let host = host.trim().to_string();
-    let user = user.trim().to_string();
-    if name.is_empty() || host.is_empty() || user.is_empty() {
+    let user = if windows_auth {
+        String::new()
+    } else {
+        user.trim().to_string()
+    };
+    if name.is_empty() || host.is_empty() || (user.is_empty() && !windows_auth) {
         return Err(AppError::InvalidConnection(
             "a connection needs a name, a host and a user".to_string(),
+        ));
+    }
+    // A named SQL Server instance (`host\SQLEXPRESS`) is found through SQL
+    // Server Browser, so its port may be left empty. Everything else needs
+    // one.
+    if port == 0 && kind != ServerKind::Sqlserver {
+        return Err(AppError::InvalidConnection(
+            "a connection needs a port".to_string(),
         ));
     }
 
@@ -186,6 +235,9 @@ pub fn add(request: NewConnection, password: Option<String>) -> Result<Connectio
     }
 
     let id = uuid::Uuid::new_v4().to_string();
+    // A Windows-authenticated connection has no password to keep, and
+    // filing one anyway would make it look like it does.
+    let password = password.filter(|_| !windows_auth);
     match (&password, save_password) {
         (Some(password), true) => secrets::save(&id, password)?,
         (Some(password), false) => secrets::remember_for_session(&id, password),
@@ -198,7 +250,11 @@ pub fn add(request: NewConnection, password: Option<String>) -> Result<Connectio
         host,
         port,
         user,
+        kind,
         engine,
+        windows_auth,
+        trust_server_certificate,
+        managed: false,
         tls_mode,
         read_only,
         save_password: save_password && password.is_some(),
@@ -241,6 +297,16 @@ pub fn remove(id: &str) -> Result<(), AppError> {
         .iter()
         .position(|c| c.id == id)
         .ok_or_else(|| AppError::ConnectionNotFound(id.to_string()))?;
+    if store.connections[index].managed {
+        let owner = match store.connections[index].kind {
+            ServerKind::Postgres => "PostgreSQL server",
+            _ => "LocalDB instance",
+        };
+        return Err(AppError::InvalidConnection(format!(
+            "\"{}\" is Rezure's own {owner} — it's listed for as long as that's installed",
+            store.connections[index].name
+        )));
+    }
 
     store.connections.remove(index);
     // Selecting nothing means the local profile, which is always there —
@@ -286,4 +352,100 @@ pub fn clear_active() {
         store.active_id = None;
         persist(&store);
     }
+}
+
+/// Adds the connection to Rezure's own LocalDB instance, once LocalDB is
+/// installed and if it isn't there already.
+///
+/// A connection rather than a local profile: a profile is a datadir one
+/// `mysqld` is pointed at, and LocalDB has no such thing. Seeded rather than
+/// left to the user, because there is exactly one right way to reach it —
+/// `(localdb)\Rezure`, Windows Authentication — and nothing to ask.
+///
+/// Called at startup and right after LocalDB is installed. Returns whether
+/// it added one. Also creates the instance itself if it's missing — see
+/// `mssql_localdb::ensure_created` for why that can't wait for Start.
+pub fn ensure_localdb() -> bool {
+    if !mssql_localdb::is_installed() {
+        return false;
+    }
+    if let Err(err) = mssql_localdb::ensure_created() {
+        log::warn!("could not create the LocalDB instance: {err}");
+    }
+    let mut store = store();
+    if store
+        .connections
+        .iter()
+        .any(|c| c.managed && c.kind == ServerKind::Sqlserver)
+    {
+        return false;
+    }
+    store.connections.push(Connection {
+        id: uuid::Uuid::new_v4().to_string(),
+        name: mssql_localdb::SERVICE_NAME.to_string(),
+        host: mssql_localdb::SERVER_ADDRESS.to_string(),
+        port: 0,
+        user: String::new(),
+        kind: ServerKind::Sqlserver,
+        // Unused for SQL Server; any value reads back the same.
+        engine: Engine::MariaDb,
+        windows_auth: true,
+        // Not needed: ODBC Driver 18 reaches LocalDB over its named pipe
+        // with its default encryption and no certificate complaint (checked
+        // by `mssql::tests::print_localdb_encryption_behaviour`).
+        trust_server_certificate: false,
+        managed: true,
+        tls_mode: TlsMode::Preferred,
+        read_only: false,
+        save_password: false,
+        ssh: None,
+        last_used_at: None,
+    });
+    persist(&store);
+    log::info!("added a connection for Rezure's LocalDB instance");
+    true
+}
+
+/// Adds the connection to Rezure's own PostgreSQL service, once a version is
+/// installed and if it isn't there already — the same reasoning as
+/// [`ensure_localdb`]: there's one right way to reach it (`127.0.0.1:5432`,
+/// `postgres`, no password) and nothing to ask.
+///
+/// Called at startup and right after a PostgreSQL install. Returns whether it
+/// added one.
+pub fn ensure_postgres() -> bool {
+    if !postgres::is_installed() {
+        return false;
+    }
+    let mut store = store();
+    if store
+        .connections
+        .iter()
+        .any(|c| c.managed && c.kind == ServerKind::Postgres)
+    {
+        return false;
+    }
+    store.connections.push(Connection {
+        id: uuid::Uuid::new_v4().to_string(),
+        name: postgres::SERVICE_NAME.to_string(),
+        host: postgres::HOST.to_string(),
+        port: postgres::PORT,
+        user: postgres::SUPERUSER.to_string(),
+        kind: ServerKind::Postgres,
+        // Unused for PostgreSQL; any value reads back the same.
+        engine: Engine::MariaDb,
+        windows_auth: false,
+        trust_server_certificate: false,
+        managed: true,
+        // The local server is bootstrapped without TLS; asking for it would
+        // only cost a round trip before falling back.
+        tls_mode: TlsMode::Disabled,
+        read_only: false,
+        save_password: false,
+        ssh: None,
+        last_used_at: None,
+    });
+    persist(&store);
+    log::info!("added a connection for Rezure's PostgreSQL service");
+    true
 }

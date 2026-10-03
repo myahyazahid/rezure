@@ -4,6 +4,8 @@ import { useProjectsStore } from '@/stores/projects'
 import { usePhpStore } from '@/stores/php'
 import { useServicesStore } from '@/stores/services'
 import { useBinariesStore } from '@/stores/binaries'
+import LicenseConsentModal from '@/components/common/LicenseConsentModal.vue'
+import { useLicensedInstall } from '@/composables/useLicensedInstall'
 
 const store = useProjectsStore()
 const phpStore = usePhpStore()
@@ -105,6 +107,89 @@ async function openInbox() {
   }
 }
 
+const sql = computed(() => result.value?.sqlServer ?? null)
+
+/** Everything a request needs to reach SQL Server is in place. The
+ *  certificate note isn't part of this: whether it applies depends on the
+ *  server, which only a real connect can tell. */
+const sqlReady = computed(
+  () =>
+    !!sql.value &&
+    sql.value.driverLoaded &&
+    sql.value.odbcDriver !== null &&
+    (!sql.value.usesLocaldb || (sql.value.localdbInstalled && !sql.value.portConflicts)),
+)
+
+/** ODBC Driver 18 refuses a certificate it can't verify, and the project
+ *  hasn't switched trust on. LocalDB is fine either way — checked by
+ *  connecting to it with and without. */
+const sqlTrustNote = computed(
+  () =>
+    !!sql.value &&
+    !sql.value.usesLocaldb &&
+    sql.value.encryptsByDefault &&
+    !sql.value.trustConfigured,
+)
+
+/** The ODBC Driver and LocalDB are Microsoft installers — license first. */
+const licensed = useLicensedInstall()
+
+async function installSqlPart(id: 'msodbcsql' | 'sqllocaldb') {
+  if (await licensed.request(id)) await recheck()
+}
+
+async function confirmLicensed() {
+  if (await licensed.confirm()) await recheck()
+}
+
+async function recheck() {
+  if (store.doctorFor) await store.runDoctor(store.doctorFor)
+}
+
+const pg = computed(() => result.value?.postgres ?? null)
+
+/** Rezure's PostgreSQL listens on 5432 and has the roles `postgres` and
+ *  `root`; a `.env` pointed at this machine has to agree with both. */
+const pgPortMismatch = computed(() => !!pg.value && pg.value.usesLocal && pg.value.port !== 5432)
+
+/** Everything a request needs to reach PostgreSQL is in place. A server on
+ *  another machine is the project's business — only the driver is checked. */
+const pgReady = computed(
+  () =>
+    !!pg.value &&
+    pg.value.driverLoaded &&
+    (!pg.value.usesLocal ||
+      (pg.value.postgresRunning && !pgPortMismatch.value && pg.value.knownRole)),
+)
+
+const pgBusy = ref(false)
+const pgError = ref<string | null>(null)
+
+/** Turns `pdo_pgsql` on, installs PostgreSQL, or starts it — whichever the
+ *  row asked for — then re-checks against what's actually there. */
+async function fixPostgres(step: 'driver' | 'install' | 'start') {
+  pgBusy.value = true
+  pgError.value = null
+  try {
+    if (step === 'driver') {
+      const phpVersion = result.value?.phpVersion
+      if (!phpVersion) return
+      const ok = await phpStore.setBundledExtension(phpVersion, 'pdo_pgsql', true)
+      if (!ok) return
+      justInstalled.value = [...justInstalled.value, 'pdo_pgsql']
+    } else if (step === 'install') {
+      await binariesStore.install('postgres')
+    } else {
+      await servicesStore.start('postgres')
+    }
+    await recheck()
+  } catch (e) {
+    pgError.value = typeof e === 'string' ? e : 'PostgreSQL could not be set up.'
+  } finally {
+    pgBusy.value = false
+  }
+}
+
 async function install(name: string) {
   const phpVersion = result.value?.phpVersion
   if (!phpVersion) return
@@ -131,7 +216,8 @@ async function install(name: string) {
       <p class="mt-1 text-sm text-neutral-500">
         Every <code class="font-mono">ext-*</code> in this project's
         <code class="font-mono">composer.json</code>, checked against the PHP that serves it —
-        whether that PHP can make HTTPS calls, and where the project's mail goes.
+        whether that PHP can make HTTPS calls, where the project's mail goes, and, for a project on
+        SQL Server or PostgreSQL, whether it can connect.
       </p>
 
       <p v-if="loading" class="mt-5 text-sm text-neutral-500">Asking PHP…</p>
@@ -277,6 +363,198 @@ async function install(name: string) {
         <p v-if="mailError" class="mt-2 text-xs text-red-600 dark:text-red-400">{{ mailError }}</p>
       </div>
 
+      <!-- SQL Server: only when the .env says DB_CONNECTION=sqlsrv. A Laravel
+           app on SQL Server declares none of this in composer.json, so the
+           extension list above can't catch any of it. -->
+      <div v-if="sql && !store.doctorError" class="glass-divider mt-5 border-t pt-4">
+        <p
+          v-if="sqlReady"
+          class="flex items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300"
+        >
+          <span
+            class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-[11px] font-bold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400"
+            >✓</span
+          >
+          <template v-if="sql.usesLocaldb">
+            SQL Server is ready — this project uses Rezure's LocalDB.
+          </template>
+          <template v-else>
+            PHP can reach SQL Server at <code class="font-mono">{{ sql.host }}</code
+            >.
+          </template>
+        </p>
+
+        <div v-else class="flex flex-col gap-2">
+          <div
+            v-if="!sql.driverLoaded"
+            class="rounded-xl bg-amber-100/50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+          >
+            PHP {{ result?.phpVersion }} doesn't load <code class="font-mono">pdo_sqlsrv</code>,
+            which Laravel's <code class="font-mono">sqlsrv</code> connection needs.
+            <button
+              v-if="installable('pdo_sqlsrv')"
+              type="button"
+              class="glass-btn mt-2 block rounded-full px-3 py-1 text-xs font-semibold text-amber-900 transition disabled:opacity-50 dark:text-amber-200"
+              :disabled="phpStore.installingExtension !== null"
+              @click="install('pdo_sqlsrv')"
+            >
+              <template v-if="phpStore.installingExtension === 'pdo_sqlsrv'">Installing…</template>
+              <template v-else
+                >Install pdo_sqlsrv {{ installable('pdo_sqlsrv')?.version }}</template
+              >
+            </button>
+          </div>
+
+          <div
+            v-if="!sql.odbcDriver"
+            class="rounded-xl bg-amber-100/50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+          >
+            The Microsoft ODBC Driver for SQL Server isn't installed. PHP loads
+            <code class="font-mono">pdo_sqlsrv</code> without it, but every connection fails with
+            "This extension requires the Microsoft ODBC Driver".
+            <button
+              type="button"
+              class="glass-btn mt-2 block rounded-full px-3 py-1 text-xs font-semibold text-amber-900 transition disabled:opacity-50 dark:text-amber-200"
+              :disabled="binariesStore.isInstalling('msodbcsql')"
+              @click="installSqlPart('msodbcsql')"
+            >
+              {{ binariesStore.isInstalling('msodbcsql') ? 'Installing…' : 'Install ODBC Driver' }}
+            </button>
+          </div>
+
+          <div
+            v-if="sql.usesLocaldb && !sql.localdbInstalled"
+            class="rounded-xl bg-amber-100/50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+          >
+            <code class="font-mono">DB_HOST</code> points at Rezure's LocalDB, but LocalDB isn't
+            installed.
+            <button
+              type="button"
+              class="glass-btn mt-2 block rounded-full px-3 py-1 text-xs font-semibold text-amber-900 transition disabled:opacity-50 dark:text-amber-200"
+              :disabled="binariesStore.isInstalling('sqllocaldb')"
+              @click="installSqlPart('sqllocaldb')"
+            >
+              {{ binariesStore.isInstalling('sqllocaldb') ? 'Installing…' : 'Install LocalDB' }}
+            </button>
+          </div>
+          <div
+            v-else-if="sql.usesLocaldb && sql.portConflicts"
+            class="rounded-xl bg-amber-100/50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+          >
+            LocalDB answers on a named pipe, not a port, but Laravel adds
+            <code class="font-mono">DB_PORT</code> — or its default, 1433 — to the host unless it's
+            empty. Set <code class="font-mono">DB_PORT=</code> (nothing after the
+            <code class="font-mono">=</code>) in <code class="font-mono">.env</code>.
+          </div>
+        </div>
+
+        <!-- Not a failure Rezure can see from here — only a real connect
+             shows whether the server's certificate is one the driver trusts. -->
+        <p v-if="sqlTrustNote" class="mt-2 text-xs text-neutral-500">
+          ODBC Driver 18 encrypts by default and refuses a self-signed certificate. If connecting
+          fails with a certificate error, uncomment
+          <code class="font-mono">'trust_server_certificate'</code> in
+          <code class="font-mono">config/database.php</code> and set
+          <code class="font-mono">DB_TRUST_SERVER_CERTIFICATE=true</code> — the env var alone does
+          nothing, because Laravel ships that line commented out.
+        </p>
+        <p v-if="licensed.error.value" class="mt-2 text-xs text-red-600 dark:text-red-400">
+          {{ licensed.error.value }}
+        </p>
+      </div>
+
+      <!-- PostgreSQL: only when the .env says DB_CONNECTION=pgsql. pdo_pgsql
+           ships with PHP but is off by default — the usual "could not find
+           driver" — and nothing in composer.json says a project needs it. -->
+      <div v-if="pg && !store.doctorError" class="glass-divider mt-5 border-t pt-4">
+        <p
+          v-if="pgReady"
+          class="flex items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300"
+        >
+          <span
+            class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-[11px] font-bold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400"
+            >✓</span
+          >
+          <template v-if="pg.usesLocal">
+            PostgreSQL is ready — this project uses Rezure's server as
+            <code class="font-mono">{{ pg.username }}</code
+            >.
+          </template>
+          <template v-else>
+            PHP has the PostgreSQL driver for <code class="font-mono">{{ pg.host }}</code
+            >.
+          </template>
+        </p>
+
+        <div v-else class="flex flex-col gap-2">
+          <div
+            v-if="!pg.driverLoaded"
+            class="rounded-xl bg-amber-100/50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+          >
+            PHP {{ result?.phpVersion }} doesn't load <code class="font-mono">pdo_pgsql</code>, so
+            Laravel fails with "could not find driver". It ships with PHP, just switched off.
+            <button
+              type="button"
+              class="glass-btn mt-2 block rounded-full px-3 py-1 text-xs font-semibold text-amber-900 transition disabled:opacity-50 dark:text-amber-200"
+              :disabled="pgBusy"
+              @click="fixPostgres('driver')"
+            >
+              Turn on pdo_pgsql
+            </button>
+          </div>
+
+          <template v-if="pg.usesLocal">
+            <div
+              v-if="!pg.postgresInstalled"
+              class="rounded-xl bg-amber-100/50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+            >
+              This project connects to PostgreSQL on this machine, but it isn't installed.
+              <button
+                type="button"
+                class="glass-btn mt-2 block rounded-full px-3 py-1 text-xs font-semibold text-amber-900 transition disabled:opacity-50 dark:text-amber-200"
+                :disabled="pgBusy || binariesStore.isInstalling('postgres')"
+                @click="fixPostgres('install')"
+              >
+                {{ binariesStore.isInstalling('postgres') ? 'Installing…' : 'Install PostgreSQL' }}
+              </button>
+            </div>
+            <div
+              v-else-if="!pg.postgresRunning"
+              class="rounded-xl bg-amber-100/50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+            >
+              PostgreSQL isn't running, so connecting fails.
+              <button
+                type="button"
+                class="glass-btn mt-2 block rounded-full px-3 py-1 text-xs font-semibold text-amber-900 transition disabled:opacity-50 dark:text-amber-200"
+                :disabled="pgBusy"
+                @click="fixPostgres('start')"
+              >
+                {{ pgBusy ? 'Starting…' : 'Start PostgreSQL' }}
+              </button>
+            </div>
+            <div
+              v-if="pgPortMismatch"
+              class="rounded-xl bg-amber-100/50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+            >
+              <code class="font-mono">DB_PORT={{ pg.port }}</code
+              >, but Rezure's PostgreSQL listens on 5432. Set
+              <code class="font-mono">DB_PORT=5432</code> in <code class="font-mono">.env</code>.
+            </div>
+            <div
+              v-if="!pg.knownRole"
+              class="rounded-xl bg-amber-100/50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+            >
+              Rezure's PostgreSQL has no role
+              <code class="font-mono">{{ pg.username }}</code
+              >. Set <code class="font-mono">DB_USERNAME=root</code> (or
+              <code class="font-mono">postgres</code>) — any password works, the local server trusts
+              this machine.
+            </div>
+          </template>
+        </div>
+        <p v-if="pgError" class="mt-2 text-xs text-red-600 dark:text-red-400">{{ pgError }}</p>
+      </div>
+
       <!-- HTTPS: independent of composer.json, so shown for every project
            once the PHP question itself could be asked. -->
       <div v-if="!store.doctorError" class="glass-divider mt-5 border-t pt-4">
@@ -379,5 +657,12 @@ async function install(name: string) {
         </button>
       </div>
     </div>
+
+    <LicenseConsentModal
+      v-if="licensed.pending.value"
+      :pkg="licensed.pending.value"
+      @confirm="confirmLicensed"
+      @close="licensed.cancel"
+    />
   </div>
 </template>

@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { getVersion } from '@tauri-apps/api/app'
-import { useTheme } from '@/composables/useTheme'
+import { useAppearanceStore } from '@/stores/appearance'
 import { useWindowControls } from '@/composables/useWindowControls'
 
-const { theme, toggle } = useTheme()
+const appearance = useAppearanceStore()
 const { minimize, toggleMaximize, close } = useWindowControls()
 
 const version = ref('')
@@ -30,7 +30,9 @@ onMounted(async () => {
     <div data-tauri-drag-region class="flex min-w-0 flex-1 items-center gap-2">
       <span class="text-[15px] font-bold tracking-tight">Rezure</span>
       <span class="text-xs text-neutral-500">by</span>
-      <span class="text-xs font-semibold text-red-600 dark:text-red-500">Redscale</span>
+      <span class="brand-wordmark text-xs font-semibold text-red-600 dark:text-red-500"
+        >Redscale</span
+      >
       <span
         v-if="version"
         class="glass-inset rounded-md px-1.5 py-0.5 font-mono text-[11px] text-neutral-500 dark:text-neutral-400"
@@ -41,14 +43,20 @@ onMounted(async () => {
 
     <button
       type="button"
-      class="glass-btn flex shrink-0 items-center gap-1.5 rounded-full py-1 pr-3 pl-1 text-xs font-medium transition"
-      @click="toggle"
+      class="glass-btn flex shrink-0 items-center gap-1.5 rounded-full py-1 pr-3 pl-1 text-xs font-medium transition disabled:cursor-default disabled:opacity-60"
+      :disabled="appearance.isDarkForced"
+      :title="
+        appearance.isDarkForced ? 'This theme always uses light text on a dark backdrop' : undefined
+      "
+      @click="appearance.toggleDark()"
     >
       <span
         class="flex h-5 w-5 items-center justify-center rounded-full"
-        :class="theme === 'dark' ? 'bg-white/10 text-neutral-200' : 'bg-red-500/15 text-red-600'"
+        :class="
+          appearance.isDark ? 'bg-white/10 text-neutral-200' : 'bg-accent-500/15 text-accent-600'
+        "
       >
-        <svg v-if="theme === 'dark'" viewBox="0 0 24 24" fill="currentColor" class="h-3 w-3">
+        <svg v-if="appearance.isDark" viewBox="0 0 24 24" fill="currentColor" class="h-3 w-3">
           <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" />
         </svg>
         <svg
@@ -66,7 +74,7 @@ onMounted(async () => {
           />
         </svg>
       </span>
-      {{ theme === 'dark' ? 'Dark' : 'Light' }}
+      {{ appearance.isDark ? 'Dark' : 'Light' }}
     </button>
 
     <div class="flex shrink-0 items-center gap-1">

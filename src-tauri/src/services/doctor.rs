@@ -17,6 +17,12 @@
 //! an HTTPS certificate at all? Without a CA bundle the answer is no, and the
 //! symptom — cURL error 60 on the first outbound API call — lands far from
 //! the cause. See [`TlsCheck`].
+//!
+//! And for a project whose `.env` says `DB_CONNECTION=sqlsrv`, whether the
+//! three things SQL Server needs are all in place — see [`SqlServerSetup`].
+//! A Laravel app on SQL Server declares none of them in `composer.json`, so
+//! the extension check above can't catch any of it. The same for
+//! `DB_CONNECTION=pgsql` and Rezure's own PostgreSQL — see [`PostgresSetup`].
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -25,7 +31,7 @@ use std::process::Command;
 use serde::Serialize;
 
 use super::process::MAILPIT_SMTP_PORT;
-use super::{ca_bundle, php, php_ini};
+use super::{ca_bundle, mssql_localdb, odbc, php, php_ini, postgres};
 use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
 
@@ -62,6 +68,70 @@ pub struct ProjectDiagnosis {
     /// to be on this machine — the case Mailpit catches. `None` for anything
     /// else (`log`, a real provider, no `.env`).
     pub mail: Option<MailSetup>,
+    /// How the project reaches SQL Server, when its `.env` says it does.
+    pub sql_server: Option<SqlServerSetup>,
+    /// How the project reaches PostgreSQL, when its `.env` says it does.
+    pub postgres: Option<PostgresSetup>,
+}
+
+/// A project's PostgreSQL settings, checked against Rezure's own server.
+///
+/// `pdo_pgsql` ships with every PHP build but is off by default, which is
+/// the usual first failure ("could not find driver"); the rest are the ways
+/// a `.env` written for another setup misses Rezure's server.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PostgresSetup {
+    /// `DB_HOST` as written, or Laravel's own default.
+    pub host: String,
+    /// `DB_HOST` is this machine — so it's Rezure's PostgreSQL the project
+    /// means to reach, and the checks below apply.
+    pub uses_local: bool,
+    /// `DB_PORT`, or Laravel's default (5432) when it's missing or empty.
+    pub port: u16,
+    /// `DB_USERNAME`, or Laravel's default (`root`).
+    pub username: String,
+    /// The username is a role Rezure's server has (`postgres` or `root`).
+    /// Its authentication is `trust`, so any password is accepted.
+    pub known_role: bool,
+    /// `pdo_pgsql` is loaded in the PHP serving the project.
+    pub driver_loaded: bool,
+    /// Filled in by the command layer, which is what knows about services.
+    pub postgres_installed: bool,
+    pub postgres_running: bool,
+}
+
+/// A project's SQL Server settings, checked against what this machine has.
+///
+/// Each field is one of the ways a Laravel app on SQL Server fails with a
+/// message that points somewhere else: a driver PHP doesn't have, a driver
+/// *Windows* doesn't have (PHP loads `pdo_sqlsrv` happily without it), a
+/// certificate ODBC Driver 18 won't accept, a port LocalDB doesn't listen on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SqlServerSetup {
+    /// `DB_HOST` as written, or Laravel's own default when it's missing.
+    pub host: String,
+    /// `DB_HOST` is Rezure's LocalDB instance, `(localdb)\Rezure`.
+    pub uses_localdb: bool,
+    /// LocalDB answers on a named pipe, not a port — but Laravel appends
+    /// `DB_PORT` (or its default, 1433) to the host whenever the value isn't
+    /// empty, and then dials a TCP port nothing listens on. True when
+    /// `DB_PORT` needs to be set to nothing.
+    pub port_conflicts: bool,
+    /// `trust_server_certificate` is switched on in the project — the
+    /// `config/database.php` line uncommented *and* the env var true. Laravel
+    /// ships the line commented out, so the env var alone does nothing.
+    pub trust_configured: bool,
+    /// `pdo_sqlsrv` is loaded in the PHP serving the project.
+    pub driver_loaded: bool,
+    /// The ODBC driver Windows has registered, if any.
+    pub odbc_driver: Option<String>,
+    /// That driver encrypts by default (18 and later).
+    pub encrypts_by_default: bool,
+    /// Filled in by the command layer, which is what knows about services.
+    pub localdb_installed: bool,
+    pub localdb_running: bool,
 }
 
 /// A project's local-SMTP mail settings, checked against Mailpit.
@@ -134,6 +204,89 @@ pub fn mail_setup(env: &str) -> Option<MailSetup> {
         port_matches: port == Some(MAILPIT_SMTP_PORT),
         mailpit_installed: false,
         mailpit_running: false,
+    })
+}
+
+/// Whether a `.env` value reads as true the way Laravel's `env()` does.
+fn truthy(value: Option<String>) -> bool {
+    value.is_some_and(|v| {
+        matches!(
+            v.to_ascii_lowercase().as_str(),
+            "true" | "(true)" | "1" | "yes"
+        )
+    })
+}
+
+/// Whether `config/database.php` has its `trust_server_certificate` line
+/// switched on — any line that *starts* with the key, which a commented-out
+/// one doesn't.
+fn trust_line_enabled(database_config: &str) -> bool {
+    database_config.lines().any(|line| {
+        let line = line.trim_start();
+        line.starts_with("'trust_server_certificate'")
+            || line.starts_with("\"trust_server_certificate\"")
+    })
+}
+
+/// Reads a project's SQL Server settings from its `.env` and, when it has
+/// one, `config/database.php`. `None` unless `DB_CONNECTION=sqlsrv`.
+///
+/// Only what the files say — the facts about this machine are filled in by
+/// [`diagnose`].
+pub fn sql_server_setup(env: &str, database_config: Option<&str>) -> Option<SqlServerSetup> {
+    let connection = env_value(env, "DB_CONNECTION")?;
+    if !connection.eq_ignore_ascii_case("sqlsrv") {
+        return None;
+    }
+    let host = env_value(env, "DB_HOST").unwrap_or_else(|| "localhost".to_string());
+    let uses_localdb = host.eq_ignore_ascii_case(mssql_localdb::SERVER_ADDRESS);
+    let port_conflicts = uses_localdb && !matches!(env_value(env, "DB_PORT").as_deref(), Some(""));
+    let trust_configured = truthy(env_value(env, "DB_TRUST_SERVER_CERTIFICATE"))
+        && database_config.is_some_and(trust_line_enabled);
+    Some(SqlServerSetup {
+        host,
+        uses_localdb,
+        port_conflicts,
+        trust_configured,
+        driver_loaded: false,
+        odbc_driver: None,
+        encrypts_by_default: false,
+        localdb_installed: false,
+        localdb_running: false,
+    })
+}
+
+/// Reads a project's PostgreSQL settings from its `.env`. `None` unless
+/// `DB_CONNECTION=pgsql`. Defaults are Laravel's own `config/database.php`
+/// ones.
+pub fn postgres_setup(env: &str) -> Option<PostgresSetup> {
+    let connection = env_value(env, "DB_CONNECTION")?;
+    if !connection.eq_ignore_ascii_case("pgsql") {
+        return None;
+    }
+    let host = env_value(env, "DB_HOST")
+        .filter(|host| !host.is_empty())
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+    let uses_local = matches!(
+        host.to_ascii_lowercase().as_str(),
+        "127.0.0.1" | "localhost" | "::1"
+    );
+    let port = env_value(env, "DB_PORT")
+        .and_then(|port| port.parse().ok())
+        .unwrap_or(postgres::PORT);
+    let username = env_value(env, "DB_USERNAME")
+        .filter(|user| !user.is_empty())
+        .unwrap_or_else(|| postgres::APP_ROLE.to_string());
+    let known_role = [postgres::SUPERUSER, postgres::APP_ROLE].contains(&username.as_str());
+    Some(PostgresSetup {
+        host,
+        uses_local,
+        port,
+        username,
+        known_role,
+        driver_loaded: false,
+        postgres_installed: false,
+        postgres_running: false,
     })
 }
 
@@ -353,33 +506,49 @@ pub fn diagnose_project(id: &str) -> Result<ProjectDiagnosis, AppError> {
 pub fn diagnose(project_dir: &Path) -> Result<ProjectDiagnosis, AppError> {
     let php_exe = php::active_exe()?;
     let php_version = php::active_id();
-    let mail = std::fs::read_to_string(project_dir.join(".env"))
-        .ok()
-        .and_then(|env| mail_setup(&env));
+    let env = std::fs::read_to_string(project_dir.join(".env")).ok();
+    let mail = env.as_deref().and_then(mail_setup);
+    let mut sql_server = env.as_deref().and_then(|env| {
+        let config = std::fs::read_to_string(project_dir.join("config").join("database.php")).ok();
+        sql_server_setup(env, config.as_deref())
+    });
+    let mut postgres = env.as_deref().and_then(postgres_setup);
 
-    let Ok(composer_json) = std::fs::read_to_string(project_dir.join("composer.json")) else {
-        return Ok(ProjectDiagnosis {
-            php_version,
-            has_composer_json: false,
-            extensions: Vec::new(),
-            missing: Vec::new(),
-            mail,
-        });
+    let composer_json = std::fs::read_to_string(project_dir.join("composer.json")).ok();
+    let required = composer_json
+        .as_deref()
+        .map(required_extensions)
+        .unwrap_or_default();
+
+    // Nothing to ask PHP about, so don't pay for the process.
+    let loaded = if required.is_empty() && sql_server.is_none() && postgres.is_none() {
+        BTreeSet::new()
+    } else {
+        loaded_modules(&php_exe)?
     };
 
-    let required = required_extensions(&composer_json);
-    // Nothing to ask PHP about, so don't pay for the process.
-    if required.is_empty() {
+    if let Some(setup) = sql_server.as_mut() {
+        let driver = odbc::detect();
+        setup.driver_loaded = loaded.contains(&normalize("pdo_sqlsrv"));
+        setup.encrypts_by_default = driver.as_ref().is_some_and(|d| d.encrypts_by_default());
+        setup.odbc_driver = driver.map(|d| d.name);
+    }
+    if let Some(setup) = postgres.as_mut() {
+        setup.driver_loaded = loaded.contains(&normalize("pdo_pgsql"));
+    }
+
+    if composer_json.is_none() || required.is_empty() {
         return Ok(ProjectDiagnosis {
             php_version,
-            has_composer_json: true,
+            has_composer_json: composer_json.is_some(),
             extensions: Vec::new(),
             missing: Vec::new(),
             mail,
+            sql_server,
+            postgres,
         });
     }
 
-    let loaded = loaded_modules(&php_exe)?;
     let mut extensions: Vec<ExtensionCheck> = required
         .into_iter()
         .map(|(name, dev_only)| ExtensionCheck {
@@ -400,12 +569,95 @@ pub fn diagnose(project_dir: &Path) -> Result<ProjectDiagnosis, AppError> {
         missing: missing_from(&extensions),
         extensions,
         mail,
+        sql_server,
+        postgres,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const LARAVEL_CONFIG: &str = "'sqlsrv' => [\n    'driver' => 'sqlsrv',\n    \
+        // 'encrypt' => env('DB_ENCRYPT', 'yes'),\n    \
+        // 'trust_server_certificate' => env('DB_TRUST_SERVER_CERTIFICATE', 'false'),\n],\n";
+
+    #[test]
+    fn a_pgsql_connection_is_read_with_laravels_defaults() {
+        assert!(postgres_setup("DB_CONNECTION=mysql\n").is_none());
+        // Laravel 11's .env leaves everything but the driver commented out.
+        let setup = postgres_setup("DB_CONNECTION=pgsql\n# DB_HOST=127.0.0.1\n").unwrap();
+        assert!(setup.uses_local && setup.known_role);
+        assert_eq!((setup.port, setup.username.as_str()), (5432, "root"));
+    }
+
+    #[test]
+    fn a_pgsql_env_written_for_elsewhere_is_told_apart() {
+        let setup = postgres_setup(
+            "DB_CONNECTION=pgsql\nDB_HOST=db.example.com\nDB_PORT=6543\nDB_USERNAME=forge\n",
+        )
+        .unwrap();
+        assert!(!setup.uses_local && !setup.known_role);
+        assert_eq!(setup.port, 6543);
+        // An empty DB_PORT falls back to the default, as Laravel's does.
+        assert_eq!(
+            postgres_setup("DB_CONNECTION=pgsql\nDB_PORT=\n")
+                .unwrap()
+                .port,
+            5432
+        );
+    }
+
+    #[test]
+    fn only_a_sqlsrv_connection_is_read_as_sql_server() {
+        assert!(sql_server_setup("DB_CONNECTION=mysql\nDB_HOST=127.0.0.1\n", None).is_none());
+        assert!(sql_server_setup("APP_NAME=x\n", None).is_none());
+        let setup =
+            sql_server_setup("DB_CONNECTION=sqlsrv\nDB_HOST=db.office.local\n", None).unwrap();
+        assert_eq!(setup.host, "db.office.local");
+        assert!(!setup.uses_localdb && !setup.port_conflicts);
+    }
+
+    /// LocalDB has no TCP port, and Laravel appends one whenever DB_PORT
+    /// isn't empty — including its own 1433 when the line is missing.
+    #[test]
+    fn localdb_needs_an_empty_db_port_not_a_missing_one() {
+        let base = "DB_CONNECTION=sqlsrv\nDB_HOST='(localdb)\\Rezure'\n";
+        let setup = sql_server_setup(&format!("{base}DB_PORT=\n"), None).unwrap();
+        assert!(setup.uses_localdb, "{setup:?}");
+        assert!(!setup.port_conflicts);
+        assert!(sql_server_setup(base, None).unwrap().port_conflicts);
+        assert!(
+            sql_server_setup(&format!("{base}DB_PORT=1433\n"), None)
+                .unwrap()
+                .port_conflicts
+        );
+    }
+
+    /// Laravel ships the config line commented out, so the env var on its
+    /// own changes nothing — both have to be there.
+    #[test]
+    fn trusting_the_certificate_takes_the_config_line_and_the_env_var() {
+        let env = "DB_CONNECTION=sqlsrv\nDB_TRUST_SERVER_CERTIFICATE=true\n";
+        assert!(
+            !sql_server_setup(env, Some(LARAVEL_CONFIG))
+                .unwrap()
+                .trust_configured
+        );
+        assert!(!sql_server_setup(env, None).unwrap().trust_configured);
+
+        let enabled = LARAVEL_CONFIG.replace("// 'trust", "'trust");
+        assert!(
+            sql_server_setup(env, Some(&enabled))
+                .unwrap()
+                .trust_configured
+        );
+        assert!(
+            !sql_server_setup("DB_CONNECTION=sqlsrv\n", Some(&enabled))
+                .unwrap()
+                .trust_configured
+        );
+    }
 
     #[test]
     fn env_values_are_read_the_way_phpdotenv_reads_them() {

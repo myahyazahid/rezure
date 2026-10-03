@@ -59,7 +59,9 @@ const PATH_ROWS = [
             :aria-checked="settingsStore.startWithWindows"
             class="relative h-6 w-11 shrink-0 rounded-full transition"
             :class="
-              settingsStore.startWithWindows ? 'bg-red-600' : 'bg-neutral-900/15 dark:bg-white/15'
+              settingsStore.startWithWindows
+                ? 'bg-accent-600'
+                : 'bg-neutral-900/15 dark:bg-white/15'
             "
             @click="settingsStore.setStartWithWindows(!settingsStore.startWithWindows)"
           >
@@ -83,7 +85,9 @@ const PATH_ROWS = [
             :aria-checked="settingsStore.keepInTrayOnClose"
             class="relative h-6 w-11 shrink-0 rounded-full transition"
             :class="
-              settingsStore.keepInTrayOnClose ? 'bg-red-600' : 'bg-neutral-900/15 dark:bg-white/15'
+              settingsStore.keepInTrayOnClose
+                ? 'bg-accent-600'
+                : 'bg-neutral-900/15 dark:bg-white/15'
             "
             @click="settingsStore.setKeepInTrayOnClose(!settingsStore.keepInTrayOnClose)"
           >
@@ -109,7 +113,7 @@ const PATH_ROWS = [
             :aria-checked="settingsStore.notifyOnCrash"
             class="relative h-6 w-11 shrink-0 rounded-full transition"
             :class="
-              settingsStore.notifyOnCrash ? 'bg-red-600' : 'bg-neutral-900/15 dark:bg-white/15'
+              settingsStore.notifyOnCrash ? 'bg-accent-600' : 'bg-neutral-900/15 dark:bg-white/15'
             "
             @click="settingsStore.setNotifyOnCrash(!settingsStore.notifyOnCrash)"
           >
@@ -155,7 +159,7 @@ const PATH_ROWS = [
             :aria-checked="settingsStore.autoWriteHosts"
             class="relative h-6 w-11 shrink-0 rounded-full transition"
             :class="
-              settingsStore.autoWriteHosts ? 'bg-red-600' : 'bg-neutral-900/15 dark:bg-white/15'
+              settingsStore.autoWriteHosts ? 'bg-accent-600' : 'bg-neutral-900/15 dark:bg-white/15'
             "
             @click="settingsStore.setAutoWriteHosts(!settingsStore.autoWriteHosts)"
           >
@@ -179,7 +183,7 @@ const PATH_ROWS = [
           min="1"
           max="65535"
           :value="settingsStore.defaultPort"
-          class="glass-inset w-24 rounded-lg px-3 py-1.5 text-right text-sm text-neutral-900 focus:border-red-400/70 focus:outline-none dark:text-neutral-100"
+          class="glass-inset w-24 rounded-lg px-3 py-1.5 text-right text-sm text-neutral-900 focus:border-accent-400/70 focus:outline-none dark:text-neutral-100"
           @change="onPortChange"
         />
       </div>

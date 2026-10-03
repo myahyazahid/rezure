@@ -68,6 +68,50 @@ export interface ProjectDiagnosis {
   /** The project's `.env` mails a local SMTP server — what Mailpit is for.
    *  Null for `log`, a real provider, or no `.env`. */
   mail: MailSetup | null
+  /** The project's `.env` says `DB_CONNECTION=sqlsrv`. Null otherwise. */
+  sqlServer: SqlServerSetup | null
+  /** The project's `.env` says `DB_CONNECTION=pgsql`. Null otherwise. */
+  postgres: PostgresSetup | null
+}
+
+/** A project's PostgreSQL settings, checked against Rezure's own server —
+ *  mirrors `services::doctor::PostgresSetup`. */
+export interface PostgresSetup {
+  /** `DB_HOST` as written, or Laravel's default. */
+  host: string
+  /** `DB_HOST` is this machine, so Rezure's PostgreSQL is what it reaches. */
+  usesLocal: boolean
+  /** `DB_PORT`, or Laravel's default 5432. */
+  port: number
+  /** `DB_USERNAME`, or Laravel's default `root`. */
+  username: string
+  /** The username is `postgres` or `root`, the roles Rezure's server has. */
+  knownRole: boolean
+  /** `pdo_pgsql` is loaded in the serving PHP. */
+  driverLoaded: boolean
+  postgresInstalled: boolean
+  postgresRunning: boolean
+}
+
+/** A project's SQL Server settings, checked against this machine. */
+export interface SqlServerSetup {
+  /** `DB_HOST` as written. */
+  host: string
+  /** `DB_HOST` is Rezure's LocalDB, `(localdb)\Rezure`. */
+  usesLocaldb: boolean
+  /** LocalDB has no TCP port, but Laravel appends `DB_PORT` (or 1433) unless
+   *  it's set to nothing. */
+  portConflicts: boolean
+  /** Both the config line and the env var turn on trust_server_certificate. */
+  trustConfigured: boolean
+  /** `pdo_sqlsrv` is loaded in the serving PHP. */
+  driverLoaded: boolean
+  /** The ODBC driver Windows has registered, if any. */
+  odbcDriver: string | null
+  /** That driver is 18+, which encrypts by default. */
+  encryptsByDefault: boolean
+  localdbInstalled: boolean
+  localdbRunning: boolean
 }
 
 /** A project's local-SMTP mail settings, checked against Mailpit. */
@@ -116,6 +160,9 @@ export interface ExtensionStatus {
   installed: boolean
   /** A verified build exists for this PHP branch. */
   available: boolean
+  /** Needs the Microsoft ODBC Driver for SQL Server to connect (sqlsrv,
+   *  pdo_sqlsrv). PHP loads the DLL without it; only connecting fails. */
+  requiresOdbc: boolean
 }
 
 /** One extension the official PHP zip already ships in `ext/`, and whether

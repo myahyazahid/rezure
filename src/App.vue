@@ -3,6 +3,7 @@ import { RouterView } from 'vue-router'
 import { onMounted } from 'vue'
 import AppTitleBar from '@/components/common/AppTitleBar.vue'
 import AppSidebar from '@/components/common/AppSidebar.vue'
+import StickerOverlay from '@/components/common/StickerOverlay.vue'
 import { useServicesStore } from '@/stores/services'
 import { useProjectsStore } from '@/stores/projects'
 import { usePhpStore } from '@/stores/php'
@@ -59,5 +60,7 @@ onMounted(() => {
         </RouterView>
       </main>
     </div>
+
+    <StickerOverlay />
   </div>
 </template>

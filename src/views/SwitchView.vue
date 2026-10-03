@@ -5,6 +5,7 @@ import { useBinariesStore } from '@/stores/binaries'
 import { useServicesStore } from '@/stores/services'
 import { useComposerStore } from '@/stores/composer'
 import { useNodeStore } from '@/stores/node'
+import { usePostgresStore } from '@/stores/postgres'
 import RuntimeSwitchRow, {
   type RuntimeVersionEntry,
 } from '@/components/services/RuntimeSwitchRow.vue'
@@ -19,6 +20,7 @@ const binariesStore = useBinariesStore()
 const servicesStore = useServicesStore()
 const composerStore = useComposerStore()
 const nodeStore = useNodeStore()
+const postgresStore = usePostgresStore()
 
 const showInstallModal = ref(false)
 
@@ -40,6 +42,7 @@ onActivated(() => {
   binariesStore.fetchAll()
   binariesStore.fetchMariaDbVersions()
   nodeStore.fetchVersions()
+  postgresStore.fetchVersions()
   phpStore.fetchDropInDir()
   phpStore.fetchConfigDir()
   phpStore.fetchPathStatus()
@@ -77,6 +80,15 @@ const mailpitVersions = computed<RuntimeVersionEntry[]>(() =>
 // its own compatible build — see `db_profiles::resolve_server_exe`), so
 // there's no single "active" version at this page's level the way PHP has
 // one. The newest installed build is shown as a label, not a real switch.
+// SQL Server LocalDB: a Windows install rather than a zip, but like Nginx and
+// Mailpit one pinned version, so the row only reports installed or not.
+const localdb = computed(() => binariesStore.binaries.find((b) => b.id === 'sqllocaldb') ?? null)
+const localdbVersions = computed<RuntimeVersionEntry[]>(() =>
+  localdb.value
+    ? [{ id: 'sqllocaldb', version: localdb.value.version, installed: localdb.value.installed }]
+    : [],
+)
+
 const mariadbVersions = computed<RuntimeVersionEntry[]>(() =>
   binariesStore.mariadbVersions.map((v) => ({
     id: v.version,
@@ -115,6 +127,22 @@ const nodeProgress = computed(() =>
   nodeStore.installingVersion ? nodeStore.progressFor(nodeStore.installingVersion) : null,
 )
 
+// PostgreSQL: discovered on disk like Node, but switching restarts a running
+// server — on the new major's own data (see `services::postgres`).
+const postgresVersions = computed<RuntimeVersionEntry[]>(() =>
+  postgresStore.versions.map((v) => ({
+    id: v.id,
+    version: v.version,
+    installed: v.installed,
+    detail: `data: postgres\\${v.major}`,
+  })),
+)
+const postgresProgress = computed(() =>
+  postgresStore.installingVersion
+    ? postgresStore.progressFor(postgresStore.installingVersion)
+    : null,
+)
+
 // A PHP install can be started from the modal and keeps running after it's
 // closed, so the row reports the progress of whichever version is in flight.
 const phpProgress = computed(() =>
@@ -140,7 +168,7 @@ const hasPhpConfig = computed(
 
       <button
         type="button"
-        class="glass-accent flex shrink-0 items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition"
+        class="glass-accent flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition"
         @click="showInstallModal = true"
       >
         <svg
@@ -175,6 +203,9 @@ const hasPhpConfig = computed(
     </p>
     <p v-if="nodeStore.error" class="mt-3 text-sm text-red-600 dark:text-red-400">
       {{ nodeStore.error }}
+    </p>
+    <p v-if="postgresStore.error" class="mt-3 text-sm text-red-600 dark:text-red-400">
+      {{ postgresStore.error }}
     </p>
 
     <h2 class="mt-6 mb-2 text-xs font-semibold tracking-wide text-neutral-400 uppercase">
@@ -211,6 +242,17 @@ const hasPhpConfig = computed(
         :progress="mariadbProgress"
       />
       <RuntimeSwitchRow
+        icon="postgres"
+        name="PostgreSQL"
+        :active-version="postgresStore.active?.version ?? null"
+        :installed-count="postgresStore.versions.length"
+        :versions="postgresVersions"
+        :installing-id="postgresStore.installingVersion"
+        :progress="postgresProgress"
+        :busy="postgresStore.switching !== null"
+        @select="postgresStore.setActive"
+      />
+      <RuntimeSwitchRow
         icon="mailpit"
         name="Mailpit"
         :active-version="mailpit?.installed ? mailpit.version : null"
@@ -218,6 +260,15 @@ const hasPhpConfig = computed(
         :versions="mailpitVersions"
         :installing-id="binariesStore.isInstalling('mailpit') ? 'mailpit' : null"
         :progress="binariesStore.progressFor('mailpit')"
+      />
+      <RuntimeSwitchRow
+        icon="sqlserver"
+        name="SQL Server LocalDB"
+        :active-version="localdb?.installed ? localdb.version : null"
+        :installed-count="localdb?.installed ? 1 : 0"
+        :versions="localdbVersions"
+        :installing-id="binariesStore.isInstalling('sqllocaldb') ? 'sqllocaldb' : null"
+        :progress="binariesStore.progressFor('sqllocaldb')"
       />
       <RuntimeSwitchRow
         icon="composer"
@@ -257,6 +308,10 @@ const hasPhpConfig = computed(
       The PHP and Node.js versions picked here are what a project's terminal uses unless that
       project pins its own (see the PHP and Node icons on a project's card). Python isn't available
       yet — it publishes no checksum Rezure can verify a download against.
+    </p>
+    <p v-if="postgresStore.versions.length > 1" class="mt-2 text-xs text-neutral-400">
+      Each PostgreSQL major keeps its own databases: switching from one to another starts on that
+      version's data, it doesn't carry yours across. Export and import to move them.
     </p>
 
     <h2
@@ -303,6 +358,11 @@ const hasPhpConfig = computed(
       :show="phpStore.switching !== null"
       label="Switching PHP…"
       :detail="`Re-pointing the PATH link and reloading the service onto ${phpStore.switching}.`"
+    />
+    <BusyOverlay
+      :show="postgresStore.switching !== null"
+      label="Switching PostgreSQL…"
+      :detail="`Stopping the running server cleanly and starting ${postgresStore.switching}.`"
     />
   </section>
 </template>

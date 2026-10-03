@@ -198,6 +198,35 @@ pub enum AppError {
 
     #[error("couldn't load your ticket history: {0}")]
     TicketHistoryFailed(String),
+
+    #[error(
+        "{0} is installed under Microsoft's license — accept it first to let Rezure install it"
+    )]
+    LicenseNotAccepted(String),
+
+    #[error(
+        "installing {0} was cancelled — click Yes on the admin prompt to let Windows install it"
+    )]
+    InstallerCancelled(String),
+
+    #[error("{name} didn't install: {reason}")]
+    InstallerFailed { name: String, reason: String },
+
+    #[error(
+        "the Microsoft ODBC Driver for SQL Server isn't installed — install it from PHP Extensions (or the Databases page) first"
+    )]
+    OdbcDriverMissing,
+
+    #[error("{0}")]
+    UnsupportedOnSqlServer(String),
+
+    #[error("PostgreSQL version not installed: {0}")]
+    PostgresVersionNotFound(String),
+
+    #[error(
+        "PostgreSQL refuses to run with administrator rights, and Rezure was started as administrator — close it and open it normally, then start PostgreSQL again"
+    )]
+    PostgresElevated,
 }
 
 /// Serialized as its `Display` message (the `#[error("...")]` text) rather
@@ -275,6 +304,13 @@ impl AppError {
             Self::CredentialStore { .. } => "CredentialStore",
             Self::TicketSubmitFailed { .. } => "TicketSubmitFailed",
             Self::TicketHistoryFailed { .. } => "TicketHistoryFailed",
+            Self::LicenseNotAccepted { .. } => "LicenseNotAccepted",
+            Self::InstallerCancelled { .. } => "InstallerCancelled",
+            Self::InstallerFailed { .. } => "InstallerFailed",
+            Self::OdbcDriverMissing => "OdbcDriverMissing",
+            Self::UnsupportedOnSqlServer { .. } => "UnsupportedOnSqlServer",
+            Self::PostgresVersionNotFound { .. } => "PostgresVersionNotFound",
+            Self::PostgresElevated => "PostgresElevated",
         }
     }
 }

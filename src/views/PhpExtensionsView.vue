@@ -3,11 +3,16 @@ import { computed, onActivated, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { usePhpStore } from '@/stores/php'
 import { useServicesStore } from '@/stores/services'
-import type { BundledExtension } from '@/types/php'
+import { useBinariesStore } from '@/stores/binaries'
+import type { BundledExtension, ExtensionStatus } from '@/types/php'
 import SearchInput from '@/components/common/SearchInput.vue'
+import LicenseConsentModal from '@/components/common/LicenseConsentModal.vue'
+import { useLicensedInstall } from '@/composables/useLicensedInstall'
 
 const store = usePhpStore()
 const servicesStore = useServicesStore()
+const binariesStore = useBinariesStore()
+const licensed = useLicensedInstall()
 
 const search = ref('')
 /** Which installed version's extensions this page is showing — defaults to
@@ -22,7 +27,11 @@ function pickVersion(version: string) {
 }
 
 function loadFor(version: string | null) {
-  if (version) store.fetchBundledExtensions(version)
+  if (!version) return
+  store.fetchBundledExtensions(version)
+  // What can be downloaded for this version — `redis` and the SQL Server
+  // drivers aren't in the zip, so their rows offer an Install instead.
+  store.fetchExtensions(version)
 }
 
 watch(selectedVersion, loadFor)
@@ -33,7 +42,36 @@ watch(selectedVersion, loadFor)
 onActivated(() => {
   if (!selectedVersion.value) selectedVersion.value = store.active?.version ?? null
   loadFor(selectedVersion.value)
+  binariesStore.fetchAll()
 })
+
+/** The downloadable side of an extension, when it's one Rezure can fetch. */
+function downloadable(ext: BundledExtension): ExtensionStatus | null {
+  return store.extensions.find((pecl) => pecl.id === ext.id) ?? null
+}
+
+async function installExtension(ext: BundledExtension) {
+  const version = selectedVersion.value
+  if (!version) return
+  if (await store.installExtension(ext.id, version)) {
+    await store.fetchBundledExtensions(version)
+  }
+}
+
+/** The Microsoft ODBC Driver, which the SQL Server extensions need to
+ *  connect — PHP loads them happily without it, then every connect fails. */
+const odbc = computed(() => binariesStore.binaries.find((b) => b.id === 'msodbcsql') ?? null)
+
+/** A SQL Server extension is on for this version, but Windows has no ODBC
+ *  Driver for it to talk through. */
+const odbcMissing = computed(
+  () =>
+    odbc.value !== null &&
+    !odbc.value.installed &&
+    store.bundledExtensions.some(
+      (ext) => ext.enabled && ext.available && downloadable(ext)?.requiresOdbc,
+    ),
+)
 
 // The active version can only be known once `store.versions` has loaded,
 // which may resolve after this page already activated — this catches that
@@ -95,8 +133,9 @@ async function toggle(ext: BundledExtension) {
       <div>
         <h1 class="text-[28px] leading-tight font-bold tracking-tight">PHP Extensions</h1>
         <p class="mt-1 text-sm text-neutral-500">
-          Turn on extensions this PHP zip already ships in <code class="font-mono">ext/</code> — no
-          download, no hand-edited <code class="font-mono">.ini</code> fragment.
+          Turn on extensions this PHP zip already ships in <code class="font-mono">ext/</code>, or
+          install the few it doesn't (Redis, SQL Server) — no hand-edited
+          <code class="font-mono">.ini</code> fragment.
         </p>
       </div>
 
@@ -131,7 +170,7 @@ async function toggle(ext: BundledExtension) {
             >
               <span
                 class="h-1.5 w-1.5 shrink-0 rounded-full"
-                :class="v.version === selectedVersion ? 'bg-red-500' : 'bg-transparent'"
+                :class="v.version === selectedVersion ? 'bg-accent-500' : 'bg-transparent'"
               />
               <span class="flex-1 truncate">PHP {{ v.version }}</span>
             </button>
@@ -149,7 +188,7 @@ async function toggle(ext: BundledExtension) {
       class="glass mt-6 rounded-2xl p-6 text-center text-sm text-neutral-500"
     >
       No PHP version installed yet — install one from
-      <RouterLink to="/switch" class="font-semibold text-red-600 hover:underline"
+      <RouterLink to="/switch" class="font-semibold text-accent-600 hover:underline"
         >Switch</RouterLink
       >
       first.
@@ -162,6 +201,30 @@ async function toggle(ext: BundledExtension) {
       >
         PHP {{ selectedVersion }} is running right now — restart it (Dashboard → PHP) for a toggle
         here to reach requests it's already serving.
+      </p>
+
+      <!-- The DLL alone does nothing for SQL Server: without the driver it
+           talks through, the failure only shows up on the first connect. -->
+      <div
+        v-if="odbcMissing"
+        class="mt-4 flex flex-wrap items-center gap-3 rounded-xl bg-amber-100/50 px-3 py-2.5 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+      >
+        <span class="min-w-0 flex-1">
+          The SQL Server extensions need the
+          <strong class="font-semibold">Microsoft ODBC Driver for SQL Server</strong>. PHP loads
+          them without it, but every connection fails until it's installed.
+        </span>
+        <button
+          type="button"
+          class="glass-accent shrink-0 rounded-full px-3.5 py-1.5 text-xs font-semibold transition disabled:opacity-50"
+          :disabled="binariesStore.isInstalling('msodbcsql')"
+          @click="licensed.request('msodbcsql')"
+        >
+          {{ binariesStore.isInstalling('msodbcsql') ? 'Installing…' : 'Install ODBC Driver' }}
+        </button>
+      </div>
+      <p v-if="licensed.error.value" class="mt-2 text-sm text-red-600 dark:text-red-400">
+        {{ licensed.error.value }}
       </p>
 
       <SearchInput v-model="search" placeholder="Filter extensions" class="mt-4 max-w-sm" />
@@ -178,7 +241,7 @@ async function toggle(ext: BundledExtension) {
               v-for="ext in exts"
               :key="ext.id"
               class="flex items-center gap-3 px-3.5 py-2.5"
-              :class="{ 'opacity-50': !ext.available }"
+              :class="{ 'opacity-50': !ext.available && !downloadable(ext)?.available }"
             >
               <div class="min-w-0 flex-1">
                 <div class="flex flex-wrap items-center gap-1.5">
@@ -194,22 +257,45 @@ async function toggle(ext: BundledExtension) {
                     special
                   </span>
                   <span
-                    v-if="!ext.available"
+                    v-if="!ext.available && !downloadable(ext)"
                     class="glass-inset rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-neutral-500 dark:text-neutral-400"
                   >
                     not in this build
+                  </span>
+                  <!-- Downloadable, but not for this PHP branch (yet). -->
+                  <span
+                    v-else-if="!ext.available && !downloadable(ext)?.available"
+                    class="glass-inset rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-neutral-500 dark:text-neutral-400"
+                  >
+                    not available for PHP {{ selectedVersion }} yet
                   </span>
                 </div>
                 <p class="mt-0.5 truncate text-xs text-neutral-500">{{ ext.description }}</p>
               </div>
 
+              <!-- Not in the zip, but one verified download away: the row offers
+                   that instead of a toggle with nothing behind it. -->
               <button
+                v-if="!ext.available && downloadable(ext)?.available"
+                type="button"
+                class="glass-accent shrink-0 rounded-full px-3 py-1 text-xs font-semibold transition disabled:opacity-50"
+                :disabled="store.installingExtension !== null"
+                @click="installExtension(ext)"
+              >
+                {{
+                  store.installingExtension === ext.id
+                    ? 'Installing…'
+                    : `Install ${downloadable(ext)?.version}`
+                }}
+              </button>
+              <button
+                v-else
                 type="button"
                 role="switch"
                 :aria-checked="ext.enabled"
                 :aria-label="ext.label"
                 class="relative h-5 w-9 shrink-0 rounded-full transition disabled:opacity-40"
-                :class="ext.enabled ? 'bg-red-600' : 'bg-neutral-900/15 dark:bg-white/15'"
+                :class="ext.enabled ? 'bg-accent-600' : 'bg-neutral-900/15 dark:bg-white/15'"
                 :disabled="!ext.available || store.togglingExtension !== null"
                 @click="toggle(ext)"
               >
@@ -227,5 +313,12 @@ async function toggle(ext: BundledExtension) {
         </p>
       </div>
     </template>
+
+    <LicenseConsentModal
+      v-if="licensed.pending.value"
+      :pkg="licensed.pending.value"
+      @confirm="licensed.confirm"
+      @close="licensed.cancel"
+    />
   </section>
 </template>

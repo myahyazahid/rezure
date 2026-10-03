@@ -22,10 +22,20 @@ const connectionsStore = useDbConnectionsStore()
 const remote = computed(() => store.server?.remote === true)
 /** Writes are refused for the target: a read-only connection. */
 const readOnly = computed(() => store.server?.readOnly === true)
+/** SQL Server exports a `.bak`, can't stop one half-way, and imports either a
+ *  script or a backup. */
+const isSqlServer = computed(() => store.server?.kind === 'sqlserver')
+/** PostgreSQL's export runs `pg_dump` to the end; there's no cancelling it
+ *  half-way, as there is a MySQL dump. */
+const isPostgres = computed(() => store.server?.kind === 'postgres')
+const exportSupported = computed(() => store.server?.exportSupported !== false)
+const importExtensions = computed(() => store.server?.importExtensions ?? ['sql'])
+const importLabel = computed(() =>
+  importExtensions.value.map((extension) => `.${extension}`).join(' / '),
+)
 
 const showNewDatabaseModal = ref(false)
 const importFile = ref<string | null>(null)
-const copiedDsn = ref(false)
 const search = ref('')
 
 /** Matched on name alone — collation and size are things you read once you've
@@ -42,9 +52,10 @@ const subtitle = computed(() => {
   // The local promise ("never asks you for credentials") isn't one this page
   // can make about somebody else's server, so it isn't made.
   if (remote.value) {
-    return `Reading ${store.server?.label ?? 'a remote server'} — list, export and ${handoff}.`
+    const actions = exportSupported.value ? `list, export and ${handoff}` : `list and ${handoff}`
+    return `Reading ${store.server?.label ?? 'a remote server'} — ${actions}.`
   }
-  return `Create, export and ${handoff} — Rezure never asks you for credentials.`
+  return `Import or Export your database with one click`
 })
 
 /** Binary units, matching what a database client would report. */
@@ -56,18 +67,16 @@ function formatSize(bytes: number) {
   return `${value >= 10 || exponent === 0 ? Math.round(value) : value.toFixed(1)} ${units[exponent]}`
 }
 
-async function copyDsn() {
-  if (!store.server) return
-  await navigator.clipboard.writeText(store.server.dsn)
-  copiedDsn.value = true
-  window.setTimeout(() => (copiedDsn.value = false), 1500)
-}
-
 async function pickSqlFile() {
   const picked = await openFileDialog({
     multiple: false,
     directory: false,
-    filters: [{ name: 'SQL dump', extensions: ['sql'] }],
+    filters: [
+      {
+        name: importExtensions.value.includes('bak') ? 'SQL script or backup' : 'SQL dump',
+        extensions: importExtensions.value,
+      },
+    ],
   })
   if (typeof picked === 'string') importFile.value = picked
 }
@@ -108,6 +117,7 @@ const busyDetail = computed(() => {
   if (store.importingInto) return `Reading the dump into ${store.server?.label ?? 'the server'}.`
   // Worth saying for a remote dump: it crosses the network and can take
   // minutes, where a local one is effectively instant.
+  if (isSqlServer.value) return 'Writing a .bak backup to C:\\rezure\\dumps.'
   return remote.value
     ? `Pulling a .sql dump from ${store.server?.label} to C:\\rezure\\dumps.`
     : 'Writing a .sql dump to C:\\rezure\\dumps.'
@@ -140,7 +150,7 @@ const exporting = computed(
              otherwise no way to re-read it without navigating away and back. -->
         <button
           type="button"
-          class="glass-btn flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-neutral-600 transition hover:text-neutral-900 disabled:opacity-50 dark:text-neutral-300 dark:hover:text-neutral-50"
+          class="glass-btn flex h-9.5 w-9.5 shrink-0 items-center justify-center rounded-full text-neutral-600 transition hover:text-neutral-900 disabled:opacity-50 dark:text-neutral-300 dark:hover:text-neutral-50"
           :disabled="store.refreshing"
           title="Refresh the database list"
           aria-label="Refresh the database list"
@@ -164,7 +174,7 @@ const exporting = computed(
 
         <button
           type="button"
-          class="glass-accent flex shrink-0 items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
+          class="glass-accent flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
           :disabled="store.serverDown || readOnly"
           :title="readOnly ? `${store.server?.label} is read-only` : ''"
           @click="showNewDatabaseModal = true"
@@ -196,54 +206,6 @@ const exporting = computed(
       {{ profilesStore.error ?? connectionsStore.error }}
     </p>
 
-    <!-- The connection, stated once and copyable — so nothing else in the
-         app has to ask the user for credentials it already knows.
-
-         A remote target is deliberately a different colour: "which server am
-         I about to drop a database on" must be answerable at a glance, not
-         by reading the hostname. -->
-    <div
-      v-if="store.server"
-      class="mt-4 flex shrink-0 flex-wrap items-center gap-3 rounded-2xl border px-4 py-3"
-      :class="
-        remote
-          ? 'border-amber-400/50 bg-amber-100/50 dark:border-amber-500/25 dark:bg-amber-500/10'
-          : 'border-red-300/60 bg-red-100/50 dark:border-red-500/25 dark:bg-red-500/10'
-      "
-    >
-      <span
-        class="text-[11px] font-semibold tracking-wide uppercase"
-        :class="remote ? 'text-amber-500' : 'text-red-400'"
-      >
-        {{ remote ? 'Remote' : 'Server' }}
-      </span>
-      <span
-        class="min-w-0 flex-1 truncate font-mono text-sm"
-        :class="remote ? 'text-amber-800 dark:text-amber-200' : 'text-red-700 dark:text-red-300'"
-      >
-        {{ store.server.host }}:{{ store.server.port }} · {{ store.server.user }} ·
-        {{ store.server.hasPassword ? 'password set' : 'no password' }}
-        <!-- Which data this is, stated beside the connection: "New database"
-             lands in whichever target is active, and that has to be obvious
-             before the button is clicked, not after. -->
-        <template v-if="store.server.label"> · {{ store.server.label }} </template>
-        <template v-if="readOnly"> · read-only </template>
-      </span>
-      <button
-        type="button"
-        class="glass-btn flex shrink-0 items-center gap-2 rounded-full px-3.5 py-2 text-sm font-semibold transition"
-        :class="remote ? 'text-amber-800 dark:text-amber-200' : 'text-red-700 dark:text-red-300'"
-        :title="store.server.dsn"
-        @click="copyDsn"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
-          <rect x="9" y="9" width="11" height="11" rx="2" />
-          <path stroke-linecap="round" d="M5 15V5a2 2 0 0 1 2-2h8" />
-        </svg>
-        {{ copiedDsn ? 'Copied' : 'Copy DSN' }}
-      </button>
-    </div>
-
     <!-- A stopped MariaDB isn't an error the user made, so it gets an
          explanation and a way forward rather than a raw client message. -->
     <div
@@ -254,6 +216,18 @@ const exporting = computed(
         Couldn't reach {{ store.server?.label }} at
         <span class="font-mono">{{ store.server?.host }}:{{ store.server?.port }}</span
         >. Check the host is up and reachable from this machine, then
+        <button type="button" class="font-semibold underline" @click="store.fetchAll">retry</button
+        >.
+      </template>
+      <template v-else-if="isPostgres">
+        Rezure's PostgreSQL isn't running, so there's nothing to list yet. Start it from
+        <RouterLink to="/" class="font-semibold underline">Services</RouterLink>, then
+        <button type="button" class="font-semibold underline" @click="store.fetchAll">retry</button
+        >.
+      </template>
+      <template v-else-if="isSqlServer">
+        Rezure's LocalDB couldn't be reached. Start it from
+        <RouterLink to="/" class="font-semibold underline">Services</RouterLink>, then
         <button type="button" class="font-semibold underline" @click="store.fetchAll">retry</button
         >.
       </template>
@@ -275,7 +249,7 @@ const exporting = computed(
       <span class="min-w-0 truncate font-mono text-xs">{{ store.notice }}</span>
       <button
         type="button"
-        class="shrink-0 font-semibold text-red-600 underline dark:text-red-400"
+        class="shrink-0 font-semibold text-accent-600 underline dark:text-accent-400"
         @click="store.openDumpsFolder"
       >
         Show folder
@@ -290,7 +264,7 @@ const exporting = computed(
       :label="busyLabel"
       :detail="busyDetail"
       :percent="exporting ? store.exportPercent : null"
-      :on-cancel="exporting ? store.cancelExport : undefined"
+      :on-cancel="exporting && !isSqlServer && !isPostgres ? store.cancelExport : undefined"
     />
 
     <!-- Search, import and the totals sit above the table so the table itself
@@ -307,7 +281,7 @@ const exporting = computed(
       <button
         v-if="!readOnly"
         type="button"
-        class="glass-btn flex shrink-0 items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold text-neutral-700 transition dark:text-neutral-200"
+        class="glass-btn flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-neutral-700 transition dark:text-neutral-200"
         @click="pickSqlFile"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-4 w-4">
@@ -317,7 +291,7 @@ const exporting = computed(
             d="M12 4v11m0 0-4-4m4 4 4-4M5 19h14"
           />
         </svg>
-        Import .sql
+        Import {{ importLabel }}
       </button>
 
       <span class="shrink-0 text-sm text-neutral-500">
@@ -346,7 +320,7 @@ const exporting = computed(
       </template>
       <template v-else>
         No databases yet — create one, or
-        <button type="button" class="font-semibold text-red-600 underline" @click="pickSqlFile">
+        <button type="button" class="font-semibold text-accent-600 underline" @click="pickSqlFile">
           import a .sql dump</button
         >.
       </template>
@@ -409,11 +383,18 @@ const exporting = computed(
 
           <div class="flex w-52 shrink-0 items-center justify-end gap-1.5">
             <OpenInClientMenu :database="db.name" />
+            <!-- Disabled rather than hidden where it can't work, with the
+                 reason in reach: a remote SQL Server's BACKUP lands on its own
+                 disk, not this one. -->
             <button
               type="button"
               :class="ACTION_BUTTON_CLASS"
-              :disabled="store.busy === db.name"
-              :title="`Export ${db.name} to a timestamped .sql file`"
+              :disabled="store.busy === db.name || !exportSupported"
+              :title="
+                !exportSupported
+                  ? `Export isn't available here — SQL Server writes a backup onto its own disk, and ${store.server?.label} isn't this machine`
+                  : `Export ${db.name} to a timestamped ${isSqlServer ? '.bak' : '.sql'} file`
+              "
               @click="store.exportDatabase(db.name)"
             >
               <svg

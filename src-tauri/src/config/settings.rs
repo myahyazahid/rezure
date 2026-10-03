@@ -11,6 +11,7 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
+use crate::config::stickers::{self, Decorations};
 use crate::utils::error::AppError;
 use crate::utils::paths;
 
@@ -33,6 +34,9 @@ pub struct Settings {
     /// `settings.json` written before this field existed still loads.
     #[serde(default)]
     pub active_node_version: Option<String>,
+    /// Same again, for `services::postgres`.
+    #[serde(default)]
+    pub active_postgres_version: Option<String>,
     /// Registers Rezure with Windows to launch at sign-in, via
     /// `tauri-plugin-autostart`. Kept here (rather than only asking the OS)
     /// so the Settings toggle reflects intent even if `lib.rs`'s startup
@@ -55,6 +59,162 @@ pub struct Settings {
     /// automatic.
     #[serde(default)]
     pub auto_write_hosts: bool,
+    /// The Appearance page's choices. `None` until the user (or the
+    /// frontend's one-time migration of the old `localStorage` theme key)
+    /// has saved one — the frontend needs to tell "never chosen" apart from
+    /// "chose the defaults" to know whether that migration still has to run.
+    /// Read leniently: a malformed value costs the user their theme, never
+    /// the rest of their settings.
+    #[serde(default, deserialize_with = "lenient_appearance")]
+    pub appearance: Option<AppearanceSettings>,
+    /// Stickers placed from the Decorations page. Sanitized on the way in
+    /// (see `config::stickers`), so what is in memory is always drawable.
+    #[serde(default, deserialize_with = "stickers::lenient_decorations")]
+    pub decorations: Decorations,
+    /// Services taken off the Services page with Manage services, by id.
+    /// See `services::service_visibility` for why it lists the removed ones
+    /// rather than the kept ones.
+    #[serde(default)]
+    pub hidden_services: Vec<String>,
+}
+
+/// Light, dark, or whatever Windows is set to. Light is the default on
+/// purpose — a first launch looks the same for everyone, and following the
+/// OS is an opt-in choice.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemeMode {
+    #[default]
+    Light,
+    Dark,
+    System,
+}
+
+/// The decoration themes, one per category on the Appearance page. The
+/// colours themselves live in the frontend's `main.css`; this is only the
+/// closed list of names that may be stored.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemePreset {
+    /// Category "Default".
+    #[default]
+    Rezure,
+    /// Category "Girls".
+    Blossom,
+    /// Category "Girls", the more see-through glass variant. Stored as
+    /// `"softpink"`.
+    SoftPink,
+    /// Category "Mens".
+    Midnight,
+    /// Category "Mens": deep navy with gold, as opposed to Midnight's
+    /// bright blue and teal.
+    Navy,
+    /// Category "Girls": violet, moon and stars.
+    Lavender,
+    /// Category "Girls": peach and cream, hearts.
+    Peach,
+    /// Category "Girls": mint and sage, leaves.
+    Matcha,
+    /// Category "Mens": graphite and orange, carbon-fibre weave.
+    Carbon,
+    /// Category "Mens": olive and deep green, contour lines.
+    Forest,
+    /// Category "Mens": neon green on black, scanlines.
+    Terminal,
+    /// Category "Default": the clearest glass, over an iridescent backdrop.
+    /// Stored as `"fullglass"`.
+    FullGlass,
+    /// Category "Default": Full Glass without the colour — clear glass on
+    /// white. Stored as `"clearglass"`.
+    ClearGlass,
+    /// Category "Default": sky-tinted frosted glass over a dusk sky, always
+    /// with white text. Stored as `"skyglass"`.
+    SkyGlass,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AppearanceSettings {
+    /// No longer offered on the Appearance page — the title bar's Light/Dark
+    /// button is the control now — but kept, so "system" chosen earlier (or
+    /// set in the file) still works.
+    #[serde(deserialize_with = "lenient")]
+    pub mode: ThemeMode,
+    #[serde(deserialize_with = "lenient")]
+    pub theme: ThemePreset,
+    /// The theme's background pattern (petals, grid). The backdrop colours
+    /// stay either way.
+    pub show_decoration: bool,
+    /// Whole-window brightness, in percent ([`BRIGHTNESS_RANGE`]).
+    pub brightness: u16,
+    /// Colour intensity, in percent ([`SATURATION_RANGE`]): below 100 is more
+    /// muted, above is more vivid.
+    pub saturation: u16,
+    /// How much solid colour is laid over the theme's glass, in percent
+    /// ([`GLASS_SOLIDITY_RANGE`]): 0 is the theme as designed, higher makes
+    /// panels more opaque and text easier to read over busy backdrops.
+    pub glass_solidity: u16,
+    /// Webview zoom, in percent ([`UI_SCALE_RANGE`]).
+    pub ui_scale: u16,
+    /// Turns transitions and animations off inside the app.
+    pub reduce_motion: bool,
+}
+
+pub const BRIGHTNESS_RANGE: (u16, u16) = (70, 120);
+pub const SATURATION_RANGE: (u16, u16) = (50, 150);
+pub const GLASS_SOLIDITY_RANGE: (u16, u16) = (0, 60);
+pub const UI_SCALE_RANGE: (u16, u16) = (80, 130);
+
+impl Default for AppearanceSettings {
+    fn default() -> Self {
+        Self {
+            mode: ThemeMode::default(),
+            theme: ThemePreset::default(),
+            show_decoration: true,
+            brightness: 100,
+            saturation: 100,
+            glass_solidity: 0,
+            ui_scale: 100,
+            reduce_motion: false,
+        }
+    }
+}
+
+impl AppearanceSettings {
+    /// Clamps every adjustment into its range, so a hand-edited file can't
+    /// black the window out or zoom it unusably far.
+    pub fn sanitized(mut self) -> Self {
+        let clamp = |v: u16, (lo, hi): (u16, u16)| v.clamp(lo, hi);
+        self.brightness = clamp(self.brightness, BRIGHTNESS_RANGE);
+        self.saturation = clamp(self.saturation, SATURATION_RANGE);
+        self.glass_solidity = clamp(self.glass_solidity, GLASS_SOLIDITY_RANGE);
+        self.ui_scale = clamp(self.ui_scale, UI_SCALE_RANGE);
+        self
+    }
+}
+
+/// `Settings::appearance`'s reader: [`lenient`], then [`AppearanceSettings::sanitized`].
+fn lenient_appearance<'de, D>(deserializer: D) -> Result<Option<AppearanceSettings>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(lenient::<D, Option<AppearanceSettings>>(deserializer)?.map(AppearanceSettings::sanitized))
+}
+
+/// Deserializes `T`, falling back to its default when the stored value is
+/// not one it recognizes — a theme removed in a later version, or a typo
+/// made by hand in `settings.json`. Without this, one unknown string would
+/// make the whole file unreadable and reset every other setting.
+fn lenient<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned + Default,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).unwrap_or_else(|err| {
+        log::warn!("ignoring unrecognized appearance setting: {err}");
+        T::default()
+    }))
 }
 
 /// Usage data is on for a fresh install. Kept as a named function rather than
@@ -72,10 +232,14 @@ impl Default for Settings {
             share_usage_data: default_share_usage_data(),
             active_php_version: None,
             active_node_version: None,
+            active_postgres_version: None,
             start_with_windows: false,
             keep_in_tray_on_close: false,
             notify_on_crash: false,
             auto_write_hosts: false,
+            appearance: None,
+            decorations: Decorations::default(),
+            hidden_services: Vec::new(),
         }
     }
 }
@@ -222,10 +386,34 @@ mod tests {
             share_usage_data: true,
             active_php_version: Some("8.3.33".to_string()),
             active_node_version: Some("22.11.0".to_string()),
+            active_postgres_version: Some("18.6".to_string()),
             start_with_windows: true,
             keep_in_tray_on_close: true,
             notify_on_crash: true,
             auto_write_hosts: true,
+            appearance: Some(AppearanceSettings {
+                mode: ThemeMode::System,
+                theme: ThemePreset::Blossom,
+                show_decoration: false,
+                brightness: 90,
+                saturation: 120,
+                glass_solidity: 30,
+                ui_scale: 110,
+                reduce_motion: true,
+            }),
+            decorations: Decorations {
+                visible: false,
+                stickers: vec![stickers::Sticker {
+                    id: "s1".to_string(),
+                    kind: stickers::StickerKind::Bow,
+                    x: 12.5,
+                    y: 80.0,
+                    size: 9.0,
+                    rotation: -12.0,
+                    flip: true,
+                }],
+            },
+            hidden_services: vec!["sqlserver".to_string()],
         };
         save_to(&path, &settings).unwrap();
         let loaded = load_from(&path);
@@ -233,10 +421,129 @@ mod tests {
         assert!(loaded.share_usage_data);
         assert_eq!(loaded.active_php_version.as_deref(), Some("8.3.33"));
         assert_eq!(loaded.active_node_version.as_deref(), Some("22.11.0"));
+        assert_eq!(loaded.active_postgres_version.as_deref(), Some("18.6"));
         assert!(loaded.start_with_windows);
         assert!(loaded.keep_in_tray_on_close);
         assert!(loaded.notify_on_crash);
         assert!(loaded.auto_write_hosts);
+        assert_eq!(loaded.appearance, settings.appearance);
+        assert_eq!(loaded.decorations, settings.decorations);
+        assert_eq!(loaded.hidden_services, ["sqlserver"]);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    /// `None` means "never chosen", which is what tells the frontend to
+    /// migrate the theme it used to keep in `localStorage`.
+    #[test]
+    fn appearance_is_unset_until_saved() {
+        let path = temp_path("appearance-unset");
+        std::fs::write(&path, r#"{"defaultPort":80}"#).unwrap();
+        assert_eq!(load_from(&path).appearance, None);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn appearance_round_trips_in_its_json_shape() {
+        let path = temp_path("appearance-shape");
+        std::fs::write(
+            &path,
+            r#"{"defaultPort":80,"appearance":{"mode":"dark","theme":"midnight","showDecoration":false}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            load_from(&path).appearance,
+            Some(AppearanceSettings {
+                mode: ThemeMode::Dark,
+                theme: ThemePreset::Midnight,
+                show_decoration: false,
+                ..AppearanceSettings::default()
+            })
+        );
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    /// An unknown theme or mode (removed in a later version, or mistyped by
+    /// hand) falls back to the default for that one field — it must not make
+    /// the file unreadable and reset every other setting with it.
+    #[test]
+    fn unknown_appearance_values_fall_back_without_losing_other_settings() {
+        let path = temp_path("appearance-unknown");
+        std::fs::write(
+            &path,
+            r#"{"defaultPort":8080,"appearance":{"mode":"sepia","theme":"neon"}}"#,
+        )
+        .unwrap();
+        let settings = load_from(&path);
+        assert_eq!(settings.default_port, 8080);
+        assert_eq!(settings.appearance, Some(AppearanceSettings::default()));
+
+        // The one multi-word theme: its stored name is what the frontend's
+        // `data-theme` and CSS selector use.
+        std::fs::write(
+            &path,
+            r#"{"defaultPort":80,"appearance":{"theme":"softpink"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            load_from(&path).appearance.map(|a| a.theme),
+            Some(ThemePreset::SoftPink)
+        );
+        std::fs::write(&path, r#"{"defaultPort":80,"appearance":{"theme":"navy"}}"#).unwrap();
+        assert_eq!(
+            load_from(&path).appearance.map(|a| a.theme),
+            Some(ThemePreset::Navy)
+        );
+
+        // Every theme name the frontend can send (`ThemePreset` in
+        // `src/types/settings.ts`) must parse to itself, not fall back.
+        for (name, expected) in [
+            ("rezure", ThemePreset::Rezure),
+            ("blossom", ThemePreset::Blossom),
+            ("softpink", ThemePreset::SoftPink),
+            ("lavender", ThemePreset::Lavender),
+            ("peach", ThemePreset::Peach),
+            ("matcha", ThemePreset::Matcha),
+            ("midnight", ThemePreset::Midnight),
+            ("navy", ThemePreset::Navy),
+            ("carbon", ThemePreset::Carbon),
+            ("forest", ThemePreset::Forest),
+            ("terminal", ThemePreset::Terminal),
+            ("fullglass", ThemePreset::FullGlass),
+            ("clearglass", ThemePreset::ClearGlass),
+            ("skyglass", ThemePreset::SkyGlass),
+        ] {
+            let json = format!(r#"{{"defaultPort":80,"appearance":{{"theme":"{name}"}}}}"#);
+            std::fs::write(&path, json).unwrap();
+            assert_eq!(
+                load_from(&path).appearance.map(|a| a.theme),
+                Some(expected),
+                "{name}"
+            );
+        }
+
+        std::fs::write(&path, r#"{"defaultPort":8080,"appearance":"pink"}"#).unwrap();
+        let settings = load_from(&path);
+        assert_eq!(settings.default_port, 8080);
+        assert_eq!(settings.appearance, None);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    /// Out-of-range adjustments are pulled back into range rather than
+    /// trusted — a brightness of 0 would leave the user with a black window.
+    #[test]
+    fn appearance_adjustments_are_clamped() {
+        let path = temp_path("appearance-clamp");
+        std::fs::write(
+            &path,
+            r#"{"defaultPort":80,"appearance":{"brightness":0,"saturation":900,"glassSolidity":100,"uiScale":10}}"#,
+        )
+        .unwrap();
+        let a = load_from(&path).appearance.unwrap();
+        assert_eq!(a.brightness, BRIGHTNESS_RANGE.0);
+        assert_eq!(a.saturation, SATURATION_RANGE.1);
+        assert_eq!(a.glass_solidity, GLASS_SOLIDITY_RANGE.1);
+        assert_eq!(a.ui_scale, UI_SCALE_RANGE.0);
+        assert!(!a.reduce_motion);
         std::fs::remove_file(&path).unwrap();
     }
 }

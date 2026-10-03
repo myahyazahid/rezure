@@ -65,7 +65,7 @@ async function confirm() {
       <div class="mt-5">
         <button
           type="button"
-          class="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-neutral-900/20 py-6 text-sm font-semibold text-neutral-600 transition hover:border-red-400 hover:text-red-600 dark:border-white/20 dark:text-neutral-300 dark:hover:border-red-500 dark:hover:text-red-400"
+          class="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-neutral-900/20 py-6 text-sm font-semibold text-neutral-600 transition hover:border-accent-400 hover:text-accent-600 dark:border-white/20 dark:text-neutral-300 dark:hover:border-accent-500 dark:hover:text-accent-400"
           :disabled="checking"
           @click="pickFolder"
         >
@@ -154,7 +154,7 @@ async function confirm() {
         </button>
         <button
           type="button"
-          class="glass-accent rounded-full px-5 py-2 text-sm font-semibold transition disabled:opacity-50"
+          class="glass-accent rounded-full px-4 py-2 text-sm font-semibold transition disabled:opacity-50"
           :disabled="!preview || store.linking || !name.trim() || !domain.trim()"
           @click="confirm"
         >

@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import type { DbConnectionStatus, TargetResult, TlsMode } from '@/types/dbConnection'
+import type { DbConnectionStatus, ServerKind, TargetResult, TlsMode } from '@/types/dbConnection'
 import type { DbEngine } from '@/types/dbProfile'
 
 function errorMessage(e: unknown): string {
@@ -20,7 +20,10 @@ export interface ConnectionDraft {
   port: number
   user: string
   password: string
+  kind: ServerKind
   engine: DbEngine
+  windowsAuth: boolean
+  trustServerCertificate: boolean
   tlsMode: TlsMode
   readOnly: boolean
   savePassword: boolean
@@ -62,11 +65,16 @@ export const useDbConnectionsStore = defineStore('dbConnections', () => {
       request: {
         name: draft.name.trim(),
         host: draft.host.trim(),
-        port: draft.port,
+        // An emptied number box reads as '' — sent as 0, which for SQL Server
+        // means "a named instance, port from SQL Server Browser".
+        port: Number(draft.port) || 0,
         user: draft.user.trim(),
         // An empty box means "no password", not an empty one.
         password: draft.password.length > 0 ? draft.password : null,
+        kind: draft.kind,
         engine: draft.engine,
+        windowsAuth: draft.kind === 'sqlserver' && draft.windowsAuth,
+        trustServerCertificate: draft.kind === 'sqlserver' && draft.trustServerCertificate,
         tlsMode: draft.tlsMode,
         readOnly: draft.readOnly,
         savePassword: draft.savePassword,

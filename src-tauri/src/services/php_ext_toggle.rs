@@ -169,6 +169,27 @@ pub const CATALOG: &[ExtensionMeta] = &[
         debug_only: false,
         zend_extension: false,
     },
+    // Installed on request like `redis`, so on as soon as the DLL is there:
+    // nobody downloads a SQL Server driver to leave it off. Loading it is
+    // harmless without the ODBC Driver — only connecting needs that.
+    ExtensionMeta {
+        id: "pdo_sqlsrv",
+        label: "PDO SQL Server",
+        category: "Database",
+        description: "Microsoft's SQL Server driver for PDO — Laravel's sqlsrv connection. Needs the ODBC Driver for SQL Server.",
+        default_on: true,
+        debug_only: false,
+        zend_extension: false,
+    },
+    ExtensionMeta {
+        id: "sqlsrv",
+        label: "SQL Server",
+        category: "Database",
+        description: "Microsoft's procedural SQL Server driver (sqlsrv_* functions). Needs the ODBC Driver for SQL Server.",
+        default_on: true,
+        debug_only: false,
+        zend_extension: false,
+    },
     // -- Off by default: bundled, but not everyone needs them --
     ExtensionMeta {
         id: "bz2",

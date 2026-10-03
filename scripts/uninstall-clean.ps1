@@ -11,6 +11,12 @@
                               the SQLite database (override with $REZURE_HOME)
       * the user PATH entry pointing at the PHP junction
       * a managed block in the Windows hosts file
+      * the "Rezure" SQL Server LocalDB instance, when LocalDB is installed
+
+    Two things Rezure may have installed are *not* removed: the Microsoft ODBC
+    Driver for SQL Server and SQL Server Express LocalDB. Both are Windows
+    installs (Settings > Apps) that other software may rely on, so the script
+    only says whether they are there.
 
     The pre-1.0 locations (%LOCALAPPDATA%\Rezure, %APPDATA%\Rezure,
     %USERPROFILE%\rezure) are cleaned too: an install that was never launched
@@ -71,13 +77,44 @@ if (-not $Execute) {
 # A running php-cgi or mysqld holds an open handle inside the folders below,
 # and the delete would fail halfway through with a partially removed tree.
 Write-Step '1. Stopping Rezure processes'
-$running = Get-Process -Name 'rezureapp', 'nginx', 'php-cgi', 'mysqld', 'mariadbd' -ErrorAction SilentlyContinue
+# PostgreSQL only when it runs from under $Root: one installed the usual way
+# runs as a Windows service under the same process name, and isn't Rezure's.
+$running = @(Get-Process -Name 'rezureapp', 'nginx', 'php-cgi', 'mysqld', 'mariadbd' -ErrorAction SilentlyContinue) +
+    @(Get-Process -Name 'postgres' -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -and $_.Path.StartsWith($Root, [StringComparison]::OrdinalIgnoreCase) })
 if (-not $running) {
     Write-Act 'nothing running'
 } else {
     foreach ($proc in $running) {
         Write-Act "stop $($proc.Name) (pid $($proc.Id))"
         if ($Execute) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+# --- 1b. Remove the LocalDB instance -----------------------------------------
+# Its databases live under $Root\data\mssql, and a running instance holds
+# them open - so it is stopped before step 5 deletes that folder. Deleting the
+# instance also drops LocalDB's own record of those databases.
+# SqlLocalDB.exe exits 0 even when it fails, so its output is shown as-is.
+Write-Step '1b. Removing the LocalDB instance'
+$sqlLocalDb = Get-ChildItem (Join-Path $env:ProgramFiles 'Microsoft SQL Server') -Directory -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match '^\d+$' } |
+    Sort-Object { [int]$_.Name } -Descending |
+    ForEach-Object { Join-Path $_.FullName 'Tools\Binn\SqlLocalDB.exe' } |
+    Where-Object { Test-Path $_ } |
+    Select-Object -First 1
+if (-not $sqlLocalDb) {
+    Write-Act 'LocalDB is not installed'
+} else {
+    $info = & $sqlLocalDb info Rezure 2>&1 | Out-String
+    if ($info -notmatch 'Name:') {
+        Write-Act 'no Rezure instance'
+    } else {
+        Write-Act 'stop and delete the LocalDB instance "Rezure"'
+        if ($Execute) {
+            & $sqlLocalDb stop Rezure -k 2>&1 | ForEach-Object { Write-Act $_ }
+            & $sqlLocalDb delete Rezure 2>&1 | ForEach-Object { Write-Act $_ }
+        }
     }
 }
 
@@ -211,6 +248,19 @@ foreach ($dir in $targets) {
         Measure-Object Length -Sum).Sum
     Write-Act ("delete: {0}  ({1:N1} MB)" -f $dir, ($size / 1MB))
     if ($Execute) { Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
+# --- 6. Report what stays installed ------------------------------------------
+Write-Step '6. Windows installs left in place'
+$odbc = Get-OdbcDriver -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match '^ODBC Driver (17|18) for SQL Server$' } |
+    Select-Object -ExpandProperty Name -Unique
+if (-not $odbc -and -not $sqlLocalDb) {
+    Write-Act 'none'
+} else {
+    foreach ($name in @($odbc)) { if ($name) { Write-Act "kept: Microsoft $name" } }
+    if ($sqlLocalDb) { Write-Act 'kept: SQL Server Express LocalDB' }
+    Write-Act 'Remove them from Settings > Apps if nothing else on this machine uses them.'
 }
 
 Write-Host ''

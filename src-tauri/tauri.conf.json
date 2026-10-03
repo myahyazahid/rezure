@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "Rezure",
-        "width": 1200,
-        "height": 780,
+        "width": 1080,
+        "height": 700,
         "minWidth": 900,
         "minHeight": 600,
         "resizable": true,
