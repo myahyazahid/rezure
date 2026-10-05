@@ -21,11 +21,13 @@ export const useDonateStore = defineStore('donate', () => {
     await invoke('open_external_link', { url })
   }
 
-  async function copyAddress(symbol: string, address: string) {
+  /** `key` says which wallet was copied (see `walletKey` in the Donate view):
+   *  not its symbol, which two wallets on different networks share. */
+  async function copyAddress(key: string, address: string) {
     await navigator.clipboard.writeText(address)
-    copiedAddress.value = symbol
+    copiedAddress.value = key
     setTimeout(() => {
-      if (copiedAddress.value === symbol) copiedAddress.value = null
+      if (copiedAddress.value === key) copiedAddress.value = null
     }, 1500)
   }
 

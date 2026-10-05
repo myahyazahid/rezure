@@ -28,6 +28,7 @@
 //! ├── current\    the PHP junction that goes on PATH
 //! ├── www\        projects
 //! ├── dumps\      exported .sql files
+//! ├── stickers\   stickers downloaded from Decorations → Browse
 //! └── rezure.db
 //! ```
 //!
@@ -159,6 +160,13 @@ pub fn www() -> Result<PathBuf, AppError> {
 /// Where `export_database` writes its `.sql` files.
 pub fn dumps() -> Result<PathBuf, AppError> {
     Ok(home()?.join("dumps"))
+}
+
+/// Stickers downloaded from the Decorations → Browse page, one image per
+/// file. Their names and categories are in `etc\stickers.json`; the folder
+/// holds only the images. Created on first download, not here.
+pub fn stickers() -> Result<PathBuf, AppError> {
+    Ok(home()?.join("stickers"))
 }
 
 /// The SQLite database.

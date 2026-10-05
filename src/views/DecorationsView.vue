@@ -1,30 +1,56 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import StickerBrowseModal from '@/components/decorations/StickerBrowseModal.vue'
 import {
   MAX_SIZE,
   MAX_STICKERS,
   MIN_SIZE,
   STICKERS,
   STICKER_CATEGORIES,
+  savedKind,
   stickerLabel,
   stickerStyle,
   stickerUrl,
   useDecorationsStore,
   type StickerCategory,
 } from '@/stores/decorations'
-import type { Sticker, StickerKind } from '@/types/settings'
+import { useStickerLibraryStore } from '@/stores/stickerLibrary'
+import type { Sticker, StickerArt } from '@/types/settings'
 
 const store = useDecorationsStore()
+const library = useStickerLibraryStore()
 
 const selectedId = ref<string | null>(null)
 const selected = computed(() => store.stickers.find((s) => s.id === selectedId.value) ?? null)
 const selectedLabel = computed(() => (selected.value ? stickerLabel(selected.value.kind) : ''))
 
-const category = ref<StickerCategory | 'All'>('All')
-const categoryTabs = computed(() => ['All' as const, ...STICKER_CATEGORIES])
-const visibleStickers = computed(() =>
-  category.value === 'All' ? STICKERS : STICKERS.filter((s) => s.category === category.value),
+/** What the preview draws: a downloaded sticker with no image to show (its
+ *  file removed behind our back) is left out rather than drawn broken. */
+const drawn = computed(() => store.stickers.filter((s) => stickerUrl(s.kind) !== ''))
+
+/** A tile in the palette — built-in art or a download. */
+interface PaletteItem {
+  kind: StickerArt
+  label: string
+  url: string
+}
+
+type PaletteTab = 'All' | StickerCategory | 'Downloaded'
+
+const showBrowse = ref(false)
+
+const category = ref<PaletteTab>('All')
+const categoryTabs = computed<PaletteTab[]>(() => ['All', ...STICKER_CATEGORIES, 'Downloaded'])
+const downloaded = computed<PaletteItem[]>(() =>
+  library.saved.map((s) => ({ kind: savedKind(s.id), label: s.name, url: s.dataUrl })),
 )
+const visibleStickers = computed<PaletteItem[]>(() => {
+  if (category.value === 'Downloaded') return downloaded.value
+  const builtIn: PaletteItem[] = (
+    category.value === 'All' ? STICKERS : STICKERS.filter((s) => s.category === category.value)
+  ).map((s) => ({ kind: s.kind, label: s.label, url: s.url }))
+  return category.value === 'All' ? [...builtIn, ...downloaded.value] : builtIn
+})
 
 // The preview has the window's own proportions and layout, so a sticker put
 // somewhere in it lands on the same spot of the real window. Tracked live, so
@@ -111,9 +137,9 @@ function onKeydown(e: KeyboardEvent) {
 
 // Feedback for a click in the palette: a short notice over the preview,
 // and the new sticker pops in, so it's clear something was added and where.
-const notice = ref<{ text: string; kind: StickerKind | null } | null>(null)
+const notice = ref<{ text: string; kind: StickerArt | null } | null>(null)
 let noticeTimer: ReturnType<typeof setTimeout> | undefined
-function showNotice(text: string, kind: StickerKind | null) {
+function showNotice(text: string, kind: StickerArt | null) {
   notice.value = { text, kind }
   clearTimeout(noticeTimer)
   noticeTimer = setTimeout(() => (notice.value = null), 2200)
@@ -121,7 +147,7 @@ function showNotice(text: string, kind: StickerKind | null) {
 
 const poppedId = ref<string | null>(null)
 
-function addSticker(kind: StickerKind) {
+function addSticker(kind: StickerArt) {
   const id = store.add(kind)
   if (!id) {
     showNotice(`That's the maximum of ${MAX_STICKERS} stickers.`, null)
@@ -289,7 +315,7 @@ function onClear() {
           </div>
 
           <img
-            v-for="s in store.stickers"
+            v-for="s in drawn"
             :key="s.id"
             :src="stickerUrl(s.kind)"
             alt=""
@@ -349,7 +375,9 @@ function onClear() {
 
       <div class="flex flex-col gap-4">
         <div class="glass rounded-2xl p-3">
-          <div class="flex items-center justify-between gap-2 px-1">
+          <!-- Wraps: with the Downloaded tab the row no longer fits beside the
+               title in the 16rem palette card, and clipped off its edge. -->
+          <div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 px-1">
             <p class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Stickers</p>
             <div class="glass-inset flex gap-0.5 rounded-full p-0.5">
               <button
@@ -368,8 +396,42 @@ function onClear() {
               </button>
             </div>
           </div>
-          <p class="mt-1 px-1 text-xs text-neutral-500">
-            {{ store.isFull ? `That's the maximum of ${MAX_STICKERS}.` : 'Click one to add it.' }}
+          <div class="mt-1 flex items-center justify-between gap-2 px-1">
+            <p class="text-xs text-neutral-500">
+              {{ store.isFull ? `That's the maximum of ${MAX_STICKERS}.` : 'Click one to add it.' }}
+            </p>
+            <button
+              type="button"
+              class="glass-btn flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold transition"
+              @click="showBrowse = true"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                class="h-3 w-3"
+                aria-hidden="true"
+              >
+                <circle cx="11" cy="11" r="6.5" />
+                <path stroke-linecap="round" d="M16 16l4.5 4.5" />
+              </svg>
+              Browse
+            </button>
+          </div>
+          <p
+            v-if="category === 'Downloaded' && downloaded.length === 0"
+            class="mt-3 px-1 pb-1 text-xs text-neutral-500"
+          >
+            Nothing downloaded yet.
+            <button
+              type="button"
+              class="font-semibold text-accent-600 underline-offset-2 hover:underline dark:text-accent-400"
+              @click="showBrowse = true"
+            >
+              Browse the catalog
+            </button>
+            to find more stickers.
           </p>
           <!-- Fixed-size tiles, as many per row as fit, scrolling inside the
                card: at full width (below lg the palette sits under the
@@ -466,6 +528,8 @@ function onClear() {
         </div>
       </div>
     </div>
+
+    <StickerBrowseModal v-if="showBrowse" @close="showBrowse = false" />
   </section>
 </template>
 

@@ -134,6 +134,10 @@ pub fn run() {
                 commands::changelog::mark_changelog_seen,
                 commands::donate::fetch_donate_config,
                 commands::donate::open_external_link,
+                commands::stickers::fetch_sticker_catalog,
+                commands::stickers::list_saved_stickers,
+                commands::stickers::download_sticker,
+                commands::stickers::remove_saved_sticker,
             ])
             .setup(|app| {
                 if cfg!(debug_assertions) {
