@@ -119,20 +119,57 @@ and silently no-ops on a same-or-lower version regardless (Rezure never passes
 `allowDowngrades`), so a missing/blank `current_version` never produces a false update
 prompt — it just costs one avoidable response body.
 
-## Local testing without a real signed installer
+## Local testing without the production key
 
-The backend endpoint is live, but exercising a real update still needs a release signed
-with the production key (a release-time secret this repo never holds). Until you have one,
-the app-side flow can be exercised end-to-end against a fake manifest instead:
+The backend endpoint is live, but a real update needs a release signed with the production
+key (a release-time secret this repo never holds). The updater trusts exactly one public
+key, baked into the binary at build time, so the app side is tested with an app that
+trusts a key we hold instead: `scripts/test-updater.ps1`.
 
-1. Generate a throwaway *dev* signing keypair (`tauri signer generate`) — separate
-   from the real release key.
-2. Build and sign a Rezure installer at a higher version number with that dev key.
-3. Serve a hand-written `latest.json` matching the shape above (any static file
-   server works) pointing `url` at that installer and `signature` at its `.sig`.
-4. Point a debug build's `plugins.updater.endpoints` at that local URL (e.g. gated
-   behind `cfg!(debug_assertions)` in `src-tauri/src/lib.rs`) with the dev pubkey
-   swapped into `tauri.conf.json` for that build.
-5. Confirm the update is detected, downloads with progress, and installs — and
-   separately confirm a manifest signed with a *different* key is rejected, proving
-   the signature check is actually enforced rather than silently skipped.
+```powershell
+.\scripts\test-updater.ps1                  # build once, run all three scenarios
+.\scripts\test-updater.ps1 -Run wrong-key   # one scenario, reusing the build
+.\scripts\test-updater.ps1 -Run serve       # serve "good" for a manual install test
+.\scripts\test-updater.ps1 -RealUpdate -Rebuild   # also build a genuine higher version
+```
+
+What it does, with no change to the source or to `tauri.conf.json`:
+
+1. Generates a throwaway dev key, and a second "wrong" one, under `%TEMP%\rezure-updater-test`.
+2. Builds Rezure with the dev key as its trusted key and `http://127.0.0.1:8777/latest.json`
+   as its endpoint, through a `--config` override file (`dangerousInsecureTransportProtocol`
+   allows the plain-HTTP localhost endpoint; a normal build never has it). The bundled
+   PHP/nginx payload is left out, since it has nothing to do with updating.
+3. Signs the installer and writes four manifests: `good`, `launch` (a harmless `.exe`, signed
+   correctly), `wrong-key` (signed by another key) and `tampered` (right signature, one bit
+   flipped).
+4. Runs the real binary against each (`scripts/updater-probe.mjs`), in its own `REZURE_HOME`
+   and WebView2 profile with usage data off, and reads what the Changelog page shows.
+
+Expected: `good` shows "Rezure 3.0.1 is available". `launch` presses Update on a signed
+stand-in installer (a copy of Windows' own `hostname.exe`): the app downloads it, accepts
+the signature, runs it and quits, which is what it does with a real installer, minus the
+installing. `wrong-key` and `tampered` show the update too and then, on **Update**, download
+the file and refuse with the updater's own signature error, leaving the version unchanged.
+`good` does not press Update by default, because that installs a new Rezure on the machine
+running the test; `-Install` does, and `-Run serve` serves it for doing it by hand.
+
+The probe only counts a refusal if the error is about the signature **and** the installer
+was actually downloaded first. That is deliberate: the first version of this test accepted
+any red text, and passed on a script error ("Cannot read private member…") that meant the
+Update button never worked at all.
+
+Things to know:
+
+- The installer is built with the same app identity as a real install, so **installing it
+  replaces an installed Rezure**. Test on a machine (or VM) where that is fine.
+- Unless `-RealUpdate` is given, the offered installer is the one just built, so the
+  manifest says a higher version than the installer is. Detection, download and signature
+  checks are real; "the version changed afterwards" is only proven with `-RealUpdate`.
+- A failed update *check* (a broken manifest, say) is not shown in the UI: `checkError` is
+  kept in the store but nothing renders it, so it looks like "no update". The probe's
+  `none` expectation cannot tell the two apart.
+- The signing half can be checked without the private key: a release's `.sig` verifies
+  against the `pubkey` in `tauri.conf.json` with `minisign-verify`, which is what the
+  plugin uses. Done for the 3.0.0 NSIS and MSI installers (verified; a different file and
+  a single flipped bit are both rejected).

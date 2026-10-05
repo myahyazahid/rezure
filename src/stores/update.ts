@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, shallowRef } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { check, type Update } from '@tauri-apps/plugin-updater'
 import type { UpgradeNotice } from '@/types/changelog'
@@ -12,7 +12,12 @@ function errorMessage(e: unknown): string {
 
 export const useUpdateStore = defineStore('update', () => {
   const checking = ref(false)
-  const available = ref<Update | null>(null)
+  // `shallowRef`, not `ref`: `Update` is a class whose state lives in ES private
+  // fields (`#rid`), and a deep `ref` hands out a reactive Proxy of it. Private
+  // fields can't be read through a Proxy, so every method call on it threw
+  // "Cannot read private member from an object whose class did not declare it"
+  // and the Update button could never work. Found by scripts/test-updater.ps1.
+  const available = shallowRef<Update | null>(null)
   const checkError = ref<string | null>(null)
 
   const downloading = ref(false)

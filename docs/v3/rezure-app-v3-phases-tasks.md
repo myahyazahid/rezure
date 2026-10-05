@@ -104,7 +104,11 @@ sudah dipakai di `PhpConfigCard.vue` dan `RuntimeSwitchRow.vue`.
       tidak muncul, dan hasilnya tidak di-cache. Diuji lewat test Laravel (`UpgradeNoticeTest`,
       `ReleaseManifestTest`, `ReleasesTest`) dan unit test Rust. **Belum** dilihat di app
       sungguhan dengan notice yang dinyalakan di dashboard produksi
-- [ ] Uji end-to-end lawan endpoint asli — masih tersisa karena belum ada pipeline rilis nyata: repo ini belum punya workflow CI (`.github/workflows`) yang build+sign installer pakai key barusan, jadi belum ada release sungguhan berisi `signature`/`download_url` untuk diuji. Sementara ini kode sisi app sudah bisa diuji lokal lawan manifest tiruan (lihat prosedur di `docs/version-contract.md`)
+- [x] **Rantai tanda tangan terbukti dengan data nyata** (2026-10-06): installer NSIS dan MSI 3.0.0 hasil build 2026-10-01 diverifikasi dengan `minisign-verify` (yang dipakai plugin updater) terhadap `pubkey` di `tauri.conf.json` (key id `7D7C5DDBA1596BD4`): **terverifikasi**. File yang salah (tanda tangan NSIS untuk file MSI) dan installer dengan **satu bit** diubah: **ditolak**. Jadi kunci produksi dan alur build/tanda tangan benar.
+- [x] Alat uji lokal tanpa kunci produksi: `scripts/test-updater.ps1` (membangun app yang mempercayai kunci sementara lewat file override `--config`, tanpa mengubah source) dan `scripts/updater-probe.mjs` (menjalankan binary asli di `REZURE_HOME` dan profil WebView2 terpisah dengan telemetry mati, lalu membaca halaman Changelog lewat DevTools Protocol). Tiga skenario: `good`, `wrong-key`, `tampered`. Yang sudah teruji tanpa build: langkah kunci, tanda tangan, dan manifest (kunci dev meloloskan yang benar, menolak yang salah dan yang diutak-atik; **kunci produksi menolak semua payload kunci dev**), serta probe terhadap binary rilis yang ada (versi terbaca, pengecekan selesai, hasil "tidak ada update" sesuai server produksi)
+- [x] **Dijalankan penuh terhadap binary asli** (2026-10-06, `scripts/test-updater.ps1`, build sekitar 4 menit): `good`: update 3.0.1 terdeteksi dari manifest bertanda tangan. `launch`: file `.exe` tak berbahaya yang ditandatangani dengan benar **diunduh, tanda tangannya diterima, dijalankan, dan aplikasi keluar** (persis perilaku terhadap installer sungguhan, tanpa memasang apa pun). `wrong-key`: installer diunduh lalu ditolak ("The signature was created with a different key than the one provided"). `tampered`: diunduh lalu ditolak ("The signature verification failed"). Versi tetap 3.0.0 pada keduanya
+- [x] **Bug ditemukan dan diperbaiki oleh uji ini: tombol Update tidak pernah bisa bekerja.** `stores/update.ts` menyimpan objek `Update` dari plugin di `ref(...)`; Vue membungkusnya dengan Proxy reaktif, dan kelas `Update` menyimpan state di field privat ES (`#rid`) yang tidak bisa dibaca lewat Proxy. Setiap klik berakhir di "Cannot read private member from an object whose class did not declare it" (tampil sebagai teks merah, bukan penolakan tanda tangan), sehingga **tidak ada pengguna yang bisa memperbarui lewat aplikasi**. Perbaikan: `shallowRef`. Bug ini lolos dari semua tes unit dan dari pengecekan manual karena baru muncul saat tombol ditekan terhadap update sungguhan. Probe juga sempat memberi lulus palsu (ada teks merah dan versi tidak berubah dianggap "ditolak"), jadi sekarang penolakan harus bernada tanda tangan *dan* terjadi setelah installer benar-benar diunduh
+- [ ] **Uji end-to-end lawan endpoint produksi** masih menunggu rilis sungguhan: server produksi menjawab `204` untuk 3.0.0 karena belum ada rilis bertanda tangan yang dipublikasikan, dan repo ini belum punya workflow CI (`.github/workflows`). Langkahnya: build 3.0.1 dengan kunci produksi, unggah installer ke tempat yang bisa diunduh, lalu publikasikan di dashboard Releases (versi, catatan, isi `.sig`, `download_url`)
 
 ---
 
@@ -301,7 +305,7 @@ murni soal port allocation + service lifecycle, bukan batasan PHP itu sendiri.
       turunan `filterableServices` dari `LOG_SERVICES` digabung id pooled (`id.startsWith('php-')`)
       yang lagi terdaftar di `useServicesStore()` — shortcut filter per-versi muncul otomatis begitu
       project dipin, tanpa nyentuh `stores/logs.ts` sendiri. Diuji manual oleh maintainer, jalan baik
-- [ ] Nama tampilan `"PHP 8.3.0"` di kartu service belum dicek langsung di app sungguhan (cuma
+- [x] Nama tampilan `"PHP 8.3.0"` di kartu service belum dicek langsung di app sungguhan (cuma — **sudah diuji manual oleh maintainer di app sungguhan (2026-10-06)**
       diverifikasi lewat unit test `ServiceInfo`, bukan browser/UI manual)
 - [x] **Terminal dari project card ikut versi PHP yang dipin**, sama seperti Node (v3.5 Fase
       3.5.1). Diminta maintainer: sebelumnya pin cuma berlaku untuk web, jadi `php artisan` di
@@ -434,7 +438,7 @@ kena `cURL error 60` untuk setiap HTTPS keluar dari PHP. Ditambah lagi, `php.ini
       doctor, scaffold Composer). Terbukti di mesin nyata: `openssl_pkey_new()` `false` tanpa, `true`
       dengan. **Sengaja tidak di-set machine-wide** untuk terminal user — Git dan tool OpenSSL lain
       membaca variabel yang sama
-- [ ] Belum diuji manual di app sungguhan: installer hasil `npm run stage:binaries` + build di mesin
+- [x] Belum diuji manual di app sungguhan: installer hasil `npm run stage:binaries` + build di mesin — **sudah diuji manual oleh maintainer di app sungguhan (2026-10-06)**
       bersih (bundle ter-seed, `php artisan tinker` → `Http::get('https://…')` tidak error 60)
 
 ---
@@ -467,7 +471,7 @@ maintainer**. Sengaja hanya menulis ke Rezure home, tidak ke config agent milik 
       tidak disentuh (aturan yang sama dengan CA bundle)
 - [x] Unit test untuk render, resolusi pin, file bukan milik Rezure, dan escape nama project. Hasil
       render dengan data asli mesin maintainer sudah dicek (10 project, profil Laragon MySQL 8.4.3)
-- [ ] Belum dilihat berjalan di app sungguhan (`tauri dev`), dan belum dicoba apakah Claude Code
+- [x] Belum dilihat berjalan di app sungguhan (`tauri dev`), dan belum dicoba apakah Claude Code — **sudah diuji manual oleh maintainer di app sungguhan (2026-10-06)**
       benar-benar memuatnya di sesi project di bawah `www\`
 - **Batasan:** project yang di-link dari luar Rezure home (misalnya `C:\repository\…`) tidak punya
   `C:\rezure` sebagai folder induk, jadi `CLAUDE.md` tidak termuat otomatis. Solusinya satu baris
@@ -589,7 +593,7 @@ dari tiga kategori (Default, Girls, Mens), dari menu sendiri di sidebar. Tidak a
       meng-override setiap token yang di-override blok light-nya (alasannya di komentar
       `main.css`). Aksennya satu tingkat lebih terang (`accent-600` = `pink-500`), jadi kontras
       teks kecilnya lebih rendah lagi dari tema lain. Itu konsekuensi dari "soft"
-- [ ] Soft Pink belum dilihat di app sungguhan, baik light maupun dark
+- [x] Soft Pink belum dilihat di app sungguhan, baik light maupun dark — **sudah diuji manual oleh maintainer di app sungguhan (2026-10-06)**
 - [x] Tema kelima `navy` (Navy, kategori Mens). Awalnya dibuat sebagai "Soft Navy" (pasangan
       Soft Pink), lalu diganti atas permintaan maintainer karena terlalu mirip Midnight. Bedanya
       sekarang: aksen navy pekat (bukan biru terang), ujung gradien emas (bukan teal), latar navy
@@ -639,7 +643,7 @@ dari tiga kategori (Default, Girls, Mens), dari menu sendiri di sidebar. Tidak a
       untuk semua tema sekaligus
 - [x] Dilihat di app sungguhan (`tauri dev`): Blossom dan Midnight di mode light tampil benar,
       preview tiap kartu memakai temanya sendiri
-- [ ] Belum dicek: mode dark untuk Blossom/Midnight, restart app (pilihan bertahan dan tidak ada
+- [x] Belum dicek: mode dark untuk Blossom/Midnight, restart app (pilihan bertahan dan tidak ada — **sudah diuji manual oleh maintainer di app sungguhan (2026-10-06)**
       kedipan saat start), dan migrasi dari key `rezure-theme` pada instalasi lama
 
 ### Fase 3.13d — Menu Decorations (stiker)
@@ -688,7 +692,7 @@ mana saja di window, dengan preview Rezure untuk memilih posisinya.
 - [x] `StickerOverlay.vue` di `App.vue`
 - [x] Dicek lewat build + headless Chrome dengan backend tiruan: posisi di preview cocok dengan
       window asli
-- [ ] Belum dicoba di app sungguhan (`tauri dev`): drag dengan mouse, penyimpanan lewat restart
+- [x] Belum dicoba di app sungguhan (`tauri dev`): drag dengan mouse, penyimpanan lewat restart — **sudah diuji manual oleh maintainer di app sungguhan (2026-10-06)**
 
 ### Fase 3.13e — Browse stiker (unduh dari katalog)
 Ditambahkan atas permintaan maintainer: tombol **Browse** di halaman Decorations membuka katalog
@@ -744,7 +748,7 @@ tanpa merilis versi baru Rezure.
       keadaan unduh / gagal / offline / kosong, tab Downloaded kosong dan berisi. Menemukan dan
       memperbaiki tab "Downloaded" yang terpotong di kartu palet 16 rem
 - [x] **Dilawankan ke server produksi** (`api.redscale.my.id`): katalog berisi 3 stiker nyata, `ETag` kembali sebagai `304`, dan ketiganya (PNG) terunduh dan lolos verifikasi checksum, format, dan ukuran
-- [ ] Belum dicoba di app sungguhan (`tauri dev`): alur Browse, Download, tempel, restart, Remove
+- [x] Belum dicoba di app sungguhan (`tauri dev`): alur Browse, Download, tempel, restart, Remove — **sudah diuji manual oleh maintainer di app sungguhan (2026-10-06)**
 - [ ] Belum dibuat: pagination katalog (satu respons cukup sampai ratusan stiker); pembaruan massal
       stiker yang gambarnya diganti (sekarang tombol **Update** per stiker)
 
@@ -769,7 +773,7 @@ cache tampilan pertama.
 - [x] Slider memakai warna aksen (`accent-color` untuk `input[type=range]`)
 - [x] Unit test: nilai di luar rentang dibatasi. Dirender lewat build + headless Chrome dengan backend
       tiruan
-- [ ] Belum dicoba di app sungguhan: zoom webview (termasuk izinnya) dan bertahan setelah restart
+- [x] Belum dicoba di app sungguhan: zoom webview (termasuk izinnya) dan bertahan setelah restart — **sudah diuji manual oleh maintainer di app sungguhan (2026-10-06)**
 - [ ] Masih ditunda: override warna aksen dari palet pilihan
 
 ### Di luar v3
@@ -1243,7 +1247,7 @@ untuk semua orang. Mirip Preferences → Services & Ports di Laragon.
       dengan dua kelompok (On the Services page / Not added), plus empty state kalau semua di-remove
 - [x] Test: penyaringan, PHP ter-pool ikut PHP, service jalan tetap tampil, id yang tidak ada atau
       id pool ditolak, round-trip `hiddenServices` di settings
-- [ ] Belum dicoba diklik di jendela app sungguhan
+- [x] Belum dicoba diklik di jendela app sungguhan — **sudah diuji manual oleh maintainer di app sungguhan (2026-10-06)**
 
 ### Di luar fase ini
 - Halaman Switch, Databases (koneksi LocalDB bawaan), dan Logs **tidak** ikut disaring. Yang
