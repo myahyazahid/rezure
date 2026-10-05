@@ -119,6 +119,7 @@ pub fn run() {
                 commands::db_profiles::switch_db_profile,
                 commands::connections::list_db_connections,
                 commands::connections::test_db_connection,
+                commands::connections::detect_sqlserver_instances,
                 commands::connections::add_db_connection,
                 commands::connections::remove_db_connection,
                 commands::connections::set_db_connection_password,

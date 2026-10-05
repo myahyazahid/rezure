@@ -1532,7 +1532,11 @@ mod tests {
 
         let expected = format!("--plugin-dir={}", plugins.display());
         assert!(conn.args().contains(&expected), "{:?}", conn.args());
-        assert!(conn.dump_args().contains(&expected), "{:?}", conn.dump_args());
+        assert!(
+            conn.dump_args().contains(&expected),
+            "{:?}",
+            conn.dump_args()
+        );
 
         // MySQL's client has the plugin built in; a folder it doesn't need
         // is never passed.

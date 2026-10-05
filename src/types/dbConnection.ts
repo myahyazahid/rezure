@@ -61,6 +61,21 @@ export interface DbConnectionStatus extends DbConnection {
   hasPassword: boolean
 }
 
+/** A SQL Server instance already installed on this machine, offered by the
+ *  Add connection form. */
+export interface DetectedSqlServer {
+  /** A suggested name for the connection. */
+  name: string
+  /** What goes in the Host box. The port is left empty: locally an instance
+   *  is reached by name, and its port may be assigned dynamically. */
+  host: string
+  /** `service` is an installed edition (Express, Developer…); `localdb` is a
+   *  LocalDB instance. */
+  source: 'service' | 'localdb'
+  /** `null` when the state couldn't be read — not the same as stopped. */
+  running: boolean | null
+}
+
 /** What selecting a target left the page looking at. */
 export interface TargetResult {
   connections: DbConnectionStatus[]

@@ -241,6 +241,19 @@ Add it as a connection (Add connection → Server type: SQL Server). Sign in wit
 login, or with your Windows account for a server on your office domain. For a named instance
 (`host\SQLEXPRESS`) leave the port empty.
 
+**Instances already on this machine are found for you.** Choosing SQL Server in the form lists
+what's installed here under **Found on this computer** — Express, Developer and other editions
+that run as a Windows service, and LocalDB instances other than Rezure's own. Click one and the
+form fills in the host, Windows account sign-in, and (for an installed edition, which has a
+self-signed certificate) **Trust server certificate**. Nothing is saved until you test it and
+press Save, and an instance you've already added isn't offered again. The scan is read-only: it
+never starts a service or creates an instance
+([`services/mssql_discovery.rs`](../../src-tauri/src/services/mssql_discovery.rs)).
+
+Unlike the MariaDB scan for Laragon and XAMPP, this offers a *connection*, not a data
+directory: a SQL Server install is a Windows service Rezure doesn't run, so there's no folder for
+it to adopt.
+
 Export and `.bak` restore aren't offered for these: `BACKUP` and `RESTORE` read and write the
 **server's** disk, not this machine's. Listing, creating, dropping (when the connection isn't
 read-only) and running `.sql` scripts work.

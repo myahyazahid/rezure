@@ -89,6 +89,20 @@ pub fn needs_no_password(connection: &Connection) -> bool {
     }
 }
 
+/// The `host` of every saved SQL Server connection that is reached directly.
+///
+/// For `mssql_discovery`, to stop offering an instance that's already there.
+/// Tunnelled connections are left out: their host is the address *on the SSH
+/// server* (nearly always `127.0.0.1`), which says nothing about this machine.
+pub fn saved_sqlserver_hosts() -> Vec<String> {
+    store()
+        .connections
+        .iter()
+        .filter(|c| c.kind == ServerKind::Sqlserver && c.ssh.is_none())
+        .map(|c| c.host.clone())
+        .collect()
+}
+
 pub fn list() -> Vec<ConnectionStatus> {
     let store = store();
     let active_id = store.active_id.clone();

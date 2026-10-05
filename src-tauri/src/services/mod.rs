@@ -22,6 +22,7 @@ pub mod localdb_bridge;
 pub mod mariadb_catalog;
 pub mod msi;
 pub mod mssql;
+pub mod mssql_discovery;
 pub mod mssql_localdb;
 pub mod node;
 pub mod node_catalog;

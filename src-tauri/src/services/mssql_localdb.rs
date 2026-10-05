@@ -148,6 +148,50 @@ fn parse_versions(stdout: &str) -> String {
         .unwrap_or_default()
 }
 
+/// An instance of LocalDB that isn't Rezure's own — typically
+/// `MSSQLLocalDB`, the one Visual Studio and most tutorials use.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OtherInstance {
+    pub name: String,
+    pub running: bool,
+}
+
+/// The instance names `SqlLocalDB info` prints, one per line.
+fn parse_instance_names(stdout: &str) -> Vec<String> {
+    stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Every LocalDB instance except [`INSTANCE`], with whether it's running.
+///
+/// Read-only: nothing is created or started. `SqlLocalDB info` lists the
+/// automatic `MSSQLLocalDB` even before anything has created it — LocalDB
+/// makes it by itself on the first connection — and `info <name>` then says
+/// it "is not created", which here reads as stopped rather than as missing:
+/// it's still a perfectly good address to connect to.
+pub fn other_instances() -> Vec<OtherInstance> {
+    let Some(exe) = locate() else {
+        return Vec::new();
+    };
+    let Ok(listing) = sqllocaldb(&exe, &["info"]) else {
+        return Vec::new();
+    };
+    parse_instance_names(&listing)
+        .into_iter()
+        .filter(|name| !name.eq_ignore_ascii_case(INSTANCE))
+        .map(|name| {
+            let running = sqllocaldb(&exe, &["info", &name])
+                .map(|stdout| parse_info(&stdout).running)
+                .unwrap_or(false);
+            OtherInstance { name, running }
+        })
+        .collect()
+}
+
 /// The sentence `SqlLocalDB.exe` opens every failure with.
 const FAILURE_MARKER: &str = "failed because of the following error";
 
@@ -384,6 +428,26 @@ mod tests {
     /// an instance nobody created yet.
     const MISSING: &str = "Printing of LocalDB instance \"Rezure\" information failed because \
         of the following error:\r\n\r\nLocalDB instance \"Rezure\" doesn't exist! \r\n";
+
+    /// `SqlLocalDB info` with no name: one instance per line, including the
+    /// automatic one before anything has created it.
+    #[test]
+    fn the_instance_listing_is_one_name_per_line() {
+        assert_eq!(
+            parse_instance_names("MSSQLLocalDB\r\nRezure\r\n\r\n"),
+            vec!["MSSQLLocalDB", "Rezure"]
+        );
+        assert!(parse_instance_names("").is_empty());
+    }
+
+    /// Exactly what `SqlLocalDB info MSSQLLocalDB` prints on a machine where
+    /// nothing has connected to it yet: not a record, and not a failure.
+    #[test]
+    fn an_automatic_instance_nobody_has_created_reads_as_stopped() {
+        let info = parse_info("The automatic instance \"MSSQLLocalDB\" is not created.\r\n");
+        assert!(!info.exists);
+        assert!(!info.running);
+    }
 
     #[test]
     fn a_running_instance_is_read_from_its_info_record() {
