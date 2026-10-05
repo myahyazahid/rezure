@@ -90,6 +90,45 @@ pub fn is_installed() -> bool {
     locate().is_some()
 }
 
+/// The marketing release for an internal major version (`16` → `2022`).
+pub fn release_for_major(major: &str) -> Option<&'static str> {
+    Some(match major {
+        "17" => "2025",
+        "16" => "2022",
+        "15" => "2019",
+        "14" => "2017",
+        "13" => "2016",
+        "12" => "2014",
+        "11" => "2012",
+        "10_50" => "2008 R2",
+        "10" => "2008",
+        _ => return None,
+    })
+}
+
+/// `SQL Server 2022 LocalDB` for the LocalDB that's installed — what
+/// `services::telemetry` reports as the SQL Server in use. `None` when LocalDB
+/// isn't installed.
+///
+/// Read from the folder the install went to rather than asked of the
+/// instance: it's the same answer at the granularity a stack chart wants, and
+/// it costs no process spawn on a path that runs for every service start.
+pub fn release_label() -> Option<String> {
+    release_label_of(&locate()?)
+}
+
+/// `…\Microsoft SQL Server\160\Tools\Binn\SqlLocalDB.exe` → the `160`, which
+/// is the major version times ten.
+fn release_label_of(exe: &Path) -> Option<String> {
+    let folder = exe.ancestors().nth(3)?.file_name()?.to_str()?;
+    let major = (folder.parse::<u32>().ok()? / 10).to_string();
+    Some(match release_for_major(&major) {
+        Some(release) => format!("SQL Server {release} LocalDB"),
+        // A release newer than this knows: still worth reporting, as a number.
+        None => format!("SQL Server LocalDB {major}"),
+    })
+}
+
 /// `C:\rezure\data\mssql` — where the databases Rezure creates or restores
 /// keep their `.mdf`/`.ldf` files.
 ///
@@ -428,6 +467,21 @@ mod tests {
     /// an instance nobody created yet.
     const MISSING: &str = "Printing of LocalDB instance \"Rezure\" information failed because \
         of the following error:\r\n\r\nLocalDB instance \"Rezure\" doesn't exist! \r\n";
+
+    #[test]
+    fn the_release_is_read_from_the_install_folder() {
+        let label = |version: &str| {
+            release_label_of(Path::new(&format!(
+                r"C:\Program Files\Microsoft SQL Server\{version}\Tools\Binn\SqlLocalDB.exe"
+            )))
+        };
+        assert_eq!(label("160").as_deref(), Some("SQL Server 2022 LocalDB"));
+        assert_eq!(label("150").as_deref(), Some("SQL Server 2019 LocalDB"));
+        // Not a release this knows yet: reported as its number, not dropped.
+        assert_eq!(label("990").as_deref(), Some("SQL Server LocalDB 99"));
+        // Not a version folder at all.
+        assert_eq!(label("Shared"), None);
+    }
 
     /// `SqlLocalDB info` with no name: one instance per line, including the
     /// automatic one before anything has created it.

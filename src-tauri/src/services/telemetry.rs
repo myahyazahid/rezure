@@ -21,7 +21,7 @@ use crate::config::settings::SettingsState;
 use crate::db;
 use crate::db::DbState;
 use crate::services::db_engine::Engine;
-use crate::services::{db_profiles, php, ServiceInfo};
+use crate::services::{db_profiles, mssql_localdb, php, postgres, ServiceInfo};
 use crate::utils::error::AppError;
 
 /// Rows older than this (once sent) are dropped on each send cycle — a
@@ -222,29 +222,54 @@ fn error_context(action: &str, service_id: &str) -> Value {
     json!({ "action": action, "service": service_id })
 }
 
-/// The PHP and database versions in use when `started` came up — what a
-/// `service.start` event carries so the dashboard can chart which stacks
-/// people run. A PHP service reports its own version (a project's pinned
-/// one, say); anything else reports the active PHP.
+/// The versions in use when `started` came up — what a `service.start` event
+/// carries so the dashboard can chart which stacks people run. A PHP service
+/// reports its own version (a project's pinned one, say); anything else
+/// reports the active PHP.
+///
+/// Every database Rezure can run is reported when it's installed, not only
+/// the one being started: starting Nginx says which stack it starts *in*.
 pub fn stack_context(started: &ServiceInfo) -> Option<Value> {
     let php_version = if started.id.starts_with("php") && !started.version.is_empty() {
         started.version.clone()
     } else {
         php::active_id()
     };
-    let database = db_profiles::active().map(|profile| (profile.engine, profile.version));
-    stack_payload(&php_version, database)
+    stack_payload(&StackVersions {
+        php: php_version,
+        database: db_profiles::active().map(|profile| (profile.engine, profile.version)),
+        postgres: postgres::active_id(),
+        sqlserver: mssql_localdb::release_label(),
+    })
 }
 
-/// Versions only, in the shape `laravel-api`'s top-stack-combos chart reads:
-/// `php_version` bare, the database under its engine's key with the engine
-/// named in the value (`"MariaDB 11.8.9"`). `None` when neither is known.
-fn stack_payload(php_version: &str, database: Option<(Engine, String)>) -> Option<Value> {
+/// What [`stack_payload`] reports. An empty or absent field means "not
+/// installed", and its key is left out.
+#[derive(Debug, Default)]
+struct StackVersions {
+    php: String,
+    /// The MySQL-family server of the active database profile.
+    database: Option<(Engine, String)>,
+    /// The active PostgreSQL version, bare (`17.2`).
+    postgres: String,
+    /// Already worded for the dashboard (`SQL Server 2022 LocalDB`).
+    sqlserver: Option<String>,
+}
+
+/// Versions only, in the shape `laravel-api` reads: `php_version` bare, and
+/// each database under its own key with the engine named in the value
+/// (`"MariaDB 11.8.9"`, `"PostgreSQL 17.2"`). `None` when nothing is known.
+///
+/// The dashboard's top-stack-combos chart reads `php_version` and
+/// `mysql_version`/`mariadb_version`; the other keys are stored with the event
+/// and ignored by it until the dashboard learns them (the API accepts any
+/// `payload` object).
+fn stack_payload(stack: &StackVersions) -> Option<Value> {
     let mut payload = serde_json::Map::new();
-    if !php_version.is_empty() {
-        payload.insert("php_version".to_string(), json!(php_version));
+    if !stack.php.is_empty() {
+        payload.insert("php_version".to_string(), json!(stack.php));
     }
-    if let Some((engine, version)) = database.filter(|(_, version)| !version.is_empty()) {
+    if let Some((engine, version)) = stack.database.as_ref().filter(|(_, v)| !v.is_empty()) {
         let key = match engine {
             Engine::MySql => "mysql_version",
             Engine::MariaDb => "mariadb_version",
@@ -253,6 +278,15 @@ fn stack_payload(php_version: &str, database: Option<(Engine, String)>) -> Optio
             key.to_string(),
             json!(format!("{} {version}", engine.label())),
         );
+    }
+    if !stack.postgres.is_empty() {
+        payload.insert(
+            "postgres_version".to_string(),
+            json!(format!("PostgreSQL {}", stack.postgres)),
+        );
+    }
+    if let Some(sqlserver) = stack.sqlserver.as_ref().filter(|v| !v.is_empty()) {
+        payload.insert("sqlserver_version".to_string(), json!(sqlserver));
     }
     (!payload.is_empty()).then_some(Value::Object(payload))
 }
@@ -442,14 +476,27 @@ mod tests {
         );
     }
 
+    fn stack(php: &str) -> StackVersions {
+        StackVersions {
+            php: php.to_string(),
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn stack_payload_names_the_database_engine_the_way_the_dashboard_reads_it() {
         assert_eq!(
-            stack_payload("8.3.33", Some((Engine::MariaDb, "11.8.9".to_string()))),
+            stack_payload(&StackVersions {
+                database: Some((Engine::MariaDb, "11.8.9".to_string())),
+                ..stack("8.3.33")
+            }),
             Some(json!({ "php_version": "8.3.33", "mariadb_version": "MariaDB 11.8.9" }))
         );
         assert_eq!(
-            stack_payload("8.2.30", Some((Engine::MySql, "8.4.2".to_string()))),
+            stack_payload(&StackVersions {
+                database: Some((Engine::MySql, "8.4.2".to_string())),
+                ..stack("8.2.30")
+            }),
             Some(json!({ "php_version": "8.2.30", "mysql_version": "MySQL 8.4.2" }))
         );
     }
@@ -457,13 +504,74 @@ mod tests {
     #[test]
     fn stack_payload_leaves_out_what_isnt_installed() {
         assert_eq!(
-            stack_payload("8.3.33", None),
+            stack_payload(&stack("8.3.33")),
             Some(json!({ "php_version": "8.3.33" }))
         );
         assert_eq!(
-            stack_payload("", Some((Engine::MariaDb, String::new()))),
+            stack_payload(&StackVersions {
+                database: Some((Engine::MariaDb, String::new())),
+                ..stack("")
+            }),
             None
         );
+        assert_eq!(stack_payload(&StackVersions::default()), None);
+    }
+
+    /// Alongside the existing keys, not instead of them: the dashboard's
+    /// combos chart still finds `php_version` and `mariadb_version` exactly
+    /// where it always did.
+    #[test]
+    fn postgres_and_sql_server_are_reported_beside_the_existing_keys() {
+        assert_eq!(
+            stack_payload(&StackVersions {
+                database: Some((Engine::MariaDb, "11.8.9".to_string())),
+                postgres: "17.2".to_string(),
+                sqlserver: Some("SQL Server 2022 LocalDB".to_string()),
+                ..stack("8.3.33")
+            }),
+            Some(json!({
+                "php_version": "8.3.33",
+                "mariadb_version": "MariaDB 11.8.9",
+                "postgres_version": "PostgreSQL 17.2",
+                "sqlserver_version": "SQL Server 2022 LocalDB",
+            }))
+        );
+    }
+
+    /// A machine with only PostgreSQL still reports it — the dashboard just
+    /// has no database key it knows how to chart for it yet.
+    #[test]
+    fn postgres_alone_is_still_reported() {
+        assert_eq!(
+            stack_payload(&StackVersions {
+                postgres: "18.1".to_string(),
+                ..stack("8.3.33")
+            }),
+            Some(json!({ "php_version": "8.3.33", "postgres_version": "PostgreSQL 18.1" }))
+        );
+        // Nothing installed means no key, not an empty one.
+        assert_eq!(
+            stack_payload(&StackVersions {
+                sqlserver: Some(String::new()),
+                ..stack("8.3.33")
+            }),
+            Some(json!({ "php_version": "8.3.33" }))
+        );
+    }
+
+    /// Prints the stack this machine would report. Run with
+    /// `cargo test --lib prints_this_machines_stack -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "reads this machine's installed runtimes"]
+    fn prints_this_machines_stack() {
+        let stack = StackVersions {
+            php: php::active_id(),
+            database: db_profiles::active().map(|p| (p.engine, p.version)),
+            postgres: postgres::active_id(),
+            sqlserver: mssql_localdb::release_label(),
+        };
+        println!("{stack:?}");
+        println!("{:#}", stack_payload(&stack).unwrap_or(Value::Null));
     }
 
     #[test]

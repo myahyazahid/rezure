@@ -75,6 +75,31 @@ When it's there, it's one of:
   `mysql_version` / `"MySQL 8.4.2"` when the active database profile is MySQL. A PHP
   service reports its own version (a project's pinned one), anything else the active PHP.
   Keys for what isn't installed are left out (`services::telemetry::stack_context`).
+
+  Two more keys appear when the runtime is installed, on **every** `service.start` — the
+  same way the MariaDB/MySQL key does, so starting Nginx reports the stack it starts in, not
+  only the database being started:
+
+  | Key | Value | Example |
+  |---|---|---|
+  | `postgres_version` | `"PostgreSQL "` + the active PostgreSQL version | `"PostgreSQL 18.6"` |
+  | `sqlserver_version` | the installed SQL Server LocalDB's release, worded by Rezure | `"SQL Server 2022 LocalDB"` |
+
+  `sqlserver_version` is a release (2022), not a build number: it's read from the folder
+  LocalDB installed to (`…\Microsoft SQL Server\160\Tools\Binn` → 16 → 2022), which costs no
+  process spawn on a path that runs for every start. A release newer than the client knows is
+  sent as `"SQL Server LocalDB 18"` rather than dropped. Only LocalDB is reported — a SQL
+  Server Express/Developer install Rezure merely connects to isn't something it runs.
+
+  Full example, all four runtimes present:
+  `{ "php_version": "8.3.33", "mariadb_version": "MariaDB 11.2.2", "postgres_version": "PostgreSQL 18.6", "sqlserver_version": "SQL Server 2022 LocalDB" }`.
+
+  **Backend compatibility** (checked against `laravel-api`): `EventRequest` validates
+  `payload` only as `nullable|array`, `EventController` forwards `$request->validated()`, and
+  the `events.payload` column is `json` — so unknown keys are accepted and stored, never a
+  `422`. The dashboard's top-stack-combos chart and a device's "current stack" read only
+  `php_version` and `mysql_version`/`mariadb_version`, so the two new keys are stored but not
+  yet charted. Showing them (a PostgreSQL combo, say) is a change in `laravel-api`, not here.
 - **`error.report`**: what was being done to which service:
   `{ "action": "service.start | service.stop | service.restart | service.run", "service": "php-8.0.30" }`
   (`service.run` is a crash). `event_name` is `AppError::code()`, the variant's name,

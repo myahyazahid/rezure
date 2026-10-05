@@ -167,22 +167,6 @@ fn host_for(instance: &str) -> String {
     }
 }
 
-/// The marketing release for an internal major version (`16` → `2022`).
-fn release_for_major(major: &str) -> Option<&'static str> {
-    Some(match major {
-        "17" => "2025",
-        "16" => "2022",
-        "15" => "2019",
-        "14" => "2017",
-        "13" => "2016",
-        "12" => "2014",
-        "11" => "2012",
-        "10_50" => "2008 R2",
-        "10" => "2008",
-        _ => return None,
-    })
-}
-
 /// `SQL Server 2022 (SQLEXPRESS)`, from the instance and its id
 /// (`MSSQL16.SQLEXPRESS`). The release is left out when it isn't one this
 /// knows, rather than guessed.
@@ -190,7 +174,7 @@ fn display_name(instance: &str, id: &str) -> String {
     let release = id
         .strip_prefix("MSSQL")
         .and_then(|rest| rest.split_once('.'))
-        .and_then(|(major, _)| release_for_major(major));
+        .and_then(|(major, _)| mssql_localdb::release_for_major(major));
     let base = match release {
         Some(release) => format!("SQL Server {release}"),
         None => "SQL Server".to_string(),

@@ -929,9 +929,13 @@ yang sudah dikerjakan.
 - [x] **LocalDB tidak butuh `TrustServerCertificate`**: ODBC Driver 18 konek dengan maupun tanpa
       itu (test `print_localdb_encryption_behaviour`). Connection bawaan LocalDB tidak menyalakannya,
       dan requirements check tidak menyarankannya untuk LocalDB
-- [ ] `services::telemetry::stack_context`: key versi SQL Server **belum dikerjakan**. Ini mengubah
-      kontrak telemetry, dan belum dicek apakah `laravel-api` menerima key `payload` yang belum
-      dikenal (lihat Dependency di bawah). Lebih aman ditunda daripada berisiko membuat event ditolak
+- [x] `services::telemetry::stack_context`: key `sqlserver_version` (`"SQL Server 2022 LocalDB"`),
+      dikirim di setiap `service.start` selama LocalDB terpasang, sama seperti key database
+      lainnya. Nilainya release (2022), bukan nomor build: dibaca dari nama folder instalasi
+      (`…\SQL Server\160\Tools\Binn` → 16 → 2022) lewat `mssql_localdb::release_label`, jadi tanpa
+      spawn proses di jalur yang jalan di setiap start. Release yang belum dikenal dikirim sebagai
+      `"SQL Server LocalDB 18"`, bukan dibuang. **Sudah dicek ke `laravel-api`**: key `payload`
+      yang belum dikenal diterima dan disimpan (lihat Dependency di bawah)
 - [x] `scripts/uninstall-clean.ps1`: langkah 1b menghentikan dan menghapus instance `Rezure`, dan
       langkah 6 melaporkan bahwa ODBC Driver dan LocalDB tetap terpasang. Dry run sudah dicoba
 
@@ -983,8 +987,8 @@ yang sudah dikerjakan.
 dipakai project PHP/Node) dan bisa dibaca dari halaman Databases. Tidak ada di roadmap awal,
 **ditambahkan atas permintaan maintainer**, dikerjakan setelah Fase 3.14.
 
-**Status: dikerjakan** (3.15a–d). Sisa: key telemetry (lihat 3.15b) dan klik manual beberapa alur
-UI di app sungguhan (lihat Verifikasi).
+**Status: dikerjakan** (3.15a–d). Sisa: klik manual beberapa alur UI di app sungguhan (lihat
+Verifikasi). Key telemetry `postgres_version` sudah dikirim (lihat 3.15b).
 
 ### Keputusan yang sudah diambil
 - **Dikerjakan setelah SQL Server**, diputuskan maintainer
@@ -1045,10 +1049,10 @@ UI di app sungguhan (lihat Verifikasi).
       menyalakannya di versi baru
 - [x] Port conflict 5432 (pola yang sama), log viewer (`LOG_SERVICES`), `restarts_on_crash` tetap
       `false` seperti MariaDB, notifikasi crash bernama "PostgreSQL"
-- [ ] `services::telemetry::stack_context`: key `postgres_version`. **Sengaja belum**, sama seperti
-      versi SQL Server: perubahan kontrak payload yang menunggu pengecekan `laravel-api` (lihat
-      Dependency di bawah). Untuk sekarang `service.start` PostgreSQL membawa versi PHP dan MariaDB
-      seperti service lain
+- [x] `services::telemetry::stack_context`: key `postgres_version` (`"PostgreSQL 18.6"`, versi
+      aktif dari `postgres::active_id`), dikirim di setiap `service.start` selama ada versi
+      PostgreSQL terpasang, bukan hanya saat PostgreSQL yang di-start, sama seperti key MariaDB.
+      Bersebelahan dengan `php_version` dan `mariadb_version`, tidak menggantikannya
 - [x] `scripts/uninstall-clean.ps1`: `postgres` ikut dihentikan, **hanya yang berjalan dari folder
       Rezure**. PostgreSQL yang dipasang dengan installer biasa berjalan sebagai Windows service
       dengan nama proses yang sama, dan bukan milik Rezure
@@ -1179,11 +1183,18 @@ untuk semua orang. Mirip Preferences → Services & Ports di Laragon.
 
 Fase 3.4: `GET /api/v1/version/latest` di `laravel-api` **sudah** mengembalikan manifest bertanda tangan sesuai [`docs/version-contract.md`](../version-contract.md) (`VersionController`, kolom `signature`/`download_url` di `releases`). Yang masih tersisa cuma verifikasi end-to-end lawan rilis nyata — repo ini belum punya pipeline yang build+sign installer, jadi belum ada rilis sungguhan buat diuji; sementara kode sisi app sudah bisa diuji lokal lawan manifest tiruan (prosedur ada di doc kontrak itu). Fase 3.1, 3.5, 3.6, 3.10, 3.11, dan 3.13 sepenuhnya independen, tidak bergantung pada backend.
 
-Fase 3.14 dan 3.15 juga tidak bergantung pada backend, kecuali key telemetry baru di payload
-`service.start` (`postgres_version`, dan versi SQL Server untuk LocalDB — keduanya sengaja
-belum dikirim, lihat task terbuka di 3.14c dan 3.15b). `docs/telemetry-contract.md`
-harus diperbarui, dan perlu dicek apakah `laravel-api` menerima key `payload` yang belum dikenal
-serta apakah grafik "top stack combos" di dashboard ikut menampilkannya.
+Fase 3.14 dan 3.15 menambah dua key di payload `service.start`: `postgres_version` dan
+`sqlserver_version` (lihat 3.14c dan 3.15b; kontraknya di `docs/telemetry-contract.md`). Sudah
+dicek ke kode `laravel-api`:
+
+- **Diterima, tidak ditolak.** `EventRequest` memvalidasi `payload` hanya sebagai `nullable|array`,
+  `EventController` meneruskan `$request->validated()` (isi `payload` utuh), dan kolom
+  `events.payload` bertipe `json`. Key yang belum dikenal tidak pernah memicu `422`.
+- **Disimpan, belum ditampilkan.** `DashboardMetricsService::topStackCombos` dan
+  `deviceLatestStack` hanya membaca `php_version` dan `mysql_version`/`mariadb_version`, jadi grafik
+  "top combo stack" tidak berubah. Menampilkan kombinasi PHP + PostgreSQL atau SQL Server adalah
+  perubahan di `laravel-api`, bukan di app ini. Pengguna yang hanya punya PostgreSQL (tanpa profil
+  MariaDB aktif) juga belum muncul di grafik itu karena tidak punya key yang dibaca.
 
 **Catatan soal analytics lanjutan (v3 `rezure-dashboard`):** fitur traffic by hour, breakdown negara, cohort retention, dll di dashboard **tidak membutuhkan perubahan apapun di app ini** — semua data granular yang dibutuhkan (timestamp, OS version, metadata service) sudah terkirim sejak fondasi telemetry v2. Geolocation negara diproses di sisi server dari IP request yang masuk, bukan dikirim dari client.
 
@@ -1199,10 +1210,10 @@ serta apakah grafik "top stack combos" di dashboard ikut menampilkannya.
 6. Fase 3.13 (Appearance) — 3.13a dan 3.13b sudah dikerjakan di branch `glassmorph` (bersama
    redesain glassmorphism, karena 3.13a menyentuh file yang sama). Sisa verifikasi manual ada di
    daftar task 3.13b. 3.13c ditunda
-7. Fase 3.14 (SQL Server): 3.14a → 3.14b → 3.14c — **dikerjakan**. Sisa: key telemetry
-   (menunggu pengecekan `laravel-api`) dan pengujian manual di jendela app sungguhan
-8. Fase 3.15 (PostgreSQL): 3.15a → 3.15b → 3.15c → 3.15d — **dikerjakan**. Sisa: key telemetry
-   (bersama SQL Server) dan pengujian manual beberapa alur UI
+7. Fase 3.14 (SQL Server): 3.14a → 3.14b → 3.14c — **dikerjakan**, termasuk key telemetry
+   `sqlserver_version`. Sisa: pengujian manual di jendela app sungguhan
+8. Fase 3.15 (PostgreSQL): 3.15a → 3.15b → 3.15c → 3.15d — **dikerjakan**, termasuk key telemetry
+   `postgres_version`. Sisa: pengujian manual beberapa alur UI
 9. Fase 3.16 (Manage Services) — **dikerjakan** sebelum 3.15, karena kecil dan langsung
    dibutuhkan begitu kartu LocalDB muncul untuk semua user. Kartu PostgreSQL ikut otomatis
 
