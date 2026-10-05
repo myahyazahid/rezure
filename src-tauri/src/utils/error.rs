@@ -109,6 +109,12 @@ pub enum AppError {
     #[error("couldn't share this project: {0}")]
     ShareFailed(String),
 
+    /// Browsing, downloading or removing a sticker. The reason is written for
+    /// the person reading it ("that file isn't the sticker the catalog
+    /// listed"), not copied from a transport error.
+    #[error("{0}")]
+    StickerFailed(String),
+
     #[error("can't reach {host}:{port} — {reason}")]
     ServerUnreachable {
         host: String,
@@ -280,6 +286,7 @@ impl AppError {
             Self::TunnelFailed { .. } => "TunnelFailed",
             Self::ExportCancelled { .. } => "ExportCancelled",
             Self::ShareFailed { .. } => "ShareFailed",
+            Self::StickerFailed { .. } => "StickerFailed",
             Self::ServerUnreachable { .. } => "ServerUnreachable",
             Self::UnknownDbClient { .. } => "UnknownDbClient",
             Self::Settings { .. } => "Settings",

@@ -119,6 +119,7 @@ pub fn run() {
                 commands::db_profiles::switch_db_profile,
                 commands::connections::list_db_connections,
                 commands::connections::test_db_connection,
+                commands::connections::detect_sqlserver_instances,
                 commands::connections::add_db_connection,
                 commands::connections::remove_db_connection,
                 commands::connections::set_db_connection_password,
@@ -133,6 +134,10 @@ pub fn run() {
                 commands::changelog::mark_changelog_seen,
                 commands::donate::fetch_donate_config,
                 commands::donate::open_external_link,
+                commands::stickers::fetch_sticker_catalog,
+                commands::stickers::list_saved_stickers,
+                commands::stickers::download_sticker,
+                commands::stickers::remove_saved_sticker,
             ])
             .setup(|app| {
                 if cfg!(debug_assertions) {
@@ -460,6 +465,7 @@ pub fn run() {
                                     heartbeat_handle.package_info().version.to_string();
                                 let os = sysinfo::System::long_os_version();
                                 let os_version = sysinfo::System::os_version();
+                                let device_name = services::telemetry::device_name();
                                 let db = heartbeat_handle.state::<db::DbState>();
                                 let conn = db.0.lock().unwrap();
                                 if let Err(err) =
@@ -471,6 +477,7 @@ pub fn run() {
                                         &app_version,
                                         os.as_deref(),
                                         os_version.as_deref(),
+                                        device_name.as_deref(),
                                         None,
                                     )
                                 {
@@ -534,6 +541,7 @@ pub fn run() {
                         &device.0,
                         &session.0,
                         &app_version,
+                        None,
                         None,
                         None,
                         Some(&ended_at),

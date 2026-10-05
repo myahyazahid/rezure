@@ -6,7 +6,7 @@ import { useBinariesStore } from '@/stores/binaries'
 import { usePostgresStore } from '@/stores/postgres'
 import { ENGINE_LABEL } from '@/types/dbProfile'
 import type { DbEngine } from '@/types/dbProfile'
-import type { ServerKind, TlsMode } from '@/types/dbConnection'
+import type { DetectedSqlServer, ServerKind, TlsMode } from '@/types/dbConnection'
 import LicenseConsentModal from '@/components/common/LicenseConsentModal.vue'
 import { useLicensedInstall } from '@/composables/useLicensedInstall'
 
@@ -84,6 +84,35 @@ watch(
   },
 )
 
+/** Looks for SQL Server instances already on this machine the first time the
+ *  form shows SQL Server — once per opening, not on every switch of kind. */
+let scanned = false
+watch(
+  () => draft.kind,
+  (kind) => {
+    if (kind !== 'sqlserver' || scanned) return
+    scanned = true
+    store.scanSqlServers()
+  },
+)
+
+/** Fills the form from an instance the scan found. Nothing is saved: the
+ *  connection still has to pass a test, like any other. */
+function useDetected(found: DetectedSqlServer) {
+  draft.name = found.name
+  draft.host = found.host
+  // Reached by name: an instance on this machine may have a dynamic port, and
+  // the ODBC driver finds it without one.
+  draft.port = ''
+  // The Windows account running Rezure is nearly always a sysadmin on its own
+  // machine's instance, and there's no password to ask for.
+  draft.windowsAuth = true
+  // An installed edition ships a self-signed certificate that ODBC Driver 18
+  // refuses; LocalDB talks over a named pipe and has none to complain about.
+  draft.trustServerCertificate = found.source === 'service'
+  draft.useSsh = false
+}
+
 const isSqlServer = computed(() => draft.kind === 'sqlserver')
 /** No user or password to ask for: the Windows account signs in. */
 const usesWindowsAuth = computed(() => isSqlServer.value && draft.windowsAuth)
@@ -101,6 +130,8 @@ const isPostgres = computed(() => draft.kind === 'postgres')
 const psqlMissing = computed(() => isPostgres.value && postgresStore.versions.length === 0)
 
 onMounted(() => {
+  // Last opening's scan may list something that has been saved since.
+  store.detectedSqlServers = []
   if (binariesStore.binaries.length === 0) binariesStore.fetchAll()
   postgresStore.fetchVersions().catch(() => {})
 })
@@ -224,6 +255,42 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
         </button>
         <p v-if="licensed.error.value" class="mt-1 text-xs text-red-600 dark:text-red-400">
           {{ licensed.error.value }}
+        </p>
+      </div>
+
+      <div v-if="isSqlServer && store.detectedSqlServers.length > 0" class="mt-4">
+        <span :class="LABEL_CLASS">Found on this computer</span>
+        <div class="mt-1 flex flex-col gap-1.5">
+          <button
+            v-for="found in store.detectedSqlServers"
+            :key="found.host"
+            type="button"
+            class="flex items-center justify-between gap-3 rounded-xl px-3.5 py-2 text-left transition"
+            :class="
+              draft.host === found.host
+                ? 'glass-selected text-neutral-900 dark:text-neutral-50'
+                : 'glass-inset text-neutral-600 hover:bg-white/70 dark:text-neutral-300 dark:hover:bg-white/8'
+            "
+            :title="found.running === false ? 'Not running right now' : ''"
+            @click="useDetected(found)"
+          >
+            <span class="min-w-0">
+              <span class="block truncate text-sm font-semibold">{{ found.name }}</span>
+              <span class="block truncate font-mono text-xs text-neutral-500">
+                {{ found.host }}
+              </span>
+            </span>
+            <span
+              v-if="found.running !== null"
+              class="shrink-0 text-xs font-medium"
+              :class="found.running ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-500'"
+            >
+              {{ found.running ? 'Running' : 'Stopped' }}
+            </span>
+          </button>
+        </div>
+        <p class="mt-1.5 text-xs text-neutral-500">
+          Fills in the form below — you still test the connection before saving it.
         </p>
       </div>
 

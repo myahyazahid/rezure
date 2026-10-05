@@ -113,12 +113,24 @@ sudah dipakai di `PhpConfigCard.vue` dan `RuntimeSwitchRow.vue`.
 **Tujuan:** User yang mau mendukung pengembangan Rezure bisa donasi dengan mudah, lewat berbagai platform (lokal, global, dan crypto).
 
 ### Tasks
-- [x] Tambahkan menu "Support Developer" di sidebar (terpisah dari menu "Feedback" di Fase 2.1) — `/donate`, ikon hati, `AppSidebar.vue`
+- [x] Tambahkan menu "Support Developer" (kini bernama "Donate") di sidebar (terpisah dari menu "Feedback" di Fase 2.1) — `/donate`, ikon hati, `AppSidebar.vue`
 - [x] Section link donasi lokal: Trakteer / Saweria — tombol buka browser eksternal ke halaman donasi
 - [x] Section link donasi global: GitHub Sponsors / Ko-fi — tombol buka browser eksternal
 - [x] Section donasi crypto: tampilkan wallet address dengan tombol copy address dan QR code per wallet — QR digenerate client-side (`qrcode` package) dari address, gak pernah lewat layanan QR pihak ketiga
 - [x] Pesan singkat konteks beserta link ke halaman "About" — `AboutView.vue` baru (`/about`), isi masih placeholder generik, nunggu cerita project asli dari maintainer
 - [x] **Keputusan berubah dari sketsa awal roadmap**: link/alamat donasi **diambil dari API** (`GET /api/v1/support/donate`), bukan config statis di app — permintaan eksplisit user saat implementasi, memakai jalur pengecualian yang roadmap ini sendiri udah sediakan ("kecuali suatu saat ingin diubah dari server tanpa update app"). Pola fetch+cache+fallback sama persis kayak `services::changelog` (`services/donate.rs`). Endpoint-nya **sudah live** di `laravel-api` (`Api\V1\DonateController`) — spek lengkap di `api-documentation/telemetry-api.md` (`GET /support/donate`)
+- [x] **Menu diganti namanya dari "Support Developer" jadi "Donate"** (sidebar dan judul halaman; route tetap `/donate`)
+- [x] **QRIS (opsional)**: server menyimpan satu gambar QRIS yang diunggah maintainer dari dashboard dan mengirim deskripsinya (`qris { format, size, sha256, url }`) di respons donate. Klien menampilkannya sebagai kartu "QRIS" di tengah halaman Donate (`services::donate`):
+  - gambar diunduh terpisah ke `etc\donate_qris.<ext>` hanya kalau yang tersimpan bukan yang dimaksud (dibandingkan lewat `sha256`, bukan umur file), dengan alamat yang dibangun di klien (`url` dari server diabaikan), dibaca paling banyak sebesar `size` (maks 1 MB), dan harus cocok dengan `sha256` **dan** format yang diumumkan. Yang gagal diverifikasi tidak pernah ditampilkan atau disimpan
+  - ditampilkan apa adanya (tidak di-encode ulang, dipotong, atau diperbesar), karena QRIS harus tetap bisa dipindai
+- [x] **Halaman Donate tetap berisi saat endpoint mati atau error**: config dari `donate_cache.json` (sudah ada sebelumnya), gambar QRIS dari `etc\donate_qris.<ext>`. Halaman menandai `offline` ("Can't reach the server right now — showing what was saved last time"). Kalau QRIS di server sudah diganti tapi gambar barunya tidak bisa diunduh, **gambar lama tetap ditampilkan** dengan catatan bahwa mungkin sudah usang (`qrisStale`); kosong hanya kalau memang belum pernah ada yang tersimpan (`qrisUnavailable`)
+- [x] **Cache lama tidak boleh menahan QRIS**: cache config dari versi sebelum QRIS punya `Last-Modified` tetapi tanpa data QRIS, dan server akan membalas `304`, sehingga QRIS tidak akan pernah muncul. Cache diberi nomor versi (`CACHE_VERSION`); yang lebih lama tetap ditampilkan tetapi tidak dipakai untuk bertanya "ada yang baru?", jadi diambil penuh sekali lalu ditulis ulang
+- [x] Dicek lawan server produksi sungguhan: config terbaca, QRIS asli (JPG, 159.658 byte) terunduh dan lolos verifikasi checksum, dan tetap tampil dengan server dimatikan (tes `against_the_live_api`, `#[ignore]`). 18 tes unit untuk jalur sukses dan semua jalur gagal (server tiruan `utils::test_http`)
+- [x] **Logo di link dan wallet** (`icon` per entri, diunggah dari dashboard): diunduh per `id` entri dari `/support/donate/methods/{id}/icon` (alamat dibangun dari `id`, `icon.url` diabaikan), diverifikasi (checksum, format, ukuran maks 256 KB, SVG tanpa script). Format logo: SVG, PNG, **JPG**, atau WebP. JPG sempat tidak ikut karena klien mengikuti versi dokumen yang lebih lama, sehingga logo Ethereum JPG dibuang diam-diam; ketahuan lewat tes ke server produksi, disimpan di `etc\donate_icons\<id>.<ext>`, dan tampil di tombol link serta baris wallet. Logo yang gagal diunduh hanya menghilangkan logonya, link dan wallet tetap ada. Logo milik entri yang sudah dihapus dibersihkan, tetapi hanya saat server benar-benar menjawab. Logika gambar bersama QRIS dipindah ke `services::donate_images`
+- [x] **Jaringan (`network`) wallet crypto** ditampilkan di samping alamat, karena koin yang sama ada di beberapa jaringan dan dana yang dikirim ke jaringan yang salah biasanya hilang. `null` (wallet lama) berarti tidak ada chip
+- [x] **Bug yang ditemukan karena `network`: wallet dikenali lewat `symbol`.** Satu koin di dua jaringan (USDT di Tron dan Ethereum) berarti dua wallet dengan `symbol` sama; tampilan lama memakai `symbol` untuk kunci baris, QR code, dan status "Copied!", sehingga wallet pertama menampilkan QR alamat kedua. Sekarang semuanya dikunci dengan `id` wallet (cadangan: simbol + jaringan + alamat)
+- [x] `CACHE_VERSION` jadi 2 (1 = QRIS, 2 = logo dan jaringan). Cache yang lebih lama tetap ditampilkan, tapi tidak dipakai untuk `If-Modified-Since`
+- [x] **Tampilan wallet crypto**: dua kolom hanya di jendela lebar (`xl`, 1280 px ke atas), satu kolom di bawahnya; alamat tidak dipotong, tapi dipecah seimbang antar-baris (`text-balance`) agar tidak ada ekor pendek; Copy di kanan. **View QR** di bawah thumbnail membuka QR besar (288 px) dengan jaringan dan peringatan "kirim hanya lewat jaringan ini" (`WalletQrModal.vue`). QR dibuat di klien dari alamat, di atas latar putih apa pun temanya, dengan quiet zone supaya terbaca kamera
 
 ---
 
@@ -638,7 +650,8 @@ mana saja di window, dengan preview Rezure untuk memilih posisinya.
 - Stiker berupa 24 SVG buatan sendiri di `src/assets/stickers/`, dibagi dua kategori seperti tema.
   **Girls**: bow, heart, sparkle, star, sakura, cloud, strawberry, cat, butterfly, rainbow, crown,
   cherry. **Mens** (outline lebih gelap, warna lebih dingin): gamepad, rocket, bolt, flame, coffee,
-  terminal, football, headphones, shield, robot, planet, sunglasses. Tidak ada download dan tidak
+  terminal, football, headphones, shield, robot, planet, sunglasses. Dua puluh empat ini tetap
+  dibundel dan tidak butuh jaringan; stiker tambahan bisa diunduh lewat Browse (Fase 3.13e). Tidak
   ada aset pihak ketiga. Tepi putih ala stiker dan bayangan dibuat lewat class `.sticker` (filter
   `drop-shadow`) di `main.css`, bukan di SVG-nya, supaya tebalnya sama di semua ukuran
 - Posisi (`x`, `y`) dan ukuran disimpan dalam **persen dari window**, jadi satu rumus
@@ -650,9 +663,10 @@ mana saja di window, dengan preview Rezure untuk memilih posisinya.
   pointer-events-none`: di atas halaman, di bawah modal (`z-50`), dan tidak pernah menghalangi
   klik. Layer ini disembunyikan di halaman Decorations sendiri supaya tidak menutupi editor
 - Disimpan di `settings.json` sebagai `decorations { visible, stickers[] }`
-  (`config::stickers`). Jenis stiker berupa enum tertutup. Stiker yang tidak dikenal dibuang satu
-  per satu tanpa menghilangkan yang lain, nilai dibatasi ke rentangnya, dan jumlah maksimal 40.
-  Semua ini juga berlaku untuk data dari frontend (`update_settings`)
+  (`config::stickers`). Jenis stiker bawaan berupa enum tertutup (`StickerKind`); stiker unduhan
+  dirujuk lewat id yang divalidasi ketat (Fase 3.13e). Stiker yang tidak dikenal dibuang satu per
+  satu tanpa menghilangkan yang lain, nilai dibatasi ke rentangnya, dan jumlah maksimal 40. Semua
+  ini juga berlaku untuk data dari frontend (`update_settings`)
 
 **Tasks**
 - [x] `config::stickers`: `StickerKind`, `Sticker`, `Decorations::sanitized`, pembacaan lenient.
@@ -675,6 +689,64 @@ mana saja di window, dengan preview Rezure untuk memilih posisinya.
 - [x] Dicek lewat build + headless Chrome dengan backend tiruan: posisi di preview cocok dengan
       window asli
 - [ ] Belum dicoba di app sungguhan (`tauri dev`): drag dengan mouse, penyimpanan lewat restart
+
+### Fase 3.13e — Browse stiker (unduh dari katalog)
+Ditambahkan atas permintaan maintainer: tombol **Browse** di halaman Decorations membuka katalog
+stiker dari server (`api.redscale.my.id`). Stiker bisa diunduh, lalu muncul di palet (tab
+**Downloaded**) dan bisa ditempel seperti stiker bawaan. Maintainer menambah stiker dari dashboard
+tanpa merilis versi baru Rezure.
+
+**Cara kerja (ringkas)**
+- **Server** (`laravel-api`): tabel `stickers`; `GET /api/v1/stickers` (katalog, `ETag`) dan
+  `GET /api/v1/stickers/{id}/file` (gambarnya). Halaman admin `/dashboard/stickers` untuk upload,
+  ganti nama/kategori, sembunyikan, dan hapus. Kontrak lengkap di
+  `api-documentation/telemetry-api.md`. File ada di disk privat dan hanya dilayani lewat route itu,
+  dengan `nosniff` dan CSP `sandbox` (SVG yang dibuka langsung di browser tidak bisa menjalankan
+  apa pun). Route file punya limiter sendiri (300/menit per IP), karena halaman Browse memuat
+  pratinjau semuanya sekaligus dari `<img>` tanpa header device
+- **Katalog** (`services::sticker_catalog`): pola yang sama dengan `services::donate`: cache lokal
+  (`etc\stickers_catalog_cache.json`) dengan `ETag` yang dikirim balik sebagai `If-None-Match`;
+  `304` atau gagal apa pun jatuh ke cache dan ditandai `offline`. Tiap entri divalidasi sendiri:
+  yang rusak dibuang tanpa menggagalkan halaman. `url` dari server **diabaikan**; alamat file
+  dibangun dari id, jadi katalog tidak bisa mengarahkan unduhan ke host lain
+- **Unduhan** (`services::sticker_library`): dibaca paling banyak sebesar `size` di katalog (dan
+  tak pernah lebih dari 256 KB), harus cocok dengan `sha256` katalog **dan** benar-benar berformat
+  yang dijanjikan (PNG/WebP lewat signature, SVG tanpa `<script>`, `<foreignObject>`, event handler,
+  dst.). Gagal sekali = tidak disimpan sama sekali. Checksum dan ukuran diambil dari cache katalog di
+  Rust, bukan dari frontend. Disimpan di `<home>\stickers\<id>.<ext>` lewat file sementara lalu
+  rename; nama, kategori, dan checksum di `etc\stickers.json`. Maksimal 100 stiker unduhan
+- **Referensi di settings**: `Sticker.kind` kini `StickerArt` (`config::stickers`): `"bow"` untuk
+  bawaan (format lama tidak berubah) atau `"saved:<id>"` untuk unduhan. Id harus slug `[a-z0-9-]`
+  sampai 64 karakter, karena menjadi bagian nama file. Id yang tidak valid dibuang saat dibaca
+- **Frontend**: `stores/stickerLibrary.ts` (daftar unduhan + katalog), `StickerBrowseModal.vue`
+  (cari, filter kategori, Download / Update / Remove), tab **Downloaded** di palet. Gambar unduhan
+  dikirim sebagai data URL, jadi tidak butuh izin akses file. Stiker yang gambarnya hilang tidak
+  digambar, dan salinannya di window dibuang saat library dimuat
+
+**Tasks**
+- [x] `laravel-api`: migrasi + model + factory `Sticker`, `Api\V1\StickerController`
+      (`index`, `file`), `Dashboard\StickerController` (CRUD, hide/publish, pratinjau untuk draf),
+      `StickerRequest`, `App\Support\StickerFile` (format dari byte, bukan nama/MIME), limiter
+      `sticker-files`, menu Stickers di dashboard. 44 tes (Feature + Unit), Pint bersih
+- [x] Kontrak API ditulis di `api-documentation/telemetry-api.md` (dua endpoint, limiter, catatan
+      klien)
+- [x] `config::stickers::StickerArt` + `is_valid_sticker_id`; format settings lama tetap terbaca
+- [x] `services::sticker_catalog` dan `services::sticker_library`, `commands::stickers`
+      (`fetch_sticker_catalog`, `list_saved_stickers`, `download_sticker`, `remove_saved_sticker`).
+      31 tes Rust, termasuk server HTTP tiruan sungguhan (`utils::test_http`): ETag/304, galat,
+      unduhan terlalu besar (dengan dan tanpa `Content-Length`), checksum/format/SVG berbahaya,
+      batas jumlah, restart, id yang mencoba keluar folder
+- [x] **Dicek lawan `laravel-api` yang sungguhan** (database dan storage sementara): katalog,
+      `ETag` → `304`, tiga format (SVG, PNG, WebP) terunduh dan lolos verifikasi, stiker tersembunyi
+      `404`, limiter terpisah terlihat di header. Tes `against_the_real_laravel_api` (`#[ignore]`,
+      butuh `REZURE_TEST_API`) bisa diulang kapan saja
+- [x] UI dicek lewat headless Chrome dengan `invoke` tiruan: modal (terang, gelap, sempit),
+      keadaan unduh / gagal / offline / kosong, tab Downloaded kosong dan berisi. Menemukan dan
+      memperbaiki tab "Downloaded" yang terpotong di kartu palet 16 rem
+- [x] **Dilawankan ke server produksi** (`api.redscale.my.id`): katalog berisi 3 stiker nyata, `ETag` kembali sebagai `304`, dan ketiganya (PNG) terunduh dan lolos verifikasi checksum, format, dan ukuran
+- [ ] Belum dicoba di app sungguhan (`tauri dev`): alur Browse, Download, tempel, restart, Remove
+- [ ] Belum dibuat: pagination katalog (satu respons cukup sampai ratusan stiker); pembaruan massal
+      stiker yang gambarnya diganti (sekarang tombol **Update** per stiker)
 
 ### Fase 3.13c — Kustomisasi lanjutan (sebagian dikerjakan)
 Bagian "Adjustments" di halaman Appearance. Semua nilainya ikut `AppearanceSettings` di
@@ -899,6 +971,7 @@ yang sudah dikerjakan.
       maintainer. Sikapnya sama dengan `root` tanpa password di MariaDB Rezure: server dev lokal yang
       hanya terjangkau dari mesin ini. Dibutuhkan karena TablePlus tidak bisa Windows Auth. Terbukti
       login lewat jembatan maupun pipe
+- [x] **Scan SQL Server yang sudah terpasang** (`services::mssql_discovery`, command `detect_sqlserver_instances`): di form Add connection, memilih SQL Server menampilkan "Found on this computer", dan satu klik mengisi host, Windows auth, dan Trust server certificate. Sumbernya edisi terpasang (registry `Instance Names\SQL` + status service `MSSQL$<nama>`) dan instance LocalDB selain milik Rezure (`SqlLocalDB info`). Hanya membaca: tidak menjalankan service, tidak membuat instance, dan instance yang sudah tersimpan tidak ditawarkan lagi. Yang ditawarkan adalah *koneksi*, bukan folder data seperti scan Laragon/XAMPP, karena SQL Server itu service Windows yang tidak dijalankan Rezure. Teruji di mesin dengan LocalDB (`MSSQLLocalDB` terdeteksi, `Rezure` dilewati, alamat `(localdb)\nama` terbukti jalan lewat ODBC). **Bagian edisi terpasang (registry dan `sc`) baru teruji dengan sampel keluaran**, belum di mesin yang punya SQL Express atau Developer
 
 ### Fase 3.14c — SQL Server LocalDB sebagai service
 - [x] Ubin "SQL Server LocalDB" di `InstallVersionModal.vue` dan baris di halaman Switch (pola
@@ -929,9 +1002,13 @@ yang sudah dikerjakan.
 - [x] **LocalDB tidak butuh `TrustServerCertificate`**: ODBC Driver 18 konek dengan maupun tanpa
       itu (test `print_localdb_encryption_behaviour`). Connection bawaan LocalDB tidak menyalakannya,
       dan requirements check tidak menyarankannya untuk LocalDB
-- [ ] `services::telemetry::stack_context`: key versi SQL Server **belum dikerjakan**. Ini mengubah
-      kontrak telemetry, dan belum dicek apakah `laravel-api` menerima key `payload` yang belum
-      dikenal (lihat Dependency di bawah). Lebih aman ditunda daripada berisiko membuat event ditolak
+- [x] `services::telemetry::stack_context`: key `sqlserver_version` (`"SQL Server 2022 LocalDB"`),
+      dikirim di setiap `service.start` selama LocalDB terpasang, sama seperti key database
+      lainnya. Nilainya release (2022), bukan nomor build: dibaca dari nama folder instalasi
+      (`…\SQL Server\160\Tools\Binn` → 16 → 2022) lewat `mssql_localdb::release_label`, jadi tanpa
+      spawn proses di jalur yang jalan di setiap start. Release yang belum dikenal dikirim sebagai
+      `"SQL Server LocalDB 18"`, bukan dibuang. **Sudah dicek ke `laravel-api`**: key `payload`
+      yang belum dikenal diterima dan disimpan (lihat Dependency di bawah)
 - [x] `scripts/uninstall-clean.ps1`: langkah 1b menghentikan dan menghapus instance `Rezure`, dan
       langkah 6 melaporkan bahwa ODBC Driver dan LocalDB tetap terpasang. Dry run sudah dicoba
 
@@ -983,8 +1060,8 @@ yang sudah dikerjakan.
 dipakai project PHP/Node) dan bisa dibaca dari halaman Databases. Tidak ada di roadmap awal,
 **ditambahkan atas permintaan maintainer**, dikerjakan setelah Fase 3.14.
 
-**Status: dikerjakan** (3.15a–d). Sisa: key telemetry (lihat 3.15b) dan klik manual beberapa alur
-UI di app sungguhan (lihat Verifikasi).
+**Status: dikerjakan** (3.15a–d). Sisa: klik manual beberapa alur UI di app sungguhan (lihat
+Verifikasi). Key telemetry `postgres_version` sudah dikirim (lihat 3.15b).
 
 ### Keputusan yang sudah diambil
 - **Dikerjakan setelah SQL Server**, diputuskan maintainer
@@ -1045,10 +1122,10 @@ UI di app sungguhan (lihat Verifikasi).
       menyalakannya di versi baru
 - [x] Port conflict 5432 (pola yang sama), log viewer (`LOG_SERVICES`), `restarts_on_crash` tetap
       `false` seperti MariaDB, notifikasi crash bernama "PostgreSQL"
-- [ ] `services::telemetry::stack_context`: key `postgres_version`. **Sengaja belum**, sama seperti
-      versi SQL Server: perubahan kontrak payload yang menunggu pengecekan `laravel-api` (lihat
-      Dependency di bawah). Untuk sekarang `service.start` PostgreSQL membawa versi PHP dan MariaDB
-      seperti service lain
+- [x] `services::telemetry::stack_context`: key `postgres_version` (`"PostgreSQL 18.6"`, versi
+      aktif dari `postgres::active_id`), dikirim di setiap `service.start` selama ada versi
+      PostgreSQL terpasang, bukan hanya saat PostgreSQL yang di-start, sama seperti key MariaDB.
+      Bersebelahan dengan `php_version` dan `mariadb_version`, tidak menggantikannya
 - [x] `scripts/uninstall-clean.ps1`: `postgres` ikut dihentikan, **hanya yang berjalan dari folder
       Rezure**. PostgreSQL yang dipasang dengan installer biasa berjalan sebagai Windows service
       dengan nama proses yang sama, dan bukan milik Rezure
@@ -1179,11 +1256,18 @@ untuk semua orang. Mirip Preferences → Services & Ports di Laragon.
 
 Fase 3.4: `GET /api/v1/version/latest` di `laravel-api` **sudah** mengembalikan manifest bertanda tangan sesuai [`docs/version-contract.md`](../version-contract.md) (`VersionController`, kolom `signature`/`download_url` di `releases`). Yang masih tersisa cuma verifikasi end-to-end lawan rilis nyata — repo ini belum punya pipeline yang build+sign installer, jadi belum ada rilis sungguhan buat diuji; sementara kode sisi app sudah bisa diuji lokal lawan manifest tiruan (prosedur ada di doc kontrak itu). Fase 3.1, 3.5, 3.6, 3.10, 3.11, dan 3.13 sepenuhnya independen, tidak bergantung pada backend.
 
-Fase 3.14 dan 3.15 juga tidak bergantung pada backend, kecuali key telemetry baru di payload
-`service.start` (`postgres_version`, dan versi SQL Server untuk LocalDB — keduanya sengaja
-belum dikirim, lihat task terbuka di 3.14c dan 3.15b). `docs/telemetry-contract.md`
-harus diperbarui, dan perlu dicek apakah `laravel-api` menerima key `payload` yang belum dikenal
-serta apakah grafik "top stack combos" di dashboard ikut menampilkannya.
+Fase 3.14 dan 3.15 menambah dua key di payload `service.start`: `postgres_version` dan
+`sqlserver_version` (lihat 3.14c dan 3.15b; kontraknya di `docs/telemetry-contract.md`). Sudah
+dicek ke kode `laravel-api`:
+
+- **Diterima, tidak ditolak.** `EventRequest` memvalidasi `payload` hanya sebagai `nullable|array`,
+  `EventController` meneruskan `$request->validated()` (isi `payload` utuh), dan kolom
+  `events.payload` bertipe `json`. Key yang belum dikenal tidak pernah memicu `422`.
+- **Disimpan, belum ditampilkan.** `DashboardMetricsService::topStackCombos` dan
+  `deviceLatestStack` hanya membaca `php_version` dan `mysql_version`/`mariadb_version`, jadi grafik
+  "top combo stack" tidak berubah. Menampilkan kombinasi PHP + PostgreSQL atau SQL Server adalah
+  perubahan di `laravel-api`, bukan di app ini. Pengguna yang hanya punya PostgreSQL (tanpa profil
+  MariaDB aktif) juga belum muncul di grafik itu karena tidak punya key yang dibaca.
 
 **Catatan soal analytics lanjutan (v3 `rezure-dashboard`):** fitur traffic by hour, breakdown negara, cohort retention, dll di dashboard **tidak membutuhkan perubahan apapun di app ini** — semua data granular yang dibutuhkan (timestamp, OS version, metadata service) sudah terkirim sejak fondasi telemetry v2. Geolocation negara diproses di sisi server dari IP request yang masuk, bukan dikirim dari client.
 
@@ -1199,10 +1283,10 @@ serta apakah grafik "top stack combos" di dashboard ikut menampilkannya.
 6. Fase 3.13 (Appearance) — 3.13a dan 3.13b sudah dikerjakan di branch `glassmorph` (bersama
    redesain glassmorphism, karena 3.13a menyentuh file yang sama). Sisa verifikasi manual ada di
    daftar task 3.13b. 3.13c ditunda
-7. Fase 3.14 (SQL Server): 3.14a → 3.14b → 3.14c — **dikerjakan**. Sisa: key telemetry
-   (menunggu pengecekan `laravel-api`) dan pengujian manual di jendela app sungguhan
-8. Fase 3.15 (PostgreSQL): 3.15a → 3.15b → 3.15c → 3.15d — **dikerjakan**. Sisa: key telemetry
-   (bersama SQL Server) dan pengujian manual beberapa alur UI
+7. Fase 3.14 (SQL Server): 3.14a → 3.14b → 3.14c — **dikerjakan**, termasuk key telemetry
+   `sqlserver_version`. Sisa: pengujian manual di jendela app sungguhan
+8. Fase 3.15 (PostgreSQL): 3.15a → 3.15b → 3.15c → 3.15d — **dikerjakan**, termasuk key telemetry
+   `postgres_version`. Sisa: pengujian manual beberapa alur UI
 9. Fase 3.16 (Manage Services) — **dikerjakan** sebelum 3.15, karena kecil dan langsung
    dibutuhkan begitu kartu LocalDB muncul untuk semua user. Kartu PostgreSQL ikut otomatis
 

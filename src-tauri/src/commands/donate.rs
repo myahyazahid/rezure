@@ -1,10 +1,10 @@
-//! Thin glue between the Support Developer page and `services::donate`.
+//! Thin glue between the Donate page and `services::donate`.
 
-use crate::services::donate::{self, DonateConfig};
+use crate::services::donate::{self, DonatePage};
 use crate::utils::error::AppError;
 
 #[tauri::command]
-pub async fn fetch_donate_config() -> DonateConfig {
+pub async fn fetch_donate_config() -> DonatePage {
     donate::fetch().await
 }
 

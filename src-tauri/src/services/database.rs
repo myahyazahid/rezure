@@ -317,11 +317,32 @@ impl Conn {
         args.push(self.port.to_string());
         args.push("-u".to_string());
         args.push(self.user.clone());
+        if let Some(dir) = self.plugin_dir() {
+            args.push(format!("--plugin-dir={}", dir.display()));
+        }
         if connect_timeout {
             args.push(format!("--connect-timeout={CONNECT_TIMEOUT_SECS}"));
         }
         args.extend(self.tls_args());
         args
+    }
+
+    /// Where a MariaDB client finds its authentication plugins.
+    ///
+    /// MariaDB ships `caching_sha2_password` — MySQL 8's default — as a
+    /// loadable `lib\plugin\caching_sha2_password.dll` rather than built in,
+    /// and the client looks for it in a directory compiled in for an
+    /// installed server, not one relative to the `.exe`. Run from a portable
+    /// folder it finds nothing ("Plugin caching_sha2_password could not be
+    /// loaded … Library path is 'caching_sha2_password.dll'"), so every
+    /// MySQL 8 account failed with the right password. MySQL's own client has
+    /// the plugin built in and needs none of this.
+    fn plugin_dir(&self) -> Option<PathBuf> {
+        if self.client_engine != Engine::MariaDb {
+            return None;
+        }
+        let dir = self.bin.parent()?.join("lib").join("plugin");
+        dir.is_dir().then_some(dir)
     }
 
     /// TLS spelled the way this client understands it. MySQL took
@@ -539,10 +560,11 @@ fn client_error(conn: &Conn, stderr: &[u8], fallback: &str) -> AppError {
 ///   cannot be used over a password connection at all, no matter how right
 ///   the password is. Reading "Access denied" sends people off to reset a
 ///   password that was never going to be consulted.
-/// * **caching_sha2_password** — MySQL 8's default plugin, which a MariaDB
-///   client cannot speak. Rezure falls back to a MariaDB client when no
-///   MySQL build is installed (see `connections::client_dir`), so this is
-///   reachable with a perfectly correct username and password.
+/// * **caching_sha2_password** — MySQL 8's default plugin. Rezure falls
+///   back to a MariaDB client when no MySQL build is installed (see
+///   `connections::client_dir`), which speaks it only through the plugin
+///   DLL `Conn::plugin_dir` points at. A MariaDB build without that DLL
+///   makes this reachable with a perfectly correct username and password.
 /// * **`utf8mb4_0900_*`** — MySQL 8's own default collation family, which
 ///   MariaDB has never implemented (it stopped at the `unicode_520` set).
 ///   `mysqldump` writes the source server's default collation into every
@@ -561,8 +583,9 @@ fn hint_for(detail: &str) -> Option<&'static str> {
     }
     if lower.contains("caching_sha2_password") {
         return Some(
-            "this account uses MySQL 8's authentication plugin, which the MariaDB client can't \
-             speak. Install a MySQL build under C:\\rezure\\custom\\mysql\\ so Rezure has a \
+            "this account uses MySQL 8's authentication plugin, and the MariaDB client Rezure \
+             fell back to has no caching_sha2_password.dll in its lib\\plugin folder. Install a \
+             MySQL build under C:\\rezure\\custom\\mysql\\ so Rezure has a \
              matching client, or give the account mysql_native_password on the server",
         );
     }
@@ -1494,7 +1517,32 @@ mod tests {
             "the query failed",
         )
         .to_string();
-        assert!(message.contains("MariaDB client can't speak"), "{message}");
+        assert!(message.contains("caching_sha2_password.dll"), "{message}");
+    }
+
+    /// The bug: run from a portable folder, MariaDB's client looked for
+    /// `caching_sha2_password.dll` nowhere, so a correct MySQL 8 login failed.
+    #[test]
+    fn a_mariadb_client_is_pointed_at_its_own_plugins() {
+        let root = std::env::temp_dir().join(format!("rezure-plugins-{}", uuid::Uuid::new_v4()));
+        let plugins = root.join("lib").join("plugin");
+        std::fs::create_dir_all(&plugins).unwrap();
+        let mut conn = conn_for(TlsMode::Preferred, Engine::MariaDb, None);
+        conn.bin = root.join("bin");
+
+        let expected = format!("--plugin-dir={}", plugins.display());
+        assert!(conn.args().contains(&expected), "{:?}", conn.args());
+        assert!(
+            conn.dump_args().contains(&expected),
+            "{:?}",
+            conn.dump_args()
+        );
+
+        // MySQL's client has the plugin built in; a folder it doesn't need
+        // is never passed.
+        conn.client_engine = Engine::MySql;
+        assert!(!conn.args().iter().any(|a| a.starts_with("--plugin-dir")));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     /// The exact failure of importing a MySQL 8 dump into MariaDB: no wrong

@@ -61,11 +61,18 @@ export type StickerKind =
   | 'planet'
   | 'sunglasses'
 
+/** A sticker downloaded from Decorations → Browse: `saved:` plus its catalog id.
+ *  Mirrors `config::stickers::StickerArt::Saved`. */
+export type SavedStickerKind = `saved:${string}`
+
+/** What a placed sticker shows — art that ships with the app, or a download. */
+export type StickerArt = StickerKind | SavedStickerKind
+
 /** A placed sticker. Position and size are percentages of the window, so the
  *  Decorations preview and the real window agree at any size. */
 export interface Sticker {
   id: string
-  kind: StickerKind
+  kind: StickerArt
   /** Centre, 0–100 % of the window. */
   x: number
   y: number

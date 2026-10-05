@@ -1,7 +1,13 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import type { DbConnectionStatus, ServerKind, TargetResult, TlsMode } from '@/types/dbConnection'
+import type {
+  DbConnectionStatus,
+  DetectedSqlServer,
+  ServerKind,
+  TargetResult,
+  TlsMode,
+} from '@/types/dbConnection'
 import type { DbEngine } from '@/types/dbProfile'
 
 function errorMessage(e: unknown): string {
@@ -17,7 +23,8 @@ function errorMessage(e: unknown): string {
 export interface ConnectionDraft {
   name: string
   host: string
-  port: number
+  /** `''` once the number box is emptied — see `payload`. */
+  port: number | ''
   user: string
   password: string
   kind: ServerKind
@@ -51,6 +58,20 @@ export const useDbConnectionsStore = defineStore('dbConnections', () => {
   const switchingId = ref<string | null>(null)
 
   const active = computed(() => connections.value.find((c) => c.active) ?? null)
+
+  /** SQL Server instances found on this machine that aren't saved yet. */
+  const detectedSqlServers = ref<DetectedSqlServer[]>([])
+
+  /** Looks for SQL Server instances already installed here. A scan that
+   *  fails is the same as one that finds nothing — the form still works by
+   *  hand — so it never raises an error. */
+  async function scanSqlServers() {
+    try {
+      detectedSqlServers.value = await invoke<DetectedSqlServer[]>('detect_sqlserver_instances')
+    } catch {
+      detectedSqlServers.value = []
+    }
+  }
 
   async function fetchAll() {
     try {
@@ -210,6 +231,8 @@ export const useDbConnectionsStore = defineStore('dbConnections', () => {
     testError,
     saving,
     switchingId,
+    detectedSqlServers,
+    scanSqlServers,
     fetchAll,
     test,
     add,

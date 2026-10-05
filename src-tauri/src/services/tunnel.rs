@@ -33,6 +33,20 @@
 //! first: a key with a passphrase can't be used, because that passphrase
 //! would need the same treatment and Rezure never asks for one.
 //!
+//! # Why `ssh` never sees the user's key file
+//!
+//! OpenSSH refuses a private key that any other account can read, and a
+//! `.pem` saved anywhere outside the user's profile — `C:\key.pem`, a
+//! project folder on `D:` — usually is, by inheritance. The message is a
+//! wall of `@` signs ending in "bad permissions", and the fix is an
+//! `icacls` incantation. GUI clients like TablePlus embed an SSH library
+//! that skips the check, so the same file "works everywhere but Rezure".
+//!
+//! Rather than embed one too, Rezure reads the key and hands `ssh` a
+//! [`private_file`] copy, then deletes it once the tunnel is up — the forward
+//! only opens after authentication, so `ssh` is done with the key by then.
+//! The user's file is never touched.
+//!
 //! # Why the rest of the app doesn't know this exists
 //!
 //! A live tunnel is just a port on 127.0.0.1. `database::remote_conn` swaps
@@ -52,6 +66,7 @@ use super::secrets;
 use crate::config::connections::{Connection, SshAuth, SshTunnel};
 use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
+use crate::utils::private_file;
 
 /// Windows' own OpenSSH client, by absolute path.
 ///
@@ -161,6 +176,72 @@ fn port_is_open(port: u16) -> bool {
     TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_ok()
 }
 
+/// A copy of the user's private key that only the current user can read,
+/// which is the one `ssh` is pointed at — see the module docs for why.
+///
+/// Deleted on drop, along with the certificate copied beside it.
+struct KeyCopy {
+    path: PathBuf,
+    original: String,
+}
+
+impl KeyCopy {
+    /// Writes the copy into the temp folder. The folder's own permissions
+    /// don't matter: [`private_file::create`] replaces them.
+    fn new(original: &str) -> Result<Self, AppError> {
+        let key = std::fs::read(original).map_err(|e| {
+            AppError::TunnelFailed(format!("couldn't read the SSH key at {original}: {e}"))
+        })?;
+        let path = std::env::temp_dir().join(format!(
+            "rezure-ssh-key-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        let copy = Self {
+            path,
+            original: original.to_string(),
+        };
+        private_file::create(&copy.path)
+            .and_then(|mut file| std::io::Write::write_all(&mut file, &key))
+            .map_err(|e| {
+                AppError::TunnelFailed(format!("couldn't prepare the SSH key for ssh: {e}"))
+            })?;
+
+        // `ssh` picks up `<key>-cert.pub` from beside whatever `-i` names, so
+        // a certificate next to the original has to follow the copy. It's
+        // public, so its permissions don't matter.
+        let cert = format!("{original}-cert.pub");
+        if Path::new(&cert).is_file() {
+            let _ = std::fs::copy(&cert, copy.cert_path());
+        }
+        Ok(copy)
+    }
+
+    fn cert_path(&self) -> PathBuf {
+        let mut name = self.path.clone().into_os_string();
+        name.push("-cert.pub");
+        PathBuf::from(name)
+    }
+
+    /// Puts the user's own path back into `ssh`'s messages ("Load key …:
+    /// invalid format"), which would otherwise name a temp file they've
+    /// never heard of. `ssh` writes Windows paths with doubled backslashes,
+    /// so both spellings are replaced.
+    fn restore_name(&self, detail: String) -> String {
+        let copy = self.path.to_string_lossy();
+        detail
+            .replace(&copy.replace('\\', r"\\"), &self.original)
+            .replace(copy.as_ref(), &self.original)
+    }
+}
+
+impl Drop for KeyCopy {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+        let _ = std::fs::remove_file(self.cert_path());
+    }
+}
+
 /// The last few lines `ssh` wrote before giving up — "Permission denied
 /// (publickey)" and friends, which say far more than an exit code.
 fn read_log(path: &Path) -> String {
@@ -206,6 +287,17 @@ pub fn open(
         )));
     }
 
+    // Declared before the tunnel so it's dropped after it: on any early
+    // return, `ssh` is killed first and the copy deleted second.
+    let key_copy = match &ssh.auth {
+        SshAuth::Key { path } => Some(KeyCopy::new(path)?),
+        SshAuth::Password => None,
+    };
+    let explain = |detail: String| match &key_copy {
+        Some(copy) => copy.restore_name(detail),
+        None => detail,
+    };
+
     let local_port = free_local_port()?;
     let log_path = std::env::temp_dir().join(format!(
         "rezure-ssh-{}-{}.log",
@@ -223,11 +315,12 @@ pub fn open(
         .args(["-N", "-T"])
         .args(["-p", &ssh.port.to_string()]);
 
-    match &ssh.auth {
-        SshAuth::Key { path } => {
+    // `key_copy` exists exactly when the connection uses key auth.
+    match &key_copy {
+        Some(copy) => {
             command
                 .arg("-i")
-                .arg(path)
+                .arg(&copy.path)
                 // No prompt is answerable from a GUI process, so anything
                 // that would ask must fail instead of hanging. This also
                 // rules out a passphrase-protected key.
@@ -237,7 +330,7 @@ pub fn open(
                 .args(["-o", "PreferredAuthentications=publickey"])
                 .args(["-o", "IdentitiesOnly=yes"]);
         }
-        SshAuth::Password => {
+        None => {
             // BatchMode is deliberately *not* set: it disables askpass, and
             // askpass is the entire mechanism here.
             command
@@ -288,7 +381,7 @@ pub fn open(
         // A dead ssh is the common failure — a rejected key, an unreachable
         // host — and its own message is the diagnosis.
         if let Ok(Some(_)) = tunnel.child.try_wait() {
-            let detail = read_log(&tunnel.log);
+            let detail = explain(read_log(&tunnel.log));
             return Err(AppError::TunnelFailed(if detail.is_empty() {
                 format!("ssh to {}@{} exited immediately", ssh.user, ssh.host)
             } else {
@@ -299,7 +392,7 @@ pub fn open(
             return Ok(tunnel);
         }
         if Instant::now() >= deadline {
-            let detail = read_log(&tunnel.log);
+            let detail = explain(read_log(&tunnel.log));
             return Err(AppError::TunnelFailed(format!(
                 "the tunnel to {}@{} didn't come up within {}s{}",
                 ssh.user,
@@ -438,6 +531,71 @@ mod tests {
         std::fs::write(&path, "first\n\nsecond\nthird\nfourth\n").unwrap();
         assert_eq!(read_log(&path), "second; third; fourth");
         let _ = std::fs::remove_file(path);
+    }
+
+    /// The bug this was written for: a key saved as `C:\key.pem` inherits
+    /// read access for `BUILTIN\Users`, and OpenSSH ignores it.
+    #[test]
+    fn a_key_others_can_read_is_accepted_by_openssh_once_copied() {
+        let keygen = Path::new(r"C:\Windows\System32\OpenSSH\ssh-keygen.exe");
+        if !keygen.is_file() {
+            return; // OpenSSH removed from this image; nothing to check against.
+        }
+        let key = std::env::temp_dir().join(format!(
+            "rezure-keytest-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        // `ssh-keygen -y` loads the private key through the same permission
+        // check `ssh -i` does, without needing a server.
+        let openssh_accepts = |path: &Path| {
+            Command::new(keygen)
+                .args(["-y", "-f"])
+                .arg(path)
+                .stdin(Stdio::null())
+                .output()
+                .map(|out| out.status.success())
+                .unwrap_or(false)
+        };
+
+        let generated = Command::new(keygen)
+            .args(["-q", "-t", "ed25519", "-N", "", "-f"])
+            .arg(&key)
+            .status()
+            .expect("ssh-keygen runs");
+        assert!(generated.success());
+        let widened = Command::new("icacls")
+            .arg(&key)
+            .args(["/grant", "*S-1-5-32-545:(R)"])
+            .output()
+            .expect("icacls runs");
+        assert!(widened.status.success());
+        assert!(
+            !openssh_accepts(&key),
+            "the original must reproduce \"bad permissions\" or this test proves nothing"
+        );
+
+        let copy = KeyCopy::new(&key.to_string_lossy()).expect("the key can be copied");
+        assert!(openssh_accepts(&copy.path), "the copy must pass the check");
+
+        let copy_path = copy.path.clone();
+        drop(copy);
+        assert!(!copy_path.exists(), "the copy must not outlive its use");
+        let _ = std::fs::remove_file(&key);
+        let _ = std::fs::remove_file(key.with_extension("pub"));
+    }
+
+    #[test]
+    fn errors_name_the_users_key_not_the_copy() {
+        let copy = KeyCopy {
+            path: PathBuf::from(r"C:\Temp\rezure-ssh-key-1"),
+            original: r"C:\keys\server.pem".to_string(),
+        };
+        let detail = r#"Load key "C:\\Temp\\rezure-ssh-key-1": invalid format"#.to_string();
+        assert_eq!(
+            copy.restore_name(detail),
+            r#"Load key "C:\keys\server.pem": invalid format"#
+        );
     }
 
     #[test]

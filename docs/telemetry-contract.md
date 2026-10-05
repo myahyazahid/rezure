@@ -75,6 +75,31 @@ When it's there, it's one of:
   `mysql_version` / `"MySQL 8.4.2"` when the active database profile is MySQL. A PHP
   service reports its own version (a project's pinned one), anything else the active PHP.
   Keys for what isn't installed are left out (`services::telemetry::stack_context`).
+
+  Two more keys appear when the runtime is installed, on **every** `service.start` — the
+  same way the MariaDB/MySQL key does, so starting Nginx reports the stack it starts in, not
+  only the database being started:
+
+  | Key | Value | Example |
+  |---|---|---|
+  | `postgres_version` | `"PostgreSQL "` + the active PostgreSQL version | `"PostgreSQL 18.6"` |
+  | `sqlserver_version` | the installed SQL Server LocalDB's release, worded by Rezure | `"SQL Server 2022 LocalDB"` |
+
+  `sqlserver_version` is a release (2022), not a build number: it's read from the folder
+  LocalDB installed to (`…\Microsoft SQL Server\160\Tools\Binn` → 16 → 2022), which costs no
+  process spawn on a path that runs for every start. A release newer than the client knows is
+  sent as `"SQL Server LocalDB 18"` rather than dropped. Only LocalDB is reported — a SQL
+  Server Express/Developer install Rezure merely connects to isn't something it runs.
+
+  Full example, all four runtimes present:
+  `{ "php_version": "8.3.33", "mariadb_version": "MariaDB 11.2.2", "postgres_version": "PostgreSQL 18.6", "sqlserver_version": "SQL Server 2022 LocalDB" }`.
+
+  **Backend compatibility** (checked against `laravel-api`): `EventRequest` validates
+  `payload` only as `nullable|array`, `EventController` forwards `$request->validated()`, and
+  the `events.payload` column is `json` — so unknown keys are accepted and stored, never a
+  `422`. The dashboard's top-stack-combos chart and a device's "current stack" read only
+  `php_version` and `mysql_version`/`mariadb_version`, so the two new keys are stored but not
+  yet charted. Showing them (a PostgreSQL combo, say) is a change in `laravel-api`, not here.
 - **`error.report`**: what was being done to which service:
   `{ "action": "service.start | service.stop | service.restart | service.run", "service": "php-8.0.30" }`
   (`service.run` is a crash). `event_name` is `AppError::code()`, the variant's name,
@@ -89,6 +114,7 @@ When it's there, it's one of:
   "app_version": "1.0.0",
   "os": "Windows 11 Home Single Language",
   "os_version": "11 (26200)",
+  "device_name": "Yahya",
   "occurred_at": "2026-09-02T06:00:00+00:00",
   "ended_at": null
 }
@@ -97,6 +123,15 @@ When it's there, it's one of:
 `occurred_at` is stamped at *record* time, not send time — a row queued while offline
 and sent later still reports when it actually happened. `os`/`os_version` come from
 `sysinfo::System::long_os_version()` / `os_version()`.
+
+`device_name` is the Windows account name the app runs under, `%USERNAME%` (the `Yahya`
+in `C:\Users\Yahya`), read fresh on each 5-minute heartbeat by
+`services::telemetry::device_name()`. It lets the dashboard's Devices page show a human
+name instead of `dev_xxxxxxxx`. Blank becomes `null`, and anything past the API's 64-char
+limit is cut client-side, since a `422` would get the whole heartbeat dropped (see
+Sending). The closing heartbeat sends `null`, which the backend reads as "keep what you
+have". Like every other field, it's never recorded or sent while `shareUsageData` is
+`false`. Added after 3.0.0, so 3.0.0 and older clients don't send it.
 
 `session_id` is one UUID generated once per launch (`services::telemetry::SessionIdState`,
 in-memory only, never persisted) and reused on every heartbeat for that run.
@@ -124,7 +159,9 @@ mengganggu user" requirement from Fase 2.5.
 ## What's deliberately *not* sent
 
 - No file paths, project names, database names, or anything else from the user's local
-  filesystem/config beyond the fields listed above.
+  filesystem/config beyond the fields listed above. The heartbeat's `device_name` (the
+  Windows account name) is the one deliberate exception, and it's the only thing that
+  identifies the person rather than the install.
 - `event_name` is limited to a service's display name, an error kind, or omitted — never
   free text a user typed (that's what support tickets are for, a separate, explicit,
   user-initiated action documented in `docs/v2/rezure-app-v2-phases-tasks.md`'s Fase 2.1).

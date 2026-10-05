@@ -9,6 +9,7 @@
 use crate::config::connections::{NewConnection, ServerKind, SshAuth, SshTunnel, TlsMode};
 use crate::services::connections::{self, ConnectionStatus};
 use crate::services::db_engine::Engine;
+use crate::services::mssql_discovery::{self, DetectedSqlServer};
 use crate::services::secrets;
 use crate::services::{database, mssql, postgres_client};
 use crate::utils::error::AppError;
@@ -96,6 +97,19 @@ pub async fn test_db_connection(request: ConnectionRequest) -> Result<String, Ap
     })
     .await
     .map_err(joined)?
+}
+
+/// SQL Server instances already installed on this machine, for the Add
+/// connection form to offer. Read-only; nothing is saved until the user picks
+/// one, tests it and saves.
+///
+/// On a blocking task: it runs `reg`, `sc` and `SqlLocalDB`, which are
+/// quick but are still processes.
+#[tauri::command]
+pub async fn detect_sqlserver_instances() -> Result<Vec<DetectedSqlServer>, AppError> {
+    tokio::task::spawn_blocking(mssql_discovery::detect)
+        .await
+        .map_err(joined)
 }
 
 /// Saves a connection. Writes are refused by default — see

@@ -1,7 +1,15 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import type { Decorations, Settings, Sticker, StickerKind } from '@/types/settings'
+import type {
+  Decorations,
+  SavedStickerKind,
+  Settings,
+  Sticker,
+  StickerArt,
+  StickerKind,
+} from '@/types/settings'
+import { useStickerLibraryStore } from '@/stores/stickerLibrary'
 
 export type StickerCategory = 'Girls' | 'Mens'
 
@@ -60,7 +68,21 @@ export const STICKERS: readonly StickerInfo[] = CATALOG.map(([kind, label, categ
   url: artUrl(kind),
 }))
 
-export function stickerLabel(kind: StickerKind): string {
+const SAVED_PREFIX = 'saved:'
+
+/** The kind a downloaded sticker is placed as. */
+export function savedKind(id: string): SavedStickerKind {
+  return `${SAVED_PREFIX}${id}`
+}
+
+/** The library id of a downloaded sticker's kind, or `null` for built-in art. */
+export function savedIdOf(kind: StickerArt): string | null {
+  return kind.startsWith(SAVED_PREFIX) ? kind.slice(SAVED_PREFIX.length) : null
+}
+
+export function stickerLabel(kind: StickerArt): string {
+  const id = savedIdOf(kind)
+  if (id !== null) return useStickerLibraryStore().nameFor(id) ?? 'Sticker'
   return STICKERS.find((s) => s.kind === kind)?.label ?? 'Sticker'
 }
 
@@ -71,8 +93,13 @@ export const MIN_SIZE = 2
 export const MAX_SIZE = 25
 export const DEFAULT_SIZE = 7
 
-export function stickerUrl(kind: StickerKind): string {
-  return artUrl(kind)
+/** The image for a sticker, or `''` when there isn't one to draw — a
+ *  download that was removed, or the library not loaded yet. Callers skip
+ *  stickers with no image. */
+export function stickerUrl(kind: StickerArt): string {
+  const id = savedIdOf(kind)
+  if (id !== null) return useStickerLibraryStore().urlFor(id)
+  return artUrl(kind as StickerKind)
 }
 
 /** Where and how a sticker is drawn inside a box that stands for the window
@@ -118,7 +145,12 @@ export const useDecorationsStore = defineStore('decorations', () => {
       apply((await invoke<Settings>('get_settings')).decorations)
     } catch (e) {
       error.value = errorMessage(e)
+      return
     }
+    // Downloaded stickers are drawn from the library, so it's read too — and
+    // only then can a placed copy of a download that's gone be told apart
+    // from one that simply hasn't loaded yet.
+    if (await useStickerLibraryStore().loadSaved()) pruneMissing()
   }
 
   /** Saves the arrangement as it is on screen. Not applied back from the
@@ -141,7 +173,7 @@ export const useDecorationsStore = defineStore('decorations', () => {
 
   /** Adds a sticker near the middle, nudged so a few added in a row don't
    *  land exactly on top of each other. Returns its id, or null when full. */
-  function add(kind: StickerKind): string | null {
+  function add(kind: StickerArt): string | null {
     if (isFull.value) return null
     const jitter = () => (Math.random() - 0.5) * 16
     const sticker: Sticker = {
@@ -195,6 +227,38 @@ export const useDecorationsStore = defineStore('decorations', () => {
     persist()
   }
 
+  /** How many copies of a downloaded sticker are on the window. */
+  function placedCount(id: string): number {
+    return stickers.value.filter((s) => s.kind === savedKind(id)).length
+  }
+
+  /** Deletes a download and every copy of it on the window. The copies go
+   *  only once the download is really gone, so a failed delete leaves things
+   *  as they were. */
+  async function removeSaved(id: string): Promise<boolean> {
+    if (!(await useStickerLibraryStore().remove(id))) return false
+    const kept = stickers.value.filter((s) => s.kind !== savedKind(id))
+    if (kept.length !== stickers.value.length) {
+      stickers.value = kept
+      persist()
+    }
+    return true
+  }
+
+  /** Drops placed copies of downloads that no longer exist — a file deleted
+   *  by hand, say. They'd draw nothing but still count toward the limit. */
+  function pruneMissing() {
+    const library = useStickerLibraryStore()
+    const kept = stickers.value.filter((s) => {
+      const id = savedIdOf(s.kind)
+      return id === null || library.urlFor(id) !== ''
+    })
+    if (kept.length !== stickers.value.length) {
+      stickers.value = kept
+      persist()
+    }
+  }
+
   function setVisible(value: boolean) {
     visible.value = value
     persist()
@@ -213,6 +277,8 @@ export const useDecorationsStore = defineStore('decorations', () => {
     duplicate,
     bringToFront,
     clear,
+    placedCount,
+    removeSaved,
     setVisible,
   }
 })

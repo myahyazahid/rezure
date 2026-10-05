@@ -405,7 +405,7 @@ mod tests {
                 visible: false,
                 stickers: vec![stickers::Sticker {
                     id: "s1".to_string(),
-                    kind: stickers::StickerKind::Bow,
+                    kind: stickers::StickerArt::Builtin(stickers::StickerKind::Bow),
                     x: 12.5,
                     y: 80.0,
                     size: 9.0,

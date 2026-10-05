@@ -90,6 +90,45 @@ pub fn is_installed() -> bool {
     locate().is_some()
 }
 
+/// The marketing release for an internal major version (`16` → `2022`).
+pub fn release_for_major(major: &str) -> Option<&'static str> {
+    Some(match major {
+        "17" => "2025",
+        "16" => "2022",
+        "15" => "2019",
+        "14" => "2017",
+        "13" => "2016",
+        "12" => "2014",
+        "11" => "2012",
+        "10_50" => "2008 R2",
+        "10" => "2008",
+        _ => return None,
+    })
+}
+
+/// `SQL Server 2022 LocalDB` for the LocalDB that's installed — what
+/// `services::telemetry` reports as the SQL Server in use. `None` when LocalDB
+/// isn't installed.
+///
+/// Read from the folder the install went to rather than asked of the
+/// instance: it's the same answer at the granularity a stack chart wants, and
+/// it costs no process spawn on a path that runs for every service start.
+pub fn release_label() -> Option<String> {
+    release_label_of(&locate()?)
+}
+
+/// `…\Microsoft SQL Server\160\Tools\Binn\SqlLocalDB.exe` → the `160`, which
+/// is the major version times ten.
+fn release_label_of(exe: &Path) -> Option<String> {
+    let folder = exe.ancestors().nth(3)?.file_name()?.to_str()?;
+    let major = (folder.parse::<u32>().ok()? / 10).to_string();
+    Some(match release_for_major(&major) {
+        Some(release) => format!("SQL Server {release} LocalDB"),
+        // A release newer than this knows: still worth reporting, as a number.
+        None => format!("SQL Server LocalDB {major}"),
+    })
+}
+
 /// `C:\rezure\data\mssql` — where the databases Rezure creates or restores
 /// keep their `.mdf`/`.ldf` files.
 ///
@@ -146,6 +185,50 @@ fn parse_versions(stdout: &str) -> String {
         })
         .max_by(|a, b| super::binaries::compare_versions(a, b))
         .unwrap_or_default()
+}
+
+/// An instance of LocalDB that isn't Rezure's own — typically
+/// `MSSQLLocalDB`, the one Visual Studio and most tutorials use.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OtherInstance {
+    pub name: String,
+    pub running: bool,
+}
+
+/// The instance names `SqlLocalDB info` prints, one per line.
+fn parse_instance_names(stdout: &str) -> Vec<String> {
+    stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Every LocalDB instance except [`INSTANCE`], with whether it's running.
+///
+/// Read-only: nothing is created or started. `SqlLocalDB info` lists the
+/// automatic `MSSQLLocalDB` even before anything has created it — LocalDB
+/// makes it by itself on the first connection — and `info <name>` then says
+/// it "is not created", which here reads as stopped rather than as missing:
+/// it's still a perfectly good address to connect to.
+pub fn other_instances() -> Vec<OtherInstance> {
+    let Some(exe) = locate() else {
+        return Vec::new();
+    };
+    let Ok(listing) = sqllocaldb(&exe, &["info"]) else {
+        return Vec::new();
+    };
+    parse_instance_names(&listing)
+        .into_iter()
+        .filter(|name| !name.eq_ignore_ascii_case(INSTANCE))
+        .map(|name| {
+            let running = sqllocaldb(&exe, &["info", &name])
+                .map(|stdout| parse_info(&stdout).running)
+                .unwrap_or(false);
+            OtherInstance { name, running }
+        })
+        .collect()
 }
 
 /// The sentence `SqlLocalDB.exe` opens every failure with.
@@ -384,6 +467,41 @@ mod tests {
     /// an instance nobody created yet.
     const MISSING: &str = "Printing of LocalDB instance \"Rezure\" information failed because \
         of the following error:\r\n\r\nLocalDB instance \"Rezure\" doesn't exist! \r\n";
+
+    #[test]
+    fn the_release_is_read_from_the_install_folder() {
+        let label = |version: &str| {
+            release_label_of(Path::new(&format!(
+                r"C:\Program Files\Microsoft SQL Server\{version}\Tools\Binn\SqlLocalDB.exe"
+            )))
+        };
+        assert_eq!(label("160").as_deref(), Some("SQL Server 2022 LocalDB"));
+        assert_eq!(label("150").as_deref(), Some("SQL Server 2019 LocalDB"));
+        // Not a release this knows yet: reported as its number, not dropped.
+        assert_eq!(label("990").as_deref(), Some("SQL Server LocalDB 99"));
+        // Not a version folder at all.
+        assert_eq!(label("Shared"), None);
+    }
+
+    /// `SqlLocalDB info` with no name: one instance per line, including the
+    /// automatic one before anything has created it.
+    #[test]
+    fn the_instance_listing_is_one_name_per_line() {
+        assert_eq!(
+            parse_instance_names("MSSQLLocalDB\r\nRezure\r\n\r\n"),
+            vec!["MSSQLLocalDB", "Rezure"]
+        );
+        assert!(parse_instance_names("").is_empty());
+    }
+
+    /// Exactly what `SqlLocalDB info MSSQLLocalDB` prints on a machine where
+    /// nothing has connected to it yet: not a record, and not a failure.
+    #[test]
+    fn an_automatic_instance_nobody_has_created_reads_as_stopped() {
+        let info = parse_info("The automatic instance \"MSSQLLocalDB\" is not created.\r\n");
+        assert!(!info.exists);
+        assert!(!info.running);
+    }
 
     #[test]
     fn a_running_instance_is_read_from_its_info_record() {
