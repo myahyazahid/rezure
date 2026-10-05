@@ -144,7 +144,7 @@ di-review.
 - [x] `struct Conn { host, port, user, defaults: Option<TempDefaults>, bin: PathBuf }`
 - [x] `active_conn() -> Result<Conn, AppError>` yang me-resolve `Target::Local` maupun `Target::Remote`
 - [x] `base_args()` diganti `conn.args()`; `query`, `execute`, `export_database`, `import_sql`, `list_collations` semuanya lewat `Conn`
-- [x] `bin_dir()` untuk target remote fallback ke build lokal manapun yang terinstall, **dipilih berdasarkan engine hint connection** — client MariaDB tidak bisa auth `caching_sha2_password` milik MySQL 8, dan itu tidak bisa diakali flag
+- [x] `bin_dir()` untuk target remote fallback ke build lokal manapun yang terinstall, **dipilih berdasarkan engine hint connection** — client MariaDB hanya bisa auth `caching_sha2_password` milik MySQL 8 lewat plugin `lib\plugin\caching_sha2_password.dll` bawaannya, dan plugin itu harus ditunjuk dengan `--plugin-dir` (`Conn::plugin_dir`). Build MariaDB portabel tidak menemukannya sendiri dan gagal dengan "Plugin caching_sha2_password could not be loaded". **Catatan lama di sini ("tidak bisa diakali flag") salah**; ketahuan saat login ke server MySQL 8 sungguhan dari MariaDB Rezure
 - [x] Tambahkan `--connect-timeout` ke semua pemanggilan client; default client itu lama, target lokal tidak pernah kena, remote sering
 
 ### Fase 4.2.3 — List database dari connection remote (read-only)
@@ -180,6 +180,7 @@ Ditaruh paling belakang karena ini satu-satunya operasi yang bisa merusak data o
 
 - [x] Pakai `ssh.exe` bawaan Windows 10+ (`ssh -N -L <local>:<dbhost>:<dbport> user@host`), bukan embed crate SSH — key auth, `~/.ssh/config` dan ssh-agent didapat gratis, dan maintenance-nya nol
 - [x] Dukung dua mode auth: private key (`-i`), dan **password lewat `SSH_ASKPASS`** — OpenSSH for Windows 9.5p2 memanggil helper askpass, dan helper-nya adalah executable Rezure sendiri yang di-re-enter sebelum Tauri start, jadi tidak ada binary kedua yang harus dibundel. Password dikirim lewat environment proses `ssh` (per-spawn, bukan environment Rezure), bukan argv
+- [x] **Key SSH yang bisa dibaca user lain ditolak OpenSSH** ("UNPROTECTED PRIVATE KEY FILE", "bad permissions"), padahal client GUI seperti TablePlus membukanya (mereka memakai library SSH sendiri yang tidak memeriksa). File di `C:\` mewarisi `BUILTIN\Users` dan `Authenticated Users`, dan folder profil pun bisa punya grup tambahan. Rezure membaca key dan memberikan `ssh` **salinan sementara yang hanya bisa dibaca user saat ini** (`utils::private_file`: DACL terlindungi dengan satu ACE, dibuat lewat satu panggilan `CreateFileW` dengan `CREATE_NEW` sehingga tidak pernah ada saat file terbaca user lain), lalu menghapusnya begitu tunnel naik atau gagal. File asli tidak disentuh, sertifikat `-cert.pub` ikut disalin, dan pesan error `ssh` menyebut path asli. Teruji lawan OpenSSH asli: key yang dibuka ke `Users` ditolak, salinannya diterima
 - [x] Proses tunnel disupervisi seperti child process service lain, dan mati bersama connection-nya
 - [x] Kalau tunnel hidup, seluruh layer DB tetap menembak `127.0.0.1:<port lokal>` — jadi **tidak ada perubahan sama sekali** di kode Fase 4.2.2–4.2.5. Ini alasannya tunnel ditaruh terakhir, bukan pertama
 

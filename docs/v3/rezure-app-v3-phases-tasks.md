@@ -743,9 +743,8 @@ tanpa merilis versi baru Rezure.
 - [x] UI dicek lewat headless Chrome dengan `invoke` tiruan: modal (terang, gelap, sempit),
       keadaan unduh / gagal / offline / kosong, tab Downloaded kosong dan berisi. Menemukan dan
       memperbaiki tab "Downloaded" yang terpotong di kartu palet 16 rem
-- [ ] Belum dicoba di app sungguhan (`tauri dev`) dan belum dilawankan ke `api.redscale.my.id`:
-      server produksi belum punya endpoint ini sampai `laravel-api` di-deploy, migrasi dijalankan
-      (`php artisan migrate`), dan stiker pertama diunggah dari `/dashboard/stickers`
+- [x] **Dilawankan ke server produksi** (`api.redscale.my.id`): katalog berisi 3 stiker nyata, `ETag` kembali sebagai `304`, dan ketiganya (PNG) terunduh dan lolos verifikasi checksum, format, dan ukuran
+- [ ] Belum dicoba di app sungguhan (`tauri dev`): alur Browse, Download, tempel, restart, Remove
 - [ ] Belum dibuat: pagination katalog (satu respons cukup sampai ratusan stiker); pembaruan massal
       stiker yang gambarnya diganti (sekarang tombol **Update** per stiker)
 
@@ -972,6 +971,7 @@ yang sudah dikerjakan.
       maintainer. Sikapnya sama dengan `root` tanpa password di MariaDB Rezure: server dev lokal yang
       hanya terjangkau dari mesin ini. Dibutuhkan karena TablePlus tidak bisa Windows Auth. Terbukti
       login lewat jembatan maupun pipe
+- [x] **Scan SQL Server yang sudah terpasang** (`services::mssql_discovery`, command `detect_sqlserver_instances`): di form Add connection, memilih SQL Server menampilkan "Found on this computer", dan satu klik mengisi host, Windows auth, dan Trust server certificate. Sumbernya edisi terpasang (registry `Instance Names\SQL` + status service `MSSQL$<nama>`) dan instance LocalDB selain milik Rezure (`SqlLocalDB info`). Hanya membaca: tidak menjalankan service, tidak membuat instance, dan instance yang sudah tersimpan tidak ditawarkan lagi. Yang ditawarkan adalah *koneksi*, bukan folder data seperti scan Laragon/XAMPP, karena SQL Server itu service Windows yang tidak dijalankan Rezure. Teruji di mesin dengan LocalDB (`MSSQLLocalDB` terdeteksi, `Rezure` dilewati, alamat `(localdb)\nama` terbukti jalan lewat ODBC). **Bagian edisi terpasang (registry dan `sc`) baru teruji dengan sampel keluaran**, belum di mesin yang punya SQL Express atau Developer
 
 ### Fase 3.14c — SQL Server LocalDB sebagai service
 - [x] Ubin "SQL Server LocalDB" di `InstallVersionModal.vue` dan baris di halaman Switch (pola
