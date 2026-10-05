@@ -148,11 +148,12 @@ impl ClientBuild {
 ///
 /// Prefers a build of the same engine, then falls back to the other one.
 /// The fallback exists because a MariaDB client speaks to a MySQL server
-/// perfectly well for `mysql_native_password` accounts, which is most of
-/// them — refusing outright would block a working setup on a machine that
-/// only ever installed one engine. Where it *doesn't* work
-/// (`caching_sha2_password`) the client says so itself, and that message is
-/// more useful than a guess made here.
+/// perfectly well — `mysql_native_password` natively, and MySQL 8's
+/// `caching_sha2_password` through the plugin MariaDB ships beside it
+/// (`Conn::plugin_dir` points the client at it). Refusing outright would
+/// block a working setup on a machine that only ever installed one engine.
+/// Where it still doesn't work the client says so itself, and that message
+/// is more useful than a guess made here.
 pub fn client_dir(engine: Engine) -> Result<ClientBuild, AppError> {
     let other = match engine {
         Engine::MySql => Engine::MariaDb,

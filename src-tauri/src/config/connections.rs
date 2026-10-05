@@ -116,10 +116,10 @@ pub struct Connection {
     /// Which engine the *server* runs, for a [`ServerKind::Mysql`]
     /// connection. Ignored for every other kind.
     ///
-    /// Not cosmetic: the client binary is picked from this. A MariaDB client
-    /// cannot authenticate against a MySQL 8 account using
-    /// `caching_sha2_password` — no flag works around it — so guessing here
-    /// produces a login failure with no obvious cause.
+    /// Not cosmetic: the client binary is picked from this, and the two
+    /// engines' clients disagree on options (TLS flags, MySQL 8's
+    /// `mysqldump` extras), so guessing here produces failures with no
+    /// obvious cause.
     pub engine: Engine,
     /// SQL Server only: sign in as the Windows user Rezure runs as, with no
     /// password — how LocalDB and most office domain servers are reached.
