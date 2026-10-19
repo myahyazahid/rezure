@@ -86,6 +86,25 @@ impl Engine {
         None
     }
 
+    /// Extra `mysqld` options that make starting a large datadir faster,
+    /// for a server of this engine at `version`.
+    ///
+    /// MySQL 8.0.21+ opens every `.ibd` file at startup to check that its
+    /// path still matches the data dictionary
+    /// (`innodb_validate_tablespace_paths`). With a few thousand tables that
+    /// scan is most of the startup time. It only catches tablespace files
+    /// moved while the server was down, which Rezure never does — a datadir
+    /// is always opened where it lies — so it's skipped. MariaDB has no such
+    /// scan and rejects the option outright, as do older MySQL builds.
+    pub fn fast_startup_args(&self, version: &str) -> Vec<&'static str> {
+        match self {
+            Engine::MySql if version_at_least(version, (8, 0, 21)) => {
+                vec!["--innodb-validate-tablespace-paths=OFF"]
+            }
+            _ => Vec::new(),
+        }
+    }
+
     /// Prepares an empty datadir so the server will start against it.
     ///
     /// The one place the engines genuinely diverge. MariaDB keeps a separate
@@ -152,9 +171,86 @@ pub fn needs_bootstrap(data_dir: &Path) -> bool {
         .unwrap_or(true)
 }
 
+/// Whether a dotted `version` ("8.4.3", "8.0.21-log") is at least `min`.
+/// An unreadable version answers false, so an option is never passed to a
+/// server that might not understand it.
+fn version_at_least(version: &str, min: (u32, u32, u32)) -> bool {
+    let mut parts = version.split('.').map(|part| {
+        part.chars()
+            .take_while(char::is_ascii_digit)
+            .collect::<String>()
+            .parse::<u32>()
+    });
+    let mut next = || parts.next().and_then(Result::ok);
+    match (next(), next(), next()) {
+        (Some(major), Some(minor), patch) => (major, minor, patch.unwrap_or(0)) >= min,
+        _ => false,
+    }
+}
+
+/// Asks the `mysqld` with this `pid` to shut down cleanly, without logging
+/// in.
+///
+/// Both engines' Windows builds create a named event `MySQLShutdown<pid>`
+/// at startup and run their normal shutdown — InnoDB flushed and closed —
+/// when it's signalled; it's how the Windows service wrapper stops them.
+/// Unlike `mysqladmin shutdown` this needs no credentials, so it works on an
+/// adopted datadir whose root has a password Rezure doesn't know. Without
+/// it, that server was force-killed on every stop and paid for it with
+/// crash recovery on the next start.
+///
+/// Returns whether the event was found and signalled; the caller still
+/// waits for the process to exit.
+pub fn signal_shutdown_event(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenEventW, SetEvent, EVENT_MODIFY_STATE};
+
+    let name: Vec<u16> = format!("MySQLShutdown{pid}")
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    // SAFETY: `name` is a NUL-terminated UTF-16 string that outlives the
+    // call, and the handle is only used, then closed, when `OpenEventW`
+    // returned one.
+    unsafe {
+        let event = OpenEventW(EVENT_MODIFY_STATE, 0, name.as_ptr());
+        if event.is_null() {
+            return false;
+        }
+        let signalled = SetEvent(event) != 0;
+        CloseHandle(event);
+        signalled
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_mysql_new_enough_to_have_the_tablespace_scan_skips_it() {
+        let flag = "--innodb-validate-tablespace-paths=OFF";
+        assert!(Engine::MySql.fast_startup_args("8.4.3").contains(&flag));
+        assert!(Engine::MySql.fast_startup_args("8.0.21").contains(&flag));
+        assert!(Engine::MySql.fast_startup_args("9.1.0").contains(&flag));
+        assert!(Engine::MySql.fast_startup_args("8.0.20").is_empty());
+        assert!(Engine::MySql.fast_startup_args("5.7.44").is_empty());
+        assert!(Engine::MySql.fast_startup_args("").is_empty());
+        assert!(Engine::MariaDb.fast_startup_args("11.2.2").is_empty());
+    }
+
+    #[test]
+    fn versions_with_a_suffix_or_no_patch_still_compare() {
+        assert!(version_at_least("8.0.21-log", (8, 0, 21)));
+        assert!(version_at_least("8.1", (8, 0, 21)));
+        assert!(!version_at_least("8.0", (8, 0, 21)));
+        assert!(!version_at_least("unknown", (8, 0, 21)));
+    }
+
+    #[test]
+    fn signalling_a_server_that_isnt_there_reports_nothing_was_sent() {
+        assert!(!signal_shutdown_event(u32::MAX));
+    }
     use std::fs;
     use std::path::PathBuf;
 

@@ -26,6 +26,18 @@ const confirmingForceStop = ref(false)
 
 const isRunning = computed(() => props.service.status === 'running')
 const isPending = computed(() => store.isPending(props.service.id))
+/** A database can take minutes to come up (crash recovery on a large
+ *  datadir) — the row says so instead of sitting on "Stopped". */
+const statusLabel = computed(() => {
+  if (props.service.status === 'starting') return 'Starting…'
+  if (props.service.status === 'stopping') return 'Stopping…'
+  if (isRunning.value) return 'Running'
+  if (isPending.value) return 'Starting…'
+  return props.service.installed ? 'Stopped' : 'Not installed'
+})
+const isTransitioning = computed(
+  () => props.service.status === 'starting' || props.service.status === 'stopping',
+)
 const error = ref<string | null>(null)
 
 /** Every port the service binds — one per worker, plus a web UI's. */
@@ -252,15 +264,21 @@ function requestForceStop() {
             :class="
               isRunning
                 ? 'bg-emerald-500 shadow-[0_0_6px_1px_rgb(16_185_129/0.6)]'
-                : 'bg-neutral-400 dark:bg-neutral-600'
+                : isTransitioning || isPending
+                  ? 'animate-pulse bg-amber-500'
+                  : 'bg-neutral-400 dark:bg-neutral-600'
             "
           ></span>
           <span
             :class="
-              isRunning ? 'font-medium text-emerald-600 dark:text-emerald-400' : 'text-neutral-500'
+              isRunning
+                ? 'font-medium text-emerald-600 dark:text-emerald-400'
+                : isTransitioning || isPending
+                  ? 'font-medium text-amber-600 dark:text-amber-400'
+                  : 'text-neutral-500'
             "
           >
-            {{ isRunning ? 'Running' : service.installed ? 'Stopped' : 'Not installed' }}
+            {{ statusLabel }}
           </span>
           <span
             v-if="isRunning && service.workers"

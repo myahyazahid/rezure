@@ -7,8 +7,8 @@ use std::io::{BufRead, BufReader, Read};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -151,6 +151,40 @@ pub struct ProcessService {
     children: Mutex<Vec<Option<Child>>>,
     sys: Mutex<System>,
     cpu_history: Mutex<Vec<u8>>,
+    /// [`PHASE_IDLE`], or a start or stop in progress — reported as
+    /// `Starting`/`Stopping`, since in either the process exists but isn't
+    /// in `children`. Also what stops a second start from racing the first.
+    phase: AtomicU8,
+    /// When the service last wrote a line of output. See [`OutputClock`].
+    output: OutputClock,
+}
+
+const PHASE_IDLE: u8 = 0;
+const PHASE_STARTING: u8 = 1;
+const PHASE_STOPPING: u8 = 2;
+
+/// When a service last wrote a line of output — how a database that is
+/// slow to start (crash recovery on a large datadir logs as it goes) is
+/// told apart from one that is stuck.
+#[derive(Clone, Default)]
+struct OutputClock(Arc<AtomicU64>);
+
+/// The fixed point [`OutputClock`] counts from, so it can be one atomic.
+fn clock_origin() -> Instant {
+    static ORIGIN: OnceLock<Instant> = OnceLock::new();
+    *ORIGIN.get_or_init(Instant::now)
+}
+
+impl OutputClock {
+    fn touch(&self) {
+        let now = clock_origin().elapsed().as_millis() as u64;
+        self.0.store(now, Ordering::Relaxed);
+    }
+
+    fn quiet_for(&self) -> Duration {
+        let now = clock_origin().elapsed().as_millis() as u64;
+        Duration::from_millis(now.saturating_sub(self.0.load(Ordering::Relaxed)))
+    }
 }
 
 fn empty_slots(workers: u16) -> Mutex<Vec<Option<Child>>> {
@@ -202,6 +236,8 @@ impl ProcessService {
             children: empty_slots(1),
             sys: Mutex::new(System::new()),
             cpu_history: Mutex::new(Vec::new()),
+            phase: AtomicU8::new(PHASE_IDLE),
+            output: OutputClock::default(),
         })
     }
 
@@ -227,6 +263,8 @@ impl ProcessService {
             children: empty_slots(php_pool::WORKERS_PER_VERSION),
             sys: Mutex::new(System::new()),
             cpu_history: Mutex::new(Vec::new()),
+            phase: AtomicU8::new(PHASE_IDLE),
+            output: OutputClock::default(),
         })
     }
 
@@ -253,6 +291,8 @@ impl ProcessService {
             children: empty_slots(php_pool::WORKERS_PER_VERSION),
             sys: Mutex::new(System::new()),
             cpu_history: Mutex::new(Vec::new()),
+            phase: AtomicU8::new(PHASE_IDLE),
+            output: OutputClock::default(),
         }
     }
 
@@ -277,6 +317,8 @@ impl ProcessService {
             children: empty_slots(1),
             sys: Mutex::new(System::new()),
             cpu_history: Mutex::new(Vec::new()),
+            phase: AtomicU8::new(PHASE_IDLE),
+            output: OutputClock::default(),
         })
     }
 
@@ -299,6 +341,8 @@ impl ProcessService {
             children: empty_slots(1),
             sys: Mutex::new(System::new()),
             cpu_history: Mutex::new(Vec::new()),
+            phase: AtomicU8::new(PHASE_IDLE),
+            output: OutputClock::default(),
         })
     }
 
@@ -320,6 +364,8 @@ impl ProcessService {
             children: empty_slots(1),
             sys: Mutex::new(System::new()),
             cpu_history: Mutex::new(Vec::new()),
+            phase: AtomicU8::new(PHASE_IDLE),
+            output: OutputClock::default(),
         }
     }
 
@@ -527,7 +573,8 @@ impl ProcessService {
                 cmd.arg(format!("--datadir={}", data_dir.display()))
                     .arg(format!("--port={}", profile.port))
                     .arg("--bind-address=127.0.0.1")
-                    .arg("--console");
+                    .arg("--console")
+                    .args(profile.engine.fast_startup_args(&profile.version));
                 cmd
             }
             Launch::Mailpit => {
@@ -618,6 +665,7 @@ impl ProcessService {
         if let Some(stdout) = child.stdout.take() {
             spawn_log_reader(
                 self.log_sink.clone(),
+                self.output.clone(),
                 self.id.clone(),
                 LogStream::Stdout,
                 stdout,
@@ -626,6 +674,7 @@ impl ProcessService {
         if let Some(stderr) = child.stderr.take() {
             spawn_log_reader(
                 self.log_sink.clone(),
+                self.output.clone(),
                 self.id.clone(),
                 LogStream::Stderr,
                 stderr,
@@ -727,6 +776,7 @@ impl ProcessService {
 
 fn spawn_log_reader(
     sink: LogSink,
+    output: OutputClock,
     service_id: String,
     stream: LogStream,
     reader: impl Read + Send + 'static,
@@ -734,6 +784,7 @@ fn spawn_log_reader(
     std::thread::spawn(move || {
         for line in BufReader::new(reader).lines() {
             let Ok(line) = line else { break };
+            output.touch();
             sink(&service_id, stream, &line);
         }
     });
@@ -777,19 +828,26 @@ fn ensure_port_available(addr: &str, port: u16, name: &str) -> Result<(), AppErr
 /// Generous on purpose. A clean InnoDB shutdown has to flush dirty pages,
 /// and the whole point of the profile switcher is pointing at datadirs
 /// measured in gigabytes — a timeout tuned for Rezure's own near-empty
-/// datadir would force-kill exactly the large, valuable ones.
-const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
+/// datadir would force-kill exactly the large, valuable ones. A kill here
+/// isn't cheap either: it is paid back as crash recovery on the next start.
+const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// Asks a running server to shut down cleanly.
+/// Asks a running server to shut down cleanly, so InnoDB flushes and closes
+/// its tablespaces instead of being cut off mid-write.
 ///
-/// `mysqladmin shutdown` is the supported way in: it connects and issues a
-/// real shutdown, so InnoDB flushes and closes its tablespaces instead of
-/// being cut off mid-write. `mysqladmin.exe` is spelled the same on both
-/// engines — MariaDB ships it as an alias beside `mariadb-admin.exe`.
+/// The `MySQLShutdown<pid>` event comes first: it needs no login, which
+/// matters for an adopted datadir whose root has a password. `mysqladmin
+/// shutdown` stays as the fallback for a build that doesn't create the
+/// event. `mysqladmin.exe` is spelled the same on both engines — MariaDB
+/// ships it as an alias beside `mariadb-admin.exe`.
 ///
 /// Returns whether the *request* was accepted; the caller still waits for
 /// the process to actually go.
-fn request_graceful_shutdown(server_exe: &Path, port: u16) -> bool {
+fn request_graceful_shutdown(server_exe: &Path, pid: u32, port: u16) -> bool {
+    if db_engine::signal_shutdown_event(pid) {
+        return true;
+    }
+
     let Some(bin_dir) = server_exe.parent() else {
         return false;
     };
@@ -807,6 +865,9 @@ fn request_graceful_shutdown(server_exe: &Path, port: u16) -> bool {
             &port.to_string(),
             "-u",
             database::USER,
+            // A server that is up but not answering would otherwise hold
+            // this for the OS's TCP timeout before the kill fallback runs.
+            "--connect-timeout=5",
             "shutdown",
         ])
         .hidden()
@@ -818,9 +879,54 @@ fn request_graceful_shutdown(server_exe: &Path, port: u16) -> bool {
         .unwrap_or(false)
 }
 
-/// How long a database gets to finish starting before Rezure calls it a
-/// failure. Recovering a large InnoDB datadir is the slow case.
-const READY_TIMEOUT: Duration = Duration::from_secs(45);
+/// How long a starting database may go without writing a line of output
+/// before Rezure calls it stuck.
+///
+/// Silence, not total time, is the measure. Crash recovery on a large
+/// InnoDB datadir can take minutes, and the old fixed 45 s deadline cut
+/// exactly those starts short — killing the server mid-recovery, so the
+/// user's second Start had to pick the recovery up again. Both engines log
+/// recovery progress as they go, so a server still writing is still
+/// working.
+const READY_QUIET_TIMEOUT: Duration = Duration::from_secs(90);
+
+/// The outer bound however chatty the server is, so a start can't wait
+/// forever.
+const READY_MAX_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+
+const READY_POLL_INTERVAL: Duration = Duration::from_millis(200);
+
+/// Why a database didn't come up.
+#[derive(Debug, PartialEq, Eq)]
+enum NotReady {
+    /// The process is gone — it reported its own failure.
+    Exited(String),
+    /// Still running, but silent for [`READY_QUIET_TIMEOUT`].
+    Quiet,
+    /// Still running at [`READY_MAX_TIMEOUT`].
+    TooLong,
+}
+
+impl NotReady {
+    /// Whether the process is still there to be shut down.
+    fn still_running(&self) -> bool {
+        !matches!(self, NotReady::Exited(_))
+    }
+
+    fn reason(&self) -> String {
+        match self {
+            NotReady::Exited(reason) => reason.clone(),
+            NotReady::Quiet => format!(
+                "the server stopped responding: no output and no connections for {}s",
+                READY_QUIET_TIMEOUT.as_secs()
+            ),
+            NotReady::TooLong => format!(
+                "the server was still starting after {} minutes",
+                READY_MAX_TIMEOUT.as_secs() / 60
+            ),
+        }
+    }
+}
 
 /// Waits until the server is actually accepting connections, or has died
 /// trying.
@@ -837,31 +943,66 @@ const READY_TIMEOUT: Duration = Duration::from_secs(45);
 ///
 /// `ready` is the check itself — a TCP connect for MySQL, `pg_isready` for
 /// PostgreSQL, which takes connections on its port before it can serve them.
-fn wait_until_accepting(child: &mut Child, ready: impl Fn() -> bool) -> Result<(), String> {
-    let deadline = Instant::now() + READY_TIMEOUT;
+fn wait_until_accepting(
+    child: &mut Child,
+    ready: impl Fn() -> bool,
+    output: &OutputClock,
+) -> Result<(), NotReady> {
+    wait_for_readiness(
+        || child.try_wait().map(|status| status.map(|s| s.to_string())),
+        ready,
+        output,
+        ReadyLimits {
+            quiet: READY_QUIET_TIMEOUT,
+            max: READY_MAX_TIMEOUT,
+            poll: READY_POLL_INTERVAL,
+        },
+    )
+}
 
-    while Instant::now() < deadline {
+struct ReadyLimits {
+    quiet: Duration,
+    max: Duration,
+    poll: Duration,
+}
+
+/// [`wait_until_accepting`] with the process and the limits passed in, so
+/// the timing rules can be tested without a real server.
+fn wait_for_readiness(
+    mut exit_status: impl FnMut() -> std::io::Result<Option<String>>,
+    ready: impl Fn() -> bool,
+    output: &OutputClock,
+    limits: ReadyLimits,
+) -> Result<(), NotReady> {
+    let started = Instant::now();
+    loop {
         // A dead process will never start listening — check it first so a
-        // fast failure is reported immediately rather than after the full
-        // timeout.
-        match child.try_wait() {
+        // fast failure is reported immediately rather than after a timeout.
+        match exit_status() {
             Ok(Some(status)) => {
-                return Err(format!("the server exited during startup ({status})"));
+                return Err(NotReady::Exited(format!(
+                    "the server exited during startup ({status})"
+                )));
             }
-            Err(err) => return Err(format!("could not check on the server: {err}")),
+            Err(err) => {
+                return Err(NotReady::Exited(format!(
+                    "could not check on the server: {err}"
+                )))
+            }
             Ok(None) => {}
         }
 
         if ready() {
             return Ok(());
         }
-        std::thread::sleep(Duration::from_millis(200));
+        if started.elapsed() >= limits.max {
+            return Err(NotReady::TooLong);
+        }
+        if output.quiet_for() >= limits.quiet {
+            return Err(NotReady::Quiet);
+        }
+        std::thread::sleep(limits.poll);
     }
-
-    Err(format!(
-        "the server did not accept connections within {}s",
-        READY_TIMEOUT.as_secs()
-    ))
 }
 
 /// Polls until `child` exits or `timeout` elapses.
@@ -903,10 +1044,11 @@ impl Service for ProcessService {
             // Running while any worker is: a partly-down PHP still serves
             // every request, just with less headroom — `workers` says how
             // much.
-            status: if pids.is_empty() {
-                ServiceStatus::Stopped
-            } else {
-                ServiceStatus::Running
+            status: match self.phase.load(Ordering::SeqCst) {
+                PHASE_STARTING => ServiceStatus::Starting,
+                PHASE_STOPPING => ServiceStatus::Stopping,
+                _ if pids.is_empty() => ServiceStatus::Stopped,
+                _ => ServiceStatus::Running,
             },
             version,
             port: self.current_port(),
@@ -930,66 +1072,14 @@ impl Service for ProcessService {
     /// supervisor heal a lost PHP worker without dropping requests in flight
     /// on the others.
     fn start(&self) -> Result<ServiceInfo, AppError> {
-        let missing = self.missing_workers();
-        if missing.is_empty() {
+        // A second Start while the first is still waiting on the server (or
+        // one during a stop) would otherwise spawn another server against
+        // the same datadir — "Start all" doesn't know a row is mid-start.
+        let Some(_phase) = Phase::try_enter(&self.phase, PHASE_STARTING) else {
             return Ok(self.info());
-        }
-
-        // Resolving the exe *is* the installed check now: for PHP there's no
-        // manifest entry to look up, just whatever the disk scan found.
-        if !self.resolved_exe().is_ok_and(|exe| exe.is_file()) {
-            return Err(AppError::BinaryNotInstalled(self.name.to_string()));
-        }
-
-        // Only the workers about to be spawned are checked: the ones already
-        // running hold their ports legitimately. Every port is checked
-        // before anything is spawned, so a conflict on the last worker's
-        // port doesn't leave the first ones started for nothing.
-        for &worker in &missing {
-            self.reap_orphan(worker)?;
-        }
-        for &worker in &missing {
-            for port in self.ports_for(worker) {
-                ensure_port_available(self.bind_addr(), port, &self.name)?;
-            }
-        }
-
-        let mut spawned: Vec<(u16, Child)> = Vec::new();
-        for &worker in &missing {
-            match self.spawn_worker(worker) {
-                Ok(child) => spawned.push((worker, child)),
-                Err(err) => {
-                    self.discard(spawned);
-                    return Err(err);
-                }
-            }
-        }
-
-        // Only a database is waited on. nginx and `php-cgi` either bind or
-        // die immediately, while a database does its riskiest work — opening
-        // somebody's datadir — after the process already exists, so "spawned"
-        // and "working" are genuinely different answers for it alone.
-        if self.is_stateful() {
-            if let Some((_, child)) = spawned.first_mut() {
-                if let Err(reason) = wait_until_accepting(child, self.readiness()) {
-                    // It never came up, so nothing should be tracking it as
-                    // running — and a half-started server must not be left
-                    // holding the datadir.
-                    self.discard(spawned);
-                    return Err(AppError::ProcessSpawnFailed {
-                        name: self.display_name(),
-                        reason,
-                    });
-                }
-            }
-        }
-
-        let mut children = self.children.lock().unwrap();
-        for (worker, child) in spawned {
-            children[usize::from(worker)] = Some(child);
-        }
-        drop(children);
-        self.crashed.store(false, Ordering::SeqCst);
+        };
+        self.start_missing()?;
+        drop(_phase);
         Ok(self.info())
     }
 
@@ -1033,40 +1123,153 @@ impl Service for ProcessService {
     }
 }
 
+/// Holds [`ProcessService::phase`] at a start or stop for as long as it
+/// lives, and puts it back to idle when dropped — on every return path,
+/// error ones included.
+struct Phase<'a>(&'a AtomicU8);
+
+impl<'a> Phase<'a> {
+    /// Enters `phase` only from idle; `None` if something else is under way.
+    fn try_enter(slot: &'a AtomicU8, phase: u8) -> Option<Self> {
+        slot.compare_exchange(PHASE_IDLE, phase, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()
+            .map(|_| Self(slot))
+    }
+}
+
+impl Drop for Phase<'_> {
+    fn drop(&mut self) {
+        self.0.store(PHASE_IDLE, Ordering::SeqCst);
+    }
+}
+
 impl ProcessService {
+    /// The body of [`Service::start`]: brings up every worker that isn't
+    /// running.
+    fn start_missing(&self) -> Result<(), AppError> {
+        let missing = self.missing_workers();
+        if missing.is_empty() {
+            return Ok(());
+        }
+
+        // Resolving the exe *is* the installed check now: for PHP there's no
+        // manifest entry to look up, just whatever the disk scan found.
+        if !self.resolved_exe().is_ok_and(|exe| exe.is_file()) {
+            return Err(AppError::BinaryNotInstalled(self.name.to_string()));
+        }
+
+        // Only the workers about to be spawned are checked: the ones already
+        // running hold their ports legitimately. Every port is checked
+        // before anything is spawned, so a conflict on the last worker's
+        // port doesn't leave the first ones started for nothing.
+        for &worker in &missing {
+            self.reap_orphan(worker)?;
+        }
+        for &worker in &missing {
+            for port in self.ports_for(worker) {
+                ensure_port_available(self.bind_addr(), port, &self.name)?;
+            }
+        }
+
+        let mut spawned: Vec<(u16, Child)> = Vec::new();
+        for &worker in &missing {
+            match self.spawn_worker(worker) {
+                Ok(child) => spawned.push((worker, child)),
+                Err(err) => {
+                    self.discard(spawned);
+                    return Err(err);
+                }
+            }
+        }
+
+        // Only a database is waited on. nginx and `php-cgi` either bind or
+        // die immediately, while a database does its riskiest work — opening
+        // somebody's datadir — after the process already exists, so "spawned"
+        // and "working" are genuinely different answers for it alone.
+        if self.is_stateful() {
+            if let Some((_, child)) = spawned.first_mut() {
+                if let Err(not_ready) = wait_until_accepting(child, self.readiness(), &self.output)
+                {
+                    // It never came up, so nothing should be tracking it as
+                    // running — and a half-started server must not be left
+                    // holding the datadir. One that is still alive is asked
+                    // to close first: killing it mid-recovery only leaves
+                    // the next start more recovery to do.
+                    if not_ready.still_running() {
+                        self.abandon(spawned);
+                    } else {
+                        self.discard(spawned);
+                    }
+                    return Err(AppError::ProcessSpawnFailed {
+                        name: self.display_name(),
+                        reason: not_ready.reason(),
+                    });
+                }
+            }
+        }
+
+        let mut children = self.children.lock().unwrap();
+        for (worker, child) in spawned {
+            children[usize::from(worker)] = Some(child);
+        }
+        drop(children);
+        self.crashed.store(false, Ordering::SeqCst);
+        Ok(())
+    }
+
     /// The one stop path. `graceful` decides whether the process is asked to
     /// close itself first or simply killed.
     fn shut_down(&self, graceful: bool) -> Result<ServiceInfo, AppError> {
         // A deliberate stop settles whatever crash came before it — the user
         // has made a call, and the supervisor must not overrule it.
         self.crashed.store(false, Ordering::SeqCst);
-        let mut children = self.children.lock().unwrap();
-        for mut child in children.iter_mut().filter_map(Option::take) {
-            let stopped_cleanly = graceful
-                && self.is_stateful()
-                && self.request_shutdown()
-                && wait_for_exit(&mut child, GRACEFUL_SHUTDOWN_TIMEOUT);
 
-            if !stopped_cleanly {
-                if graceful && self.is_stateful() {
-                    log::warn!(
-                        "{} did not shut down cleanly in {}s — force-killing it",
-                        self.id,
-                        GRACEFUL_SHUTDOWN_TIMEOUT.as_secs()
-                    );
-                }
-                kill_process_tree(child.id());
-            }
-            let _ = child.wait();
+        // Taken out of the lock before waiting on them: a clean database
+        // shutdown can take a while, and `info()` needs that lock to answer
+        // the Services page in the meantime — `phase` is what tells it the
+        // service is stopping rather than stopped.
+        let taken: Vec<Child> = self
+            .children
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .filter_map(Option::take)
+            .collect();
+        let phase = (!taken.is_empty()).then(|| {
+            self.phase.store(PHASE_STOPPING, Ordering::SeqCst);
+            Phase(&self.phase)
+        });
+        for mut child in taken {
+            self.stop_child(&mut child, graceful);
         }
-        drop(children);
+        drop(phase);
+
         for worker in 0..self.workers {
-            if let Ok(path) = pid_file_path(&self.id, worker) {
-                let _ = fs::remove_file(&path);
-            }
+            self.forget_pid(worker);
         }
         self.cpu_history.lock().unwrap().clear();
         Ok(self.info())
+    }
+
+    /// Stops one process: asked to close first when `graceful` and it holds
+    /// state, killed if it won't (or that wasn't asked for).
+    fn stop_child(&self, child: &mut Child, graceful: bool) {
+        let stopped_cleanly = graceful
+            && self.is_stateful()
+            && self.request_shutdown(child.id())
+            && wait_for_exit(child, GRACEFUL_SHUTDOWN_TIMEOUT);
+
+        if !stopped_cleanly {
+            if graceful && self.is_stateful() {
+                log::warn!(
+                    "{} did not shut down cleanly in {}s — force-killing it",
+                    self.id,
+                    GRACEFUL_SHUTDOWN_TIMEOUT.as_secs()
+                );
+            }
+            kill_process_tree(child.id());
+        }
+        let _ = child.wait();
     }
 
     /// How [`wait_until_accepting`] tells a just-spawned database is ready.
@@ -1081,14 +1284,15 @@ impl ProcessService {
         }
     }
 
-    /// Asks a running database to shut down cleanly; whether the request was
-    /// accepted. `false` for every other service, which has nothing to flush.
-    fn request_shutdown(&self) -> bool {
+    /// Asks the database running as `pid` to shut down cleanly; whether the
+    /// request was accepted. `false` for every other service, which has
+    /// nothing to flush.
+    fn request_shutdown(&self, pid: u32) -> bool {
         let Ok(exe) = self.resolved_exe() else {
             return false;
         };
         match self.launch {
-            Launch::Database => request_graceful_shutdown(&exe, self.current_port()),
+            Launch::Database => request_graceful_shutdown(&exe, pid, self.current_port()),
             // The active version's data directory — which is the running
             // one's, because switching versions stops the service first
             // (`postgres::switch`).
@@ -1105,6 +1309,9 @@ impl ProcessService {
             name: self.name.to_string(),
             reason: e.to_string(),
         })?;
+        // The quiet timeout in `wait_until_accepting` counts from here until
+        // the first line of output arrives.
+        self.output.touch();
 
         // A pooled PHP service's folder (`data/php-<version>`) is never created
         // by anything else, and without it this write fails silently — which
@@ -1125,9 +1332,22 @@ impl ProcessService {
         for (worker, mut child) in spawned {
             kill_process_tree(child.id());
             let _ = child.wait();
-            if let Ok(path) = pid_file_path(&self.id, worker) {
-                let _ = fs::remove_file(&path);
-            }
+            self.forget_pid(worker);
+        }
+    }
+
+    /// Like [`Self::discard`], but each one still running is asked to shut
+    /// down cleanly before it is killed.
+    fn abandon(&self, spawned: Vec<(u16, Child)>) {
+        for (worker, mut child) in spawned {
+            self.stop_child(&mut child, true);
+            self.forget_pid(worker);
+        }
+    }
+
+    fn forget_pid(&self, worker: u16) {
+        if let Ok(path) = pid_file_path(&self.id, worker) {
+            let _ = fs::remove_file(&path);
         }
     }
 }
@@ -1568,6 +1788,95 @@ mod tests {
             "force stop should be immediate, took {:?}",
             started.elapsed()
         );
+    }
+
+    fn test_limits() -> ReadyLimits {
+        ReadyLimits {
+            quiet: Duration::from_millis(150),
+            max: Duration::from_secs(5),
+            poll: Duration::from_millis(10),
+        }
+    }
+
+    /// The bug behind "start it a second time and it works": a server busy
+    /// recovering a large datadir was killed at a fixed deadline. As long as
+    /// it keeps writing output it must be waited on.
+    #[test]
+    fn a_server_that_keeps_logging_is_waited_on_past_the_quiet_limit() {
+        let output = OutputClock::default();
+        output.touch();
+        let started = Instant::now();
+        let ready_after = Duration::from_millis(500);
+        let logger = output.clone();
+        let result = wait_for_readiness(
+            || Ok(None),
+            move || {
+                logger.touch();
+                started.elapsed() >= ready_after
+            },
+            &output,
+            test_limits(),
+        );
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn a_silent_server_is_given_up_on_without_being_called_dead() {
+        let output = OutputClock::default();
+        output.touch();
+        let result = wait_for_readiness(|| Ok(None), || false, &output, test_limits());
+        assert_eq!(result, Err(NotReady::Quiet));
+        assert!(NotReady::Quiet.still_running());
+    }
+
+    #[test]
+    fn a_chatty_server_still_has_an_outer_limit() {
+        let output = OutputClock::default();
+        let logger = output.clone();
+        let limits = ReadyLimits {
+            max: Duration::from_millis(300),
+            ..test_limits()
+        };
+        let result = wait_for_readiness(
+            || Ok(None),
+            move || {
+                logger.touch();
+                false
+            },
+            &output,
+            limits,
+        );
+        assert_eq!(result, Err(NotReady::TooLong));
+    }
+
+    #[test]
+    fn a_server_that_exits_is_reported_at_once() {
+        let output = OutputClock::default();
+        output.touch();
+        let started = Instant::now();
+        let result = wait_for_readiness(
+            || Ok(Some("exit code: 1".to_string())),
+            || false,
+            &output,
+            test_limits(),
+        );
+        let Err(not_ready) = result else {
+            panic!("an exited server can't be ready");
+        };
+        assert!(!not_ready.still_running());
+        assert!(not_ready.reason().contains("exit code: 1"));
+        assert!(started.elapsed() < Duration::from_millis(100));
+    }
+
+    #[test]
+    fn a_service_mid_start_reports_starting_and_refuses_a_second_start() {
+        let service = ProcessService::mariadb(no_op_sink()).unwrap();
+        let phase = Phase::try_enter(&service.phase, PHASE_STARTING).unwrap();
+        assert_eq!(service.info().status, ServiceStatus::Starting);
+        assert!(Phase::try_enter(&service.phase, PHASE_STARTING).is_none());
+        assert_eq!(service.start().unwrap().status, ServiceStatus::Starting);
+        drop(phase);
+        assert_eq!(service.info().status, ServiceStatus::Stopped);
     }
 
     #[test]
