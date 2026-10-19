@@ -215,7 +215,7 @@ pub fn reclaim(port: u16) -> Result<(), AppError> {
         });
     }
 
-    super::process::kill_process_tree(holder.pid);
+    super::process::kill_process_tree(tree_root(holder.pid));
 
     // Confirm rather than assume: `taskkill` reporting success doesn't mean
     // the socket is released yet, and a still-held port would otherwise show
@@ -231,6 +231,43 @@ pub fn reclaim(port: u16) -> Result<(), AppError> {
         port,
         reason: format!("{} did not release port {port}", holder.name),
     })
+}
+
+/// The process to kill so that `pid` stays gone: the topmost ancestor still
+/// running the same binary as `pid`.
+///
+/// The process holding a port isn't always the one that matters. nginx's
+/// worker holds port 80, but its master respawns a killed worker at once, so
+/// killing the holder alone freed nothing and the port came back under a
+/// new pid on every retry. MySQL 8 on Windows is the same shape: a monitor
+/// `mysqld` whose child `mysqld` does the listening. Climbing only while the
+/// binary matches stops at whatever launched the server (Rezure, a shell,
+/// Laragon), and it also skips a recycled parent pid that now belongs to
+/// something unrelated.
+fn tree_root(pid: u32) -> u32 {
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::nothing().with_exe(UpdateKind::Always),
+    );
+
+    let mut current = Pid::from_u32(pid);
+    // Bounded: two recycled pids could in principle name each other as
+    // parent, and this must not spin on that.
+    for _ in 0..8 {
+        let Some(process) = sys.process(current) else {
+            break;
+        };
+        let Some(parent) = process.parent().and_then(|ppid| sys.process(ppid)) else {
+            break;
+        };
+        match (process.exe(), parent.exe()) {
+            (Some(exe), Some(parent_exe)) if exe == parent_exe => current = parent.pid(),
+            _ => break,
+        }
+    }
+    current.as_u32()
 }
 
 /// The path a `PortHolder` reports, as a `PathBuf`, for callers comparing
@@ -284,6 +321,49 @@ mod tests {
         drop(listener);
 
         assert!(reclaim(port).is_ok());
+    }
+
+    /// A child running the same binary as its parent resolves to the
+    /// parent: the nginx master/worker shape, rebuilt from `cmd.exe`
+    /// starting another `cmd.exe`, since that is on every Windows machine.
+    #[test]
+    fn a_same_binary_child_resolves_to_its_parent() {
+        let mut outer = Command::new("cmd")
+            .args(["/c", "cmd /c ping -n 30 127.0.0.1 >nul"])
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let outer_pid = Pid::from_u32(outer.id());
+
+        let mut inner = None;
+        for _ in 0..50 {
+            let mut sys = System::new();
+            sys.refresh_processes(ProcessesToUpdate::All, true);
+            inner = sys
+                .processes()
+                .values()
+                .find(|p| p.parent() == Some(outer_pid) && p.name().eq_ignore_ascii_case("cmd.exe"))
+                .map(|p| p.pid().as_u32());
+            if inner.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        let root = inner.map(tree_root);
+        super::super::process::kill_process_tree(outer.id());
+        let _ = outer.wait();
+
+        let inner = inner.expect("the inner cmd.exe never appeared");
+        assert_ne!(inner, outer.id());
+        assert_eq!(root, Some(outer.id()));
+    }
+
+    #[test]
+    fn a_process_launched_by_another_binary_is_its_own_root() {
+        // This test process was started by cargo (or a shell), not by
+        // another copy of itself.
+        assert_eq!(tree_root(std::process::id()), std::process::id());
     }
 
     #[test]
