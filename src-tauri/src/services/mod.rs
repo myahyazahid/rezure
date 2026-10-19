@@ -72,11 +72,9 @@ const CPU_HISTORY_LEN: usize = 24;
 pub enum ServiceStatus {
     Running,
     Stopped,
-    // Reserved for a future async spawn/shutdown step (e.g. waiting on a
-    // service's own readiness probe before reporting it as running).
-    #[allow(dead_code)]
+    /// Spawned, but a database still waiting to accept connections.
     Starting,
-    #[allow(dead_code)]
+    /// Asked to shut down and not gone yet.
     Stopping,
 }
 

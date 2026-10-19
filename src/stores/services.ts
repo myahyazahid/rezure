@@ -88,7 +88,7 @@ export const useServicesStore = defineStore('services', () => {
    *  whole action. */
   function startAll() {
     return Promise.all(
-      services.value.filter((s) => s.status !== 'running' && s.installed).map((s) => start(s.id)),
+      services.value.filter((s) => s.status === 'stopped' && s.installed).map((s) => start(s.id)),
     )
   }
 
