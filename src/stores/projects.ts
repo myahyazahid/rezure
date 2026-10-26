@@ -1,7 +1,13 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import type { LinkPreview, ProjectInfo, ProjectTemplate } from '@/types/project'
+import type {
+  FrameworkCatalog,
+  FrameworkChoice,
+  LinkPreview,
+  ProjectInfo,
+  ProjectTemplate,
+} from '@/types/project'
 import type { ProjectDiagnosis } from '@/types/php'
 import { useServicesStore } from '@/stores/services'
 
@@ -9,6 +15,20 @@ function errorMessage(e: unknown): string {
   if (typeof e === 'string') return e
   if (e instanceof Error) return e.message
   return 'Something went wrong.'
+}
+
+/** The two optional command arguments a framework choice travels as. */
+function choiceArgs(choice: FrameworkChoice | undefined) {
+  return {
+    framework: choice && 'framework' in choice ? choice.framework : null,
+    docroot: choice && 'docroot' in choice ? choice.docroot : null,
+  }
+}
+
+/** Labels for the two ids that aren't registry entries. */
+const SPECIAL_FRAMEWORK_LABELS: Record<string, string> = {
+  unknown: 'Unknown',
+  custom: 'Custom',
 }
 
 export const useProjectsStore = defineStore('projects', () => {
@@ -151,19 +171,30 @@ export const useProjectsStore = defineStore('projects', () => {
     }
   }
 
-  /** Validates a folder and reports what linking it would produce. Throws
-   *  with a readable reason when the path can't be used. */
-  function previewLink(path: string) {
-    return invoke<LinkPreview>('preview_project_link', { path })
+  /** Validates a folder and reports what linking it would produce — as the
+   *  framework the user picked, when they picked one. Throws with a readable
+   *  reason when the path or the choice can't be used. */
+  function previewLink(path: string, choice?: FrameworkChoice) {
+    return invoke<LinkPreview>('preview_project_link', { path, ...choiceArgs(choice) })
   }
 
   /** Registers a folder outside www as a project. Records the path only —
    *  nothing inside the folder is touched. */
-  async function linkProject(path: string, name?: string, domain?: string) {
+  async function linkProject(
+    path: string,
+    name?: string,
+    domain?: string,
+    choice?: FrameworkChoice,
+  ) {
     linking.value = true
     linkError.value = null
     try {
-      await invoke('link_project', { path, name: name ?? null, domain: domain ?? null })
+      await invoke('link_project', {
+        path,
+        name: name ?? null,
+        domain: domain ?? null,
+        ...choiceArgs(choice),
+      })
       await fetchAll()
       return true
     } catch (e) {
@@ -224,6 +255,83 @@ export const useProjectsStore = defineStore('projects', () => {
   function closePhpVersionModal() {
     phpVersionModalFor.value = null
     phpVersionError.value = null
+  }
+
+  /** Every framework the pickers offer, plus what's wrong with the user's
+   *  own definitions or saved choices. Loaded with the Projects page. */
+  const frameworkCatalog = ref<FrameworkCatalog>({ frameworks: [], problems: [] })
+  const reloadingFrameworks = ref(false)
+  const frameworkError = ref<string | null>(null)
+  /** The project whose framework picker is open, or null — same shape as
+   *  `phpVersionModalFor` above. */
+  const frameworkModalFor = ref<string | null>(null)
+  const settingFramework = ref(false)
+
+  /** Best-effort: without the list, the pickers still offer Auto and Custom. */
+  async function fetchFrameworks() {
+    try {
+      frameworkCatalog.value = await invoke<FrameworkCatalog>('list_frameworks')
+    } catch (e) {
+      frameworkError.value = errorMessage(e)
+    }
+  }
+
+  /**
+   * Re-reads the user's own `etc\frameworks.json` — the only way an edit to
+   * it takes effect without restarting the app — then refetches the list,
+   * since any project may now be detected differently.
+   */
+  async function reloadFrameworks() {
+    reloadingFrameworks.value = true
+    frameworkError.value = null
+    try {
+      frameworkCatalog.value = await invoke<FrameworkCatalog>('reload_frameworks')
+      await fetchAll()
+    } catch (e) {
+      frameworkError.value = errorMessage(e)
+    } finally {
+      reloadingFrameworks.value = false
+    }
+  }
+
+  /** A framework id as the user reads it. */
+  function frameworkLabel(id: string) {
+    return (
+      frameworkCatalog.value.frameworks.find((f) => f.id === id)?.label ??
+      SPECIAL_FRAMEWORK_LABELS[id] ??
+      id
+    )
+  }
+
+  /**
+   * Serves a project as another framework, from a folder of the user's
+   * choosing ("Custom"), or — with `null` — as detected again. Rust rewrites
+   * the vhost and reloads nginx, so the change is live when this returns.
+   */
+  async function setFramework(id: string, choice: FrameworkChoice) {
+    settingFramework.value = true
+    frameworkError.value = null
+    try {
+      await invoke('set_project_framework', { id, ...choiceArgs(choice) })
+      await fetchAll()
+      frameworkModalFor.value = null
+      return true
+    } catch (e) {
+      frameworkError.value = errorMessage(e)
+      return false
+    } finally {
+      settingFramework.value = false
+    }
+  }
+
+  function openFrameworkModal(id: string) {
+    frameworkError.value = null
+    frameworkModalFor.value = id
+  }
+
+  function closeFrameworkModal() {
+    frameworkModalFor.value = null
+    frameworkError.value = null
   }
 
   const nodeVersionError = ref<string | null>(null)
@@ -338,6 +446,17 @@ export const useProjectsStore = defineStore('projects', () => {
     setPhpVersion,
     openPhpVersionModal,
     closePhpVersionModal,
+    frameworkCatalog,
+    reloadingFrameworks,
+    frameworkError,
+    frameworkModalFor,
+    settingFramework,
+    fetchFrameworks,
+    reloadFrameworks,
+    frameworkLabel,
+    setFramework,
+    openFrameworkModal,
+    closeFrameworkModal,
     nodeVersionError,
     nodeVersionModalFor,
     settingNodeVersion,

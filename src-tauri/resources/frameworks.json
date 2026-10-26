@@ -1,0 +1,183 @@
+{
+  "frameworks": [
+    {
+      "id": "laravel",
+      "label": "Laravel",
+      "category": "PHP",
+      "priority": 90,
+      "detect": { "any": [{ "file": "artisan" }, { "composer": "laravel/framework" }] },
+      "docroot": "public"
+    },
+    {
+      "id": "codeigniter4",
+      "label": "CodeIgniter 4",
+      "category": "PHP",
+      "priority": 90,
+      "detect": { "any": [{ "file": "spark" }, { "composer": "codeigniter4/framework" }] },
+      "docroot": "public"
+    },
+    {
+      "id": "codeigniter3",
+      "label": "CodeIgniter 3",
+      "category": "PHP",
+      "priority": 90,
+      "detect": {
+        "any": [{ "file": "system/core/CodeIgniter.php" }, { "composer": "codeigniter/framework" }]
+      }
+    },
+    {
+      "id": "wordpress",
+      "label": "WordPress",
+      "category": "PHP",
+      "priority": 90,
+      "detect": { "any": [{ "file": "wp-config.php" }, { "file": "wp-load.php" }] }
+    },
+    {
+      "id": "bedrock",
+      "label": "Bedrock",
+      "category": "PHP",
+      "priority": 90,
+      "detect": { "all": [{ "composer": "roots/wordpress" }, { "dir": "web/app" }] },
+      "docroot": "web"
+    },
+    {
+      "id": "drupal",
+      "label": "Drupal",
+      "category": "PHP",
+      "priority": 90,
+      "detect": {
+        "any": [
+          { "composer": "drupal/core" },
+          { "composer": "drupal/core-recommended" },
+          { "file": "core/lib/Drupal.php" }
+        ]
+      },
+      "docroot": "web"
+    },
+    {
+      "id": "joomla",
+      "label": "Joomla",
+      "category": "PHP",
+      "priority": 90,
+      "detect": { "all": [{ "dir": "administrator" }, { "file": "includes/defines.php" }] }
+    },
+    {
+      "id": "symfony",
+      "label": "Symfony",
+      "category": "PHP",
+      "priority": 80,
+      "detect": { "composer": "symfony/framework-bundle" },
+      "docroot": "public"
+    },
+    {
+      "id": "yii2",
+      "label": "Yii 2",
+      "category": "PHP",
+      "priority": 80,
+      "detect": { "composer": "yiisoft/yii2" },
+      "docroot": "web"
+    },
+    {
+      "id": "cakephp",
+      "label": "CakePHP",
+      "category": "PHP",
+      "priority": 80,
+      "detect": { "composer": "cakephp/cakephp" },
+      "docroot": "webroot"
+    },
+    {
+      "id": "slim",
+      "label": "Slim",
+      "category": "PHP",
+      "priority": 80,
+      "detect": { "composer": "slim/slim" },
+      "docroot": "public"
+    },
+    {
+      "id": "laminas",
+      "label": "Laminas",
+      "category": "PHP",
+      "priority": 80,
+      "detect": { "any": [{ "composer": "laminas/laminas-mvc" }, { "composer": "mezzio/mezzio" }] },
+      "docroot": "public"
+    },
+    {
+      "id": "nextjs",
+      "label": "Next.js",
+      "category": "JavaScript",
+      "priority": 55,
+      "detect": { "npm": "next" }
+    },
+    {
+      "id": "nuxt",
+      "label": "Nuxt",
+      "category": "JavaScript",
+      "priority": 55,
+      "detect": { "npm": "nuxt" }
+    },
+    {
+      "id": "astro",
+      "label": "Astro",
+      "category": "JavaScript",
+      "priority": 55,
+      "detect": { "npm": "astro" }
+    },
+    {
+      "id": "vue",
+      "label": "Vue",
+      "category": "JavaScript",
+      "priority": 50,
+      "detect": { "npm": "vue" }
+    },
+    {
+      "id": "react",
+      "label": "React",
+      "category": "JavaScript",
+      "priority": 50,
+      "detect": { "npm": "react" }
+    },
+    {
+      "id": "svelte",
+      "label": "Svelte",
+      "category": "JavaScript",
+      "priority": 50,
+      "detect": { "any": [{ "npm": "svelte" }, { "npm": "@sveltejs/kit" }] }
+    },
+    {
+      "id": "angular",
+      "label": "Angular",
+      "category": "JavaScript",
+      "priority": 50,
+      "detect": { "npm": "@angular/core" }
+    },
+    {
+      "id": "php-public",
+      "label": "PHP (public/)",
+      "category": "Generic",
+      "priority": 30,
+      "detect": { "all": [{ "file": "public/index.php" }, { "not": { "file": "index.php" } }] },
+      "docroot": "public"
+    },
+    {
+      "id": "php",
+      "label": "PHP",
+      "category": "Generic",
+      "priority": 20,
+      "detect": { "any": [{ "file": "composer.json" }, { "file": "index.php" }] }
+    },
+    {
+      "id": "node",
+      "label": "Node",
+      "category": "Generic",
+      "priority": 15,
+      "detect": { "file": "package.json" }
+    },
+    {
+      "id": "static",
+      "label": "Static",
+      "category": "Generic",
+      "priority": 10,
+      "detect": { "file": "index.html" }
+    }
+  ]
+}

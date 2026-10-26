@@ -74,6 +74,16 @@ See [`docs/setup-dev.md`](docs/setup-dev.md) for a more detailed walkthrough, in
 
 ---
 
+## 🧩 Adding a Framework
+
+Rezure recognises frameworks (and so which folder nginx serves) from definitions in
+[`src-tauri/resources/frameworks.json`](src-tauri/resources/frameworks.json), not from code. Teaching
+it a new one is a small, self-contained PR: one entry in that file plus one fixture folder under
+`src-tauri/tests/fixtures/frameworks/` — the tests pick both up on their own. The format, the
+priority bands and the fixture rules are in [`docs/v1/frameworks.md`](docs/v1/frameworks.md).
+
+---
+
 ## 📝 Commit Messages
 
 We follow [Conventional Commits](https://www.conventionalcommits.org/):

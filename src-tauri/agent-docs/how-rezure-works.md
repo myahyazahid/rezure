@@ -51,7 +51,7 @@ they serve the projects.** Rezure's projects are served by Rezure. See
 | `{{home}}\custom\<runtime>\<name>\` | Runtimes added by hand. They're used, but Rezure didn't verify them. |
 | `{{home}}\current\php` | A junction to the active PHP version's folder. |
 | `{{home}}\data\` | Runtime state: generated Nginx and PHP config, the default database's data, PID files. |
-| `{{home}}\etc\` | Settings (`settings.json`), database profiles (`profiles.json`), linked projects (`links.json`), the CA bundle (`cacert.pem`), and **PHP overrides (`php\conf.d\`)**. |
+| `{{home}}\etc\` | Settings (`settings.json`), database profiles (`profiles.json`), linked projects (`links.json`), framework choices per project (`project-frameworks.json`), **your own framework definitions (`frameworks.json`)**, the CA bundle (`cacert.pem`), and **PHP overrides (`php\conf.d\`)**. |
 | `{{home}}\dumps\` | SQL exports made from the Databases page. |
 | `{{home}}\rezure.db` | Rezure's own SQLite database (project history, PHP/Node version pins). |
 
@@ -65,9 +65,11 @@ they serve the projects.** Rezure's projects are served by Rezure. See
   domain. Rezure never writes into a linked folder.
 - New projects can be created from templates: Laravel (`composer create-project`),
   WordPress, blank PHP, static HTML.
-- **Document root:** a Laravel project (one with an `artisan` file and a
-  `public\` folder) is served from `public\`. Everything else is served from the
-  project folder itself. Requests fall through to `index.php` (front controller).
+- **Document root:** decided by the project's framework — see
+  [Frameworks and document roots](#frameworks-and-document-roots). Laravel and
+  CodeIgniter 4 are served from `public\`, WordPress from the project folder
+  itself. `{{home}}\AGENTS.md` lists each project's framework and served folder.
+  Requests fall through to `index.php` (front controller).
 - **Hosts file:** `.test` domains resolve through a block Rezure manages in
   `C:\Windows\System32\drivers\etc\hosts`, between
   `# --- Rezure managed entries (do not edit below) ---` and
@@ -77,6 +79,50 @@ they serve the projects.** Rezure's projects are served by Rezure. See
   doesn't add its hosts entry.** If `<name>.test` doesn't resolve, that's why.
 - **Requirements check** on a project card checks the project's PHP extensions,
   outgoing HTTPS from PHP, and its mail settings.
+
+## Frameworks and document roots
+
+Rezure recognises a project's framework from marker files (`artisan`, `spark`,
+`wp-config.php`, packages in `composer.json` or `package.json`), and the
+framework decides which folder Nginx serves. When several match, the most
+specific wins: a CodeIgniter 4 app with a `package.json` for its CSS is still
+CodeIgniter 4.
+
+- **Wrong framework?** The user changes it from the framework badge on the
+  Projects page: pick another framework, or **Custom** with a subfolder to serve.
+  Rezure keeps that in `{{home}}\etc\project-frameworks.json`. Don't edit that
+  file; the app writes it.
+- **A framework Rezure doesn't know** goes in `{{home}}\etc\frameworks.json`.
+  This one is meant to be edited by hand. After saving it, click **Reload** in
+  the framework picker (or restart the app). Mistakes are listed on the Projects
+  page; the rest of the file still applies.
+
+```json
+{
+  "frameworks": [
+    {
+      "id": "acme",
+      "label": "Acme CMS",
+      "priority": 85,
+      "detect": { "any": [{ "composer": "acme/core" }, { "file": "acme.php" }] },
+      "docroot": "public"
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `id` | Lowercase letters, digits and hyphens. Reusing a built-in id (`laravel`, `codeigniter4`, ...) replaces that definition. |
+| `label` | What the Projects page shows. |
+| `priority` | 0 to 100, highest match wins. Built-ins: 90 for frameworks with their own marker file, 80 for ones found through Composer, 50–55 for JavaScript frameworks, 10–30 for plain PHP / Node / static. |
+| `detect` | `{ "file": "path" }`, `{ "dir": "path" }`, `{ "composer": "vendor/package" }`, `{ "npm": "package" }`, combined with `{ "any": [...] }`, `{ "all": [...] }` and `{ "not": {...} }`. Paths are relative to the project. |
+| `category` | Optional heading in the app's framework picker (`PHP`, `JavaScript`, ...). Left out: "Your frameworks". |
+| `docroot` | Optional subfolder to serve, relative, no `..`. Left out: the project folder. If the subfolder doesn't exist in a project, that project is served from its own folder. |
+
+Definitions only choose a folder. Every project gets the same Nginx rules
+(static files, everything else through `index.php`); there's no way to add
+Nginx directives through them.
 
 ## Web server (Nginx)
 
@@ -308,7 +354,9 @@ person you shared it with.
   served.
 - Don't edit anything under `{{home}}\data\` (generated), the hosts file's Rezure
   block, `{{home}}\current\`, or the JSON files in `{{home}}\etc\` while the app is
-  running.
+  running. The one exception is `{{home}}\etc\frameworks.json`, which is read
+  only when the user clicks **Reload** (see
+  [Frameworks and document roots](#frameworks-and-document-roots)).
 - Don't start, stop or kill `nginx.exe`, `php-cgi.exe`, `mysqld.exe`,
   `postgres.exe`, `mailpit.exe` or LocalDB's `sqlservr.exe` yourself. Don't run
   `pg_ctl` or `initdb` against `{{home}}\data\postgres\`. Don't run `SqlLocalDB` to

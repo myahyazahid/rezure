@@ -23,7 +23,7 @@ use super::binaries;
 use super::php;
 use super::php_ini;
 use super::php_pool;
-use super::projects::{docroot, scan_projects};
+use super::projects::scan_projects;
 use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
 use crate::utils::paths;
@@ -191,13 +191,10 @@ fn write_if_changed(path: &Path, contents: &str) -> Result<bool, AppError> {
     Ok(true)
 }
 
-fn vhost_config(
-    domain: &str,
-    project_root: &Path,
-    stack: &str,
-    fastcgi_params: &Path,
-    upstream: &str,
-) -> String {
+/// One project's `server` block. `docroot` is already resolved — the
+/// framework (and any override) decided it in `services::frameworks`, so the
+/// template itself is the same for every project: the `php` serve profile.
+fn vhost_config(domain: &str, docroot: &Path, fastcgi_params: &Path, upstream: &str) -> String {
     format!(
         r#"server {{
     listen 80;
@@ -222,7 +219,7 @@ fn vhost_config(
 }}
 "#,
         domain = domain,
-        root = conf_path(&docroot(project_root, stack)),
+        root = conf_path(docroot),
         upstream = upstream,
         fastcgi_params = conf_path(fastcgi_params),
     )
@@ -325,8 +322,7 @@ pub fn sync_vhosts(
         );
         let config = vhost_config(
             &project.domain,
-            Path::new(&project.path),
-            &project.stack,
+            Path::new(&project.docroot),
             &fastcgi_params,
             &php_pool::upstream_name(base),
         );
@@ -390,7 +386,6 @@ mod tests {
         let config = vhost_config(
             "blog.test",
             Path::new(r"C:\Users\dev\rezure\www\blog"),
-            "PHP",
             Path::new(r"C:\nginx\conf\fastcgi_params"),
             &php_pool::upstream_name(php_pool::DEFAULT_BASE_PORT),
         );
@@ -429,20 +424,31 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
+    /// End to end from the folder: a CodeIgniter 4 app (the shape that used
+    /// to be detected as Node) gets a vhost rooted at its `public\`.
     #[test]
-    fn vhost_config_roots_laravel_projects_at_public() {
+    fn vhost_config_roots_codeigniter4_projects_at_public() {
         let dir = std::env::temp_dir().join(format!("rezure-test-vhost-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("public")).unwrap();
+        fs::write(dir.join("spark"), "").unwrap();
+        fs::write(
+            dir.join("package.json"),
+            r#"{"dependencies":{"sass":"latest"}}"#,
+        )
+        .unwrap();
 
+        let serving = crate::services::frameworks::builtin_registry().serving(&dir, None);
         let config = vhost_config(
             "app.test",
-            &dir,
-            "Laravel",
+            &serving.docroot,
             Path::new("fastcgi_params"),
             &php_pool::upstream_name(php_pool::DEFAULT_BASE_PORT),
         );
-        assert!(config.contains(&conf_path(&dir.join("public"))));
+        assert!(
+            config.contains(&format!("root \"{}\";", conf_path(&dir.join("public")))),
+            "{config}"
+        );
 
         fs::remove_dir_all(&dir).unwrap();
     }

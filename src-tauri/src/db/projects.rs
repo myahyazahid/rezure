@@ -33,9 +33,21 @@ pub struct ProjectInfo {
     pub name: String,
     pub path: String,
     pub domain: String,
-    /// Detected framework/stack (Laravel, Vue, WordPress, ...), shown as a
-    /// badge in the UI.
+    /// The framework's label (Laravel, CodeIgniter 4, Vue, ...), shown as a
+    /// badge in the UI — whatever `framework` resolved to, override or not.
     pub stack: String,
+    /// The framework id the project is served as: a registry id from
+    /// `services::frameworks`, `custom` or `unknown`.
+    pub framework: String,
+    /// What detection alone says, so the UI can offer "Auto (detected: X)"
+    /// next to a manual choice.
+    pub detected_framework: String,
+    /// Whether the user's choice (`config::project_frameworks`), rather than
+    /// detection, decided `framework`.
+    pub framework_overridden: bool,
+    /// The folder nginx serves, absolute — `public\` for Laravel and
+    /// CodeIgniter 4, the project folder for most others.
+    pub docroot: String,
     /// Whether `domain` currently resolves to 127.0.0.1 via the OS hosts
     /// file — read-only, no admin rights needed to check.
     pub has_hosts_entry: bool,
@@ -274,6 +286,10 @@ mod tests {
             path: format!("C:/rezure/www/{id}"),
             domain: format!("{id}.test"),
             stack: "PHP".to_string(),
+            framework: "php".to_string(),
+            detected_framework: "php".to_string(),
+            framework_overridden: false,
+            docroot: format!("C:/rezure/www/{id}"),
             has_hosts_entry: false,
             last_opened_at: None,
             open_count: 0,

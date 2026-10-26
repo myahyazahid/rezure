@@ -1,9 +1,12 @@
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::db::projects::ProjectInfo;
 use crate::db::{self, DbState};
+use crate::services::frameworks::{self, FrameworkCatalog};
 use crate::services::scaffold::ProjectTemplate;
-use crate::services::{hosts, launcher, projects, scaffold, vhosts, ServiceManager, ServiceStatus};
+use crate::services::{
+    hosts, launcher, projects, scaffold, telemetry, vhosts, ServiceManager, ServiceStatus,
+};
 use crate::utils::error::AppError;
 
 /// Makes a project just created, linked or unlinked live immediately
@@ -269,27 +272,47 @@ pub fn open_project_terminal(id: String, db_state: State<'_, DbState>) -> Result
     Ok(())
 }
 
-/// What linking a folder would produce — name, stack, docroot and the
+/// What linking a folder would produce — name, framework, docroot and the
 /// domain it would get — without registering anything. Also where a bad
 /// path is refused, so the dialog can say why before the user commits.
+///
+/// `framework` (an id) or `docroot` (a subfolder, "Custom") previews the
+/// user's own choice instead of detection; at most one of them.
 #[tauri::command]
-pub fn preview_project_link(path: String) -> Result<projects::LinkPreview, AppError> {
-    projects::prepare_link(&path)
+pub fn preview_project_link(
+    path: String,
+    framework: Option<String>,
+    docroot: Option<String>,
+) -> Result<projects::LinkPreview, AppError> {
+    let choice = projects::choice(framework, docroot)?;
+    projects::prepare_link(&path, choice.as_ref())
 }
 
 /// Registers a folder outside `www` as a project. Records the path only —
-/// nothing inside the folder is read, written or moved.
+/// nothing inside the folder is read, written or moved. `framework` and
+/// `docroot` as in [`preview_project_link`].
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub fn link_project(
     path: String,
     name: Option<String>,
     domain: Option<String>,
+    framework: Option<String>,
+    docroot: Option<String>,
+    app: AppHandle,
     manager: State<'_, ServiceManager>,
     db_state: State<'_, DbState>,
 ) -> Result<(), AppError> {
-    projects::link(&path, name, domain)?;
+    let choice = projects::choice(framework, docroot)?;
+    let outcome = projects::link(&path, name, domain, choice)?;
     // The newly linked project needs a vhost before it can serve.
     sync_vhosts_and_reload(&manager, &db_state, "after linking");
+    telemetry::record_framework(
+        &app,
+        "project.linked",
+        &outcome.detected_framework,
+        outcome.choice.as_ref(),
+    );
     Ok(())
 }
 
@@ -303,5 +326,49 @@ pub fn unlink_project(
 ) -> Result<(), AppError> {
     projects::unlink(&id)?;
     sync_vhosts_and_reload(&manager, &db_state, "after unlinking");
+    Ok(())
+}
+
+/// Every framework the pickers can offer, plus anything wrong with the
+/// definitions or with a project's saved choice.
+#[tauri::command]
+pub fn list_frameworks() -> Result<FrameworkCatalog, AppError> {
+    projects::framework_catalog()
+}
+
+/// Re-reads the user's own `etc\frameworks.json` — the only way an edit to
+/// it takes effect without restarting — and re-serves every project, since
+/// any of them may now be detected differently.
+#[tauri::command]
+pub fn reload_frameworks(
+    manager: State<'_, ServiceManager>,
+    db_state: State<'_, DbState>,
+) -> Result<FrameworkCatalog, AppError> {
+    frameworks::reload();
+    sync_vhosts_and_reload(&manager, &db_state, "after reloading frameworks");
+    projects::framework_catalog()
+}
+
+/// Serves a project as `framework` (an id) or from `docroot` (a subfolder,
+/// "Custom") — or, with neither, goes back to what detection says. Live
+/// immediately: the vhosts are rewritten and a running nginx reloaded.
+#[tauri::command]
+pub fn set_project_framework(
+    id: String,
+    framework: Option<String>,
+    docroot: Option<String>,
+    app: AppHandle,
+    manager: State<'_, ServiceManager>,
+    db_state: State<'_, DbState>,
+) -> Result<(), AppError> {
+    let choice = projects::choice(framework, docroot)?;
+    let change = projects::set_framework(&id, choice)?;
+    sync_vhosts_and_reload(&manager, &db_state, "after changing a project's framework");
+    telemetry::record_framework(
+        &app,
+        "project.framework_changed",
+        &change.detected_framework,
+        change.choice.as_ref(),
+    );
     Ok(())
 }

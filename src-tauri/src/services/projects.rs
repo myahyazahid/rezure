@@ -1,17 +1,20 @@
 //! Auto-detects local projects by scanning `www_root()` — one folder, one
-//! project, stack guessed from marker files (`artisan`, `wp-config.php`,
-//! `package.json`, ...). The filesystem is the source of truth for *which*
-//! projects exist, rescanned on every `list_projects` call; `commands::projects`
-//! merges in each project's SQLite history (`db::projects`) afterward.
+//! project, framework recognised by `services::frameworks` (with the user's
+//! own choice from `config::project_frameworks` winning over detection). The
+//! filesystem is the source of truth for *which* projects exist, rescanned on
+//! every `list_projects` call; `commands::projects` merges in each project's
+//! SQLite history (`db::projects`) afterward.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
-use serde_json::Value;
 
+use super::frameworks::{self, FrameworkCatalog, Registry};
 use super::hosts;
-use crate::config::links;
+use crate::config::links::{self, LinkStore};
+use crate::config::project_frameworks::{self, FrameworkOverride, OverrideStore};
 use crate::db::projects::{ProjectInfo, ProjectKind};
 use crate::utils::error::AppError;
 use crate::utils::paths;
@@ -60,10 +63,13 @@ pub fn www_root() -> Result<PathBuf, AppError> {
 /// The single place that answers "what projects exist" — the list, vhost
 /// generation, the hosts file, the launcher and database-to-project
 /// matching all read it, so linked projects work everywhere by virtue of
-/// appearing here.
+/// appearing here. The same goes for framework choices: they're applied
+/// here, so every one of those consumers serves the corrected docroot.
 pub fn scan_projects() -> Result<Vec<ProjectInfo>, AppError> {
-    let mut projects = scan_www()?;
-    projects.extend(linked_projects(&projects));
+    let registry = frameworks::registry();
+    let overrides = project_frameworks::load();
+    let mut projects = scan_www(&registry, &overrides)?;
+    projects.extend(linked_projects(&projects, &registry, &overrides));
     projects.sort_by_key(|p| p.name.to_lowercase());
     Ok(projects)
 }
@@ -88,7 +94,11 @@ pub fn find(id: &str) -> Result<ProjectInfo, AppError> {
 /// before saving — but a hand-edited `links.json`, or a folder later moved
 /// into `www`, can still produce one. Two vhosts for one domain is a
 /// confusing failure, so the scanned one wins and the link is logged.
-fn linked_projects(scanned: &[ProjectInfo]) -> Vec<ProjectInfo> {
+fn linked_projects(
+    scanned: &[ProjectInfo],
+    registry: &Registry,
+    overrides: &OverrideStore,
+) -> Vec<ProjectInfo> {
     let store = links::load();
     let mut taken: Vec<String> = scanned.iter().map(|p| p.domain.clone()).collect();
     let mut projects = Vec::new();
@@ -106,6 +116,28 @@ fn linked_projects(scanned: &[ProjectInfo]) -> Vec<ProjectInfo> {
 
         let path = PathBuf::from(&link.path);
         let missing = !path.is_dir();
+        let choice = overrides.get(&link.id);
+
+        // A folder that isn't there can't be inspected; the badge would
+        // otherwise read "Unknown" as though the project had no framework.
+        let (stack, framework, detected_framework, framework_overridden, docroot) = if missing {
+            (
+                "Missing".to_string(),
+                frameworks::UNKNOWN.to_string(),
+                frameworks::UNKNOWN.to_string(),
+                choice.is_some(),
+                link.path.clone(),
+            )
+        } else {
+            let serving = registry.serving(&path, choice);
+            (
+                serving.label,
+                serving.framework,
+                serving.detected,
+                serving.overridden,
+                serving.docroot.display().to_string(),
+            )
+        };
 
         projects.push(ProjectInfo {
             id: link.id,
@@ -116,13 +148,11 @@ fn linked_projects(scanned: &[ProjectInfo]) -> Vec<ProjectInfo> {
             // by an older build or edited by hand hasn't been through it.
             domain_invalid: !is_safe_domain(&link.domain),
             domain: link.domain,
-            // A folder that isn't there can't be inspected; the badge would
-            // otherwise read "Unknown" as though the project had no stack.
-            stack: if missing {
-                "Missing".to_string()
-            } else {
-                detect_stack(&path)
-            },
+            stack,
+            framework,
+            detected_framework,
+            framework_overridden,
+            docroot,
             last_opened_at: None,
             open_count: 0,
             kind: ProjectKind::Linked,
@@ -138,7 +168,7 @@ fn linked_projects(scanned: &[ProjectInfo]) -> Vec<ProjectInfo> {
 }
 
 /// Scans `www_root()` for project folders.
-fn scan_www() -> Result<Vec<ProjectInfo>, AppError> {
+fn scan_www(registry: &Registry, overrides: &OverrideStore) -> Result<Vec<ProjectInfo>, AppError> {
     let root = www_root()?;
     fs::create_dir_all(&root)
         .map_err(|e| AppError::Io(format!("could not create {}: {e}", root.display())))?;
@@ -167,6 +197,7 @@ fn scan_www() -> Result<Vec<ProjectInfo>, AppError> {
         // The folder name comes off the disk, so nothing has vetted it —
         // it's whatever the user (or an unzipped archive) called it.
         let domain_invalid = !is_safe_domain(&domain);
+        let serving = registry.serving(&path, overrides.get(folder_name));
         projects.push(ProjectInfo {
             id: folder_name.to_string(),
             name: folder_name.to_string(),
@@ -174,7 +205,11 @@ fn scan_www() -> Result<Vec<ProjectInfo>, AppError> {
             has_hosts_entry: hosts::has_entry(&domain),
             domain,
             domain_invalid,
-            stack: detect_stack(&path),
+            stack: serving.label,
+            framework: serving.framework,
+            detected_framework: serving.detected,
+            framework_overridden: serving.overridden,
+            docroot: serving.docroot.display().to_string(),
             // Filled in by `commands::projects::list_projects` from SQLite —
             // a bare scan has no way to know this.
             last_opened_at: None,
@@ -195,7 +230,7 @@ fn scan_www() -> Result<Vec<ProjectInfo>, AppError> {
 
 /// What linking a folder would produce, without doing it.
 ///
-/// Lets the dialog show the name, stack and domain the user is about to
+/// Lets the dialog show the name, framework and domain the user is about to
 /// get — and refuse a bad path — before anything is written.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -203,12 +238,50 @@ pub struct LinkPreview {
     pub path: String,
     pub name: String,
     pub domain: String,
+    /// The label of the framework it would be served as.
     pub stack: String,
+    /// That framework's id — the user's choice when they made one.
+    pub framework: String,
+    /// What detection alone says.
+    pub detected_framework: String,
     /// The folder nginx would actually serve — `public/` for Laravel.
     pub docroot: String,
     /// True when the domain had to be adjusted to avoid a clash, so the
     /// dialog can say why it isn't the obvious one.
     pub domain_adjusted: bool,
+    /// Set when the folder picked looks like the docroot *of* a project —
+    /// see [`parent_suggestion`].
+    pub suggestion: Option<LinkSuggestion>,
+}
+
+/// "This is the `public\` folder of a CodeIgniter 4 project — add the
+/// project instead?"
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkSuggestion {
+    /// The project folder to link instead.
+    pub path: String,
+    /// The label of the framework detected there.
+    pub framework: String,
+    /// The docroot the picked folder turned out to be, as the definition
+    /// names it (`public`).
+    pub folder: String,
+}
+
+/// What [`link`] did, for telemetry.
+#[derive(Debug, Clone)]
+pub struct LinkOutcome {
+    pub detected_framework: String,
+    /// `None` when the user kept what detection found.
+    pub choice: Option<FrameworkOverride>,
+}
+
+/// What [`set_framework`] changed, for telemetry.
+#[derive(Debug, Clone)]
+pub struct FrameworkChange {
+    pub detected_framework: String,
+    /// `None` when the project went back to detection.
+    pub choice: Option<FrameworkOverride>,
 }
 
 /// Folders that must never become a vhost root.
@@ -267,8 +340,67 @@ fn free_domain(base_slug: &str, taken: &[String]) -> (String, bool) {
     )
 }
 
-/// Validates a folder and works out what linking it would produce.
-pub fn prepare_link(path: &str) -> Result<LinkPreview, AppError> {
+/// The user's framework choice from the two optional fields a command
+/// receives — a framework id, or a folder for "Custom". Blank counts as
+/// absent; neither means "go with detection".
+pub fn choice(
+    framework: Option<String>,
+    docroot: Option<String>,
+) -> Result<Option<FrameworkOverride>, AppError> {
+    let framework = framework
+        .map(|f| f.trim().to_string())
+        .filter(|f| !f.is_empty());
+    let docroot = docroot
+        .map(|d| d.trim().to_string())
+        .filter(|d| !d.is_empty());
+    match (framework, docroot) {
+        (Some(_), Some(docroot)) => Err(AppError::InvalidDocroot {
+            docroot,
+            reason: "pick a framework or a folder, not both".to_string(),
+        }),
+        (Some(framework), None) => Ok(Some(FrameworkOverride::Framework(framework))),
+        (None, Some(docroot)) => Ok(Some(FrameworkOverride::Docroot(docroot))),
+        (None, None) => Ok(None),
+    }
+}
+
+/// Refuses a choice that can't be served: a framework the registry doesn't
+/// have, or a folder that's outside the project, unsafe in an nginx config,
+/// or simply not there.
+fn validate_choice(
+    registry: &Registry,
+    project: &Path,
+    choice: &FrameworkOverride,
+) -> Result<(), AppError> {
+    match choice {
+        FrameworkOverride::Framework(id) => match registry.get(id) {
+            Some(_) => Ok(()),
+            None => Err(AppError::UnknownFramework(id.clone())),
+        },
+        FrameworkOverride::Docroot(docroot) => {
+            frameworks::validate_relative_path(docroot).map_err(|reason| {
+                AppError::InvalidDocroot {
+                    docroot: docroot.clone(),
+                    reason,
+                }
+            })?;
+            if frameworks::resolve_docroot(project, Some(docroot)) == project {
+                return Err(AppError::InvalidDocroot {
+                    docroot: docroot.clone(),
+                    reason: "there's no folder by that name in this project".to_string(),
+                });
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Validates a folder and works out what linking it would produce — with
+/// the user's framework `choice`, when they made one.
+pub fn prepare_link(
+    path: &str,
+    choice: Option<&FrameworkOverride>,
+) -> Result<LinkPreview, AppError> {
     let folder = PathBuf::from(path);
 
     if !folder.is_dir() {
@@ -281,7 +413,8 @@ pub fn prepare_link(path: &str) -> Result<LinkPreview, AppError> {
 
     // Anything under `www` is already picked up by the scan; linking it too
     // would list it twice and generate two vhosts for one folder.
-    if links::is_inside(path, &www_root()?) {
+    let www = www_root()?;
+    if links::is_inside(path, &www) {
         return Err(AppError::UnusableProjectPath {
             path: path.to_string(),
             reason: "it's already inside your www folder, so it's listed automatically".to_string(),
@@ -294,6 +427,11 @@ pub fn prepare_link(path: &str) -> Result<LinkPreview, AppError> {
             path: path.to_string(),
             name: existing.name.clone(),
         });
+    }
+
+    let registry = frameworks::registry();
+    if let Some(choice) = choice {
+        validate_choice(&registry, &folder, choice)?;
     }
 
     let name = folder
@@ -310,24 +448,86 @@ pub fn prepare_link(path: &str) -> Result<LinkPreview, AppError> {
 
     let taken: Vec<String> = scan_projects()?.into_iter().map(|p| p.domain).collect();
     let (domain, domain_adjusted) = free_domain(&slug, &taken);
-    let stack = detect_stack(&folder);
+    let serving = registry.serving(&folder, choice);
 
     Ok(LinkPreview {
-        docroot: docroot(&folder, &stack).display().to_string(),
+        docroot: serving.docroot.display().to_string(),
         path: path.to_string(),
         name,
         domain,
-        stack,
+        stack: serving.label,
+        framework: serving.framework,
+        detected_framework: serving.detected,
         domain_adjusted,
+        suggestion: parent_suggestion(&folder, &registry, &store, &www),
     })
 }
 
-/// Registers a folder as a project. Writes nothing inside it.
-pub fn link(path: &str, name: Option<String>, domain: Option<String>) -> Result<(), AppError> {
+/// When `folder` is the docroot of a framework project above it — the
+/// `public\` of a CodeIgniter 4 app, say — that project folder.
+///
+/// Linking `public\` directly is the obvious workaround when detection gets
+/// a project wrong, and it half works: the site loads, but the project's
+/// folder and terminal buttons open `public\`, and its name is taken by the
+/// wrong folder. Offering the project itself undoes that.
+fn parent_suggestion(
+    folder: &Path,
+    registry: &Registry,
+    store: &LinkStore,
+    www: &Path,
+) -> Option<LinkSuggestion> {
+    let docroots: BTreeSet<&str> = registry
+        .frameworks()
+        .iter()
+        .filter_map(|f| f.def.docroot.as_deref())
+        .collect();
+
+    for docroot in docroots {
+        let depth = docroot.split(['/', '\\']).filter(|s| !s.is_empty()).count();
+        let Some(project) = folder.ancestors().nth(depth) else {
+            continue;
+        };
+        let served = frameworks::resolve_docroot(project, Some(docroot));
+        if served == project
+            || !links::same_path(&served.display().to_string(), &folder.display().to_string())
+        {
+            continue;
+        }
+
+        let project_path = project.display().to_string();
+        let linkable = reject_dangerous_root(project).is_ok()
+            && store.linked_at(&project_path).is_none()
+            && !links::is_inside(&project_path, www);
+        if !linkable {
+            continue;
+        }
+
+        let Some(detected) = registry.detect(project) else {
+            continue;
+        };
+        if detected.def.docroot.as_deref() == Some(docroot) {
+            return Some(LinkSuggestion {
+                path: project_path,
+                framework: detected.def.label.clone(),
+                folder: docroot.to_string(),
+            });
+        }
+    }
+    None
+}
+
+/// Registers a folder as a project, with the user's framework `choice` if
+/// they made one. Writes nothing inside the folder.
+pub fn link(
+    path: &str,
+    name: Option<String>,
+    domain: Option<String>,
+    choice: Option<FrameworkOverride>,
+) -> Result<LinkOutcome, AppError> {
     // Re-validated here rather than trusting the preview: the dialog may
     // have been open a while, and the folder or the domain could have been
     // taken in the meantime.
-    let preview = prepare_link(path)?;
+    let preview = prepare_link(path, choice.as_ref())?;
 
     let name = name
         .map(|n| n.trim().to_string())
@@ -362,76 +562,90 @@ pub fn link(path: &str, name: Option<String>, domain: Option<String>) -> Result<
         None => preview.domain,
     };
 
+    // Picking exactly what detection found is no choice at all. Leaving it
+    // unset means a better detector in a later release still applies.
+    let choice = choice.filter(|choice| {
+        !matches!(choice, FrameworkOverride::Framework(id) if *id == preview.detected_framework)
+    });
+
+    // The dialog's choice is the whole truth for this id — including "Auto",
+    // which clears anything a previous link of the same folder left behind.
+    // Written before the link itself, so a failure here leaves nothing half
+    // added.
+    let id = links::id_for(path, &name);
+    let mut overrides = project_frameworks::load();
+    if overrides.set(&id, choice.clone()) {
+        project_frameworks::save(&overrides)?;
+    }
+
     let mut store = links::load();
     links::add(&mut store, path.to_string(), name, domain);
-    links::save(&store)
+    links::save(&store)?;
+
+    Ok(LinkOutcome {
+        detected_framework: preview.detected_framework,
+        choice,
+    })
 }
 
-/// Forgets a linked project. Never touches the folder itself.
+/// Forgets a linked project, and the framework chosen for it. Never touches
+/// the folder itself.
 pub fn unlink(id: &str) -> Result<(), AppError> {
     let mut store = links::load();
     links::remove(&mut store, id)?;
-    links::save(&store)
-}
+    links::save(&store)?;
 
-/// The project's docroot — Laravel serves from `public/`, everything else
-/// from the project root itself. Used by vhost generation.
-pub fn docroot(project_path: &Path, stack: &str) -> PathBuf {
-    if stack == "Laravel" && project_path.join("public").is_dir() {
-        project_path.join("public")
-    } else {
-        project_path.to_path_buf()
-    }
-}
-
-fn detect_stack(dir: &Path) -> String {
-    if dir.join("artisan").is_file() {
-        return "Laravel".to_string();
-    }
-    if dir.join("wp-config.php").is_file() || dir.join("wp-load.php").is_file() {
-        return "WordPress".to_string();
-    }
-    if let Some(stack) = detect_from_package_json(dir) {
-        return stack;
-    }
-    if dir.join("composer.json").is_file() || dir.join("index.php").is_file() {
-        return "PHP".to_string();
-    }
-    if dir.join("index.html").is_file() {
-        return "Static".to_string();
-    }
-    "Unknown".to_string()
-}
-
-/// Looks for a handful of well-known frontend framework dependencies in
-/// `package.json`; falls back to a generic "Node" if the file exists but
-/// none of them match.
-fn detect_from_package_json(dir: &Path) -> Option<String> {
-    let content = fs::read_to_string(dir.join("package.json")).ok()?;
-    let json: Value = serde_json::from_str(&content).ok()?;
-
-    let has_dep = |name: &str| {
-        ["dependencies", "devDependencies"]
-            .iter()
-            .filter_map(|section| json.get(section)?.as_object())
-            .any(|deps| deps.contains_key(name))
-    };
-
-    const FRAMEWORKS: &[(&str, &str)] = &[
-        ("next", "Next.js"),
-        ("nuxt", "Nuxt"),
-        ("vue", "Vue"),
-        ("react", "React"),
-        ("svelte", "Svelte"),
-    ];
-
-    for (dep, label) in FRAMEWORKS {
-        if has_dep(dep) {
-            return Some((*label).to_string());
+    // Best-effort: a leftover override only matters if the same folder is
+    // linked again under the same name, and `link` resets it then anyway.
+    let mut overrides = project_frameworks::load();
+    if overrides.set(id, None) {
+        if let Err(err) = project_frameworks::save(&overrides) {
+            log::warn!("unlinked {id} but couldn't forget its framework choice: {err}");
         }
     }
+    Ok(())
+}
 
-    Some("Node".to_string())
+/// Sets, or with `None` clears back to detection, the framework a project is
+/// served as — scanned and linked projects alike.
+pub fn set_framework(
+    id: &str,
+    choice: Option<FrameworkOverride>,
+) -> Result<FrameworkChange, AppError> {
+    let project = find(id)?;
+    if let Some(choice) = &choice {
+        validate_choice(&frameworks::registry(), Path::new(&project.path), choice)?;
+    }
+
+    let mut overrides = project_frameworks::load();
+    if overrides.set(id, choice.clone()) {
+        project_frameworks::save(&overrides)?;
+    }
+    Ok(FrameworkChange {
+        detected_framework: project.detected_framework,
+        choice,
+    })
+}
+
+/// The frameworks the pickers offer, and everything the user should know is
+/// wrong: definitions that were skipped, and projects set to a framework
+/// that has since disappeared (they're served as detected meanwhile).
+pub fn framework_catalog() -> Result<FrameworkCatalog, AppError> {
+    let registry = frameworks::registry();
+    let overrides = project_frameworks::load();
+    let mut catalog = registry.catalog();
+
+    for project in scan_projects()? {
+        if let Some(FrameworkOverride::Framework(id)) = overrides.get(&project.id) {
+            if registry.get(id).is_none() {
+                catalog.problems.push(format!(
+                    "{} is set to the framework \"{id}\", which isn't defined any more — it's served as detected until you pick another.",
+                    project.name
+                ));
+            }
+        }
+    }
+    Ok(catalog)
 }
 
 #[cfg(test)]
@@ -486,11 +700,16 @@ mod tests {
         dir
     }
 
+    /// The label a project folder gets from the built-in definitions alone.
+    fn stack_of(dir: &Path) -> String {
+        frameworks::builtin_registry().serving(dir, None).label
+    }
+
     #[test]
     fn detects_laravel_via_artisan() {
         let dir = temp_project("laravel");
         fs::write(dir.join("artisan"), "").unwrap();
-        assert_eq!(detect_stack(&dir), "Laravel");
+        assert_eq!(stack_of(&dir), "Laravel");
         fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -498,7 +717,7 @@ mod tests {
     fn detects_wordpress_via_wp_config() {
         let dir = temp_project("wordpress");
         fs::write(dir.join("wp-config.php"), "").unwrap();
-        assert_eq!(detect_stack(&dir), "WordPress");
+        assert_eq!(stack_of(&dir), "WordPress");
         fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -510,7 +729,7 @@ mod tests {
             r#"{"dependencies":{"vue":"^3.5.0"}}"#,
         )
         .unwrap();
-        assert_eq!(detect_stack(&dir), "Vue");
+        assert_eq!(stack_of(&dir), "Vue");
         fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -522,14 +741,29 @@ mod tests {
             r#"{"dependencies":{"express":"^4.0.0"}}"#,
         )
         .unwrap();
-        assert_eq!(detect_stack(&dir), "Node");
+        assert_eq!(stack_of(&dir), "Node");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The regression this release is about: npm for assets doesn't make a
+    /// PHP project a Node one.
+    #[test]
+    fn a_php_project_that_also_uses_npm_stays_php() {
+        let dir = temp_project("php-with-npm");
+        fs::write(dir.join("index.php"), "<?php").unwrap();
+        fs::write(
+            dir.join("package.json"),
+            r#"{"dependencies":{"sass":"latest"}}"#,
+        )
+        .unwrap();
+        assert_eq!(stack_of(&dir), "PHP");
         fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn falls_back_to_unknown_for_an_empty_folder() {
         let dir = temp_project("empty");
-        assert_eq!(detect_stack(&dir), "Unknown");
+        assert_eq!(stack_of(&dir), "Unknown");
         fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -556,12 +790,12 @@ mod tests {
     #[test]
     fn a_folder_inside_www_cannot_also_be_linked() {
         let inside = www_root().unwrap().join("already-here");
-        let err = prepare_link(&inside.display().to_string()).unwrap_err();
+        let err = prepare_link(&inside.display().to_string(), None).unwrap_err();
         // It may fail either because it's inside www or because it doesn't
         // exist; only the first is the rule under test, so create it.
         let _ = fs::create_dir_all(&inside);
 
-        let err = prepare_link(&inside.display().to_string())
+        let err = prepare_link(&inside.display().to_string(), None)
             .err()
             .unwrap_or(err);
         let _ = fs::remove_dir_all(&inside);
@@ -574,7 +808,7 @@ mod tests {
 
     #[test]
     fn a_path_that_isnt_a_folder_is_refused() {
-        let err = prepare_link(r"C:\definitely\not\here").unwrap_err();
+        let err = prepare_link(r"C:\definitely\not\here", None).unwrap_err();
         assert!(matches!(err, AppError::UnusableProjectPath { .. }));
     }
 
@@ -614,9 +848,11 @@ mod tests {
         // the shape rather than fabricating a store: whatever comes back,
         // anything flagged missing must carry the Missing stack, and
         // anything present must not be flagged.
-        for project in linked_projects(&scanned) {
+        let registry = frameworks::builtin_registry();
+        for project in linked_projects(&scanned, &registry, &OverrideStore::default()) {
             if project.missing {
                 assert_eq!(project.stack, "Missing");
+                assert_eq!(project.docroot, project.path);
             } else {
                 assert_ne!(project.stack, "Missing");
             }
@@ -624,18 +860,95 @@ mod tests {
     }
 
     #[test]
-    fn laravel_docroot_is_the_public_folder() {
-        let dir = temp_project("laravel-docroot");
-        fs::create_dir_all(dir.join("public")).unwrap();
-        assert_eq!(docroot(&dir, "Laravel"), dir.join("public"));
-        fs::remove_dir_all(&dir).unwrap();
+    fn a_choice_needs_one_field_not_both() {
+        assert_eq!(choice(None, None).unwrap(), None);
+        assert_eq!(
+            choice(Some("  ".into()), Some(String::new())).unwrap(),
+            None
+        );
+        assert_eq!(
+            choice(Some("laravel".into()), None).unwrap(),
+            Some(FrameworkOverride::Framework("laravel".into()))
+        );
+        assert_eq!(
+            choice(None, Some(" public ".into())).unwrap(),
+            Some(FrameworkOverride::Docroot("public".into()))
+        );
+        assert!(choice(Some("laravel".into()), Some("public".into())).is_err());
     }
 
     #[test]
-    fn non_laravel_docroot_is_the_project_root() {
-        let dir = temp_project("static-docroot");
-        assert_eq!(docroot(&dir, "Static"), dir);
+    fn a_choice_that_cannot_be_served_is_refused() {
+        let dir = temp_project("choice");
+        fs::create_dir_all(dir.join("htdocs")).unwrap();
+        let registry = frameworks::builtin_registry();
+
+        let unknown = FrameworkOverride::Framework("acme".into());
+        assert!(matches!(
+            validate_choice(&registry, &dir, &unknown),
+            Err(AppError::UnknownFramework(_))
+        ));
+        for bad in ["..", r"C:\Windows", "nope"] {
+            let docroot = FrameworkOverride::Docroot(bad.into());
+            assert!(
+                matches!(
+                    validate_choice(&registry, &dir, &docroot),
+                    Err(AppError::InvalidDocroot { .. })
+                ),
+                "{bad} must be refused"
+            );
+        }
+        assert!(validate_choice(
+            &registry,
+            &dir,
+            &FrameworkOverride::Docroot("htdocs".into())
+        )
+        .is_ok());
+        assert!(validate_choice(
+            &registry,
+            &dir,
+            &FrameworkOverride::Framework("codeigniter4".into())
+        )
+        .is_ok());
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Picking `public\` of a CodeIgniter 4 app — the workaround for the
+    /// old detection bug — offers the app itself instead.
+    #[test]
+    fn the_public_folder_of_a_project_suggests_the_project() {
+        let project = temp_project("suggest-ci4");
+        fs::write(project.join("spark"), "").unwrap();
+        fs::create_dir_all(project.join("public")).unwrap();
+        fs::write(project.join("public").join("index.php"), "<?php").unwrap();
+        let registry = frameworks::builtin_registry();
+        let www = Path::new(r"C:\nowhere\www");
+
+        let suggestion = parent_suggestion(
+            &project.join("public"),
+            &registry,
+            &LinkStore::default(),
+            www,
+        )
+        .expect("public\\ of a CodeIgniter 4 app must suggest the app");
+        assert!(links::same_path(
+            &suggestion.path,
+            &project.display().to_string()
+        ));
+        assert_eq!(suggestion.framework, "CodeIgniter 4");
+        assert_eq!(suggestion.folder, "public");
+
+        // The project itself, or an ordinary folder, suggests nothing.
+        assert!(parent_suggestion(&project, &registry, &LinkStore::default(), www).is_none());
+        let plain = temp_project("suggest-plain");
+        fs::create_dir_all(plain.join("public")).unwrap();
+        assert!(
+            parent_suggestion(&plain.join("public"), &registry, &LinkStore::default(), www)
+                .is_none()
+        );
+
+        fs::remove_dir_all(&project).unwrap();
+        fs::remove_dir_all(&plain).unwrap();
     }
 
     #[test]
@@ -662,14 +975,14 @@ mod tests {
         fs::write(dir.join("index.php"), "<?php echo 'linked';").unwrap();
         let path = dir.display().to_string();
 
-        let preview = prepare_link(&path).expect("a normal folder must be linkable");
+        let preview = prepare_link(&path, None).expect("a normal folder must be linkable");
         println!(
             "preview: name={} domain={} stack={} docroot={}",
             preview.name, preview.domain, preview.stack, preview.docroot
         );
         assert_eq!(preview.stack, "PHP");
 
-        link(&path, None, None).expect("linking must succeed");
+        link(&path, None, None, None).expect("linking must succeed");
 
         let listed = scan_projects().unwrap();
         let found = listed
@@ -685,7 +998,7 @@ mod tests {
 
         // Linking the same folder twice must be refused, not duplicated.
         assert!(
-            prepare_link(&path).is_err(),
+            prepare_link(&path, None).is_err(),
             "a folder already linked can't be linked again"
         );
 
@@ -713,7 +1026,46 @@ mod tests {
     #[ignore]
     fn print_real_scan() {
         for p in scan_projects().unwrap() {
-            println!("{} | {} | {} | {}", p.id, p.stack, p.domain, p.path);
+            println!(
+                "{} | {} ({}{}) | {} | {} | docroot {}",
+                p.id,
+                p.stack,
+                p.framework,
+                if p.framework_overridden {
+                    ", manual"
+                } else {
+                    ""
+                },
+                p.domain,
+                p.path,
+                p.docroot
+            );
+        }
+    }
+
+    /// Detection against a folder of real projects, without linking any of
+    /// them — set `REZURE_DETECT_DIR` to the folder that holds them:
+    /// `$env:REZURE_DETECT_DIR='C:\repository\ORDO'; cargo test --lib services::projects::tests::print_detection -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn print_detection() {
+        let Some(root) = std::env::var_os("REZURE_DETECT_DIR") else {
+            println!("set REZURE_DETECT_DIR to a folder of projects");
+            return;
+        };
+        let registry = frameworks::builtin_registry();
+        for entry in fs::read_dir(root).unwrap().flatten() {
+            let dir = entry.path();
+            if !dir.is_dir() {
+                continue;
+            }
+            let serving = registry.serving(&dir, None);
+            println!(
+                "{:<40} {:<16} docroot {}",
+                dir.file_name().unwrap().to_string_lossy(),
+                serving.label,
+                serving.docroot.display()
+            );
         }
     }
 }

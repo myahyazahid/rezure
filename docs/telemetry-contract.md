@@ -45,6 +45,8 @@ Recording and sending are two separate steps, and each independently respects
 | A service is stopped via the Services page | event, `service.stop` | `commands::services::stop_service` |
 | Starting, stopping or restarting a service fails | event, `error.report` (name = the error's kind, e.g. `PortInUse`) | `commands::services::{start,stop,restart}_service` |
 | Every worker of a service dies on its own | event, `error.report` (name = `ServiceCrashed`) | the crash sink in `services::process::real_services` |
+| A folder is added with **Add folder** on the Projects page | event, `project.linked` (name = the framework id it's served as) | `commands::projects::link_project` |
+| A project's framework is changed, or set back to Auto | event, `project.framework_changed` (name = the framework id it's served as now) | `commands::projects::set_project_framework` |
 | Every 5 minutes while the app is open (plus once immediately) | heartbeat | `lib.rs`'s heartbeat-recorder loop |
 | The app is quitting (`ExitRequested`), if a session is open | heartbeat, with `ended_at` set | `lib.rs`'s `app.run(...)` closure |
 
@@ -59,8 +61,8 @@ only its failures are reported.
 {
   "device_id": "…",
   "event_id": "…",
-  "event_type": "app_opened | service.start | service.stop | error.report",
-  "event_name": "Nginx | PortInUse | … | null",
+  "event_type": "app_opened | service.start | service.stop | error.report | project.linked | project.framework_changed",
+  "event_name": "Nginx | PortInUse | codeigniter4 | … | null",
   "app_version": "1.0.0",
   "payload": { "…": "…" },
   "occurred_at": "2026-09-02T06:00:00+00:00"
@@ -104,6 +106,23 @@ When it's there, it's one of:
   `{ "action": "service.start | service.stop | service.restart | service.run", "service": "php-8.0.30" }`
   (`service.run` is a crash). `event_name` is `AppError::code()`, the variant's name,
   or `ServiceCrashed`.
+- **`project.linked`** / **`project.framework_changed`**: which framework detection found and
+  what the user chose instead — `{ "detected": "node", "chosen": "codeigniter4" }`, with
+  `"chosen": null` when they kept detection (or, for `framework_changed`, went back to it).
+  `event_name` is the framework the project ends up served as. Added in 3.2.0 so the dashboard
+  can show where detection gets projects wrong (`detected` ≠ `chosen`) and which frameworks people
+  use that Rezure doesn't recognise yet (`unknown`, `user-defined`, `custom`).
+
+  Values are framework ids only, reduced by `Registry::reportable_id`
+  (`services::frameworks`): a built-in id (`laravel`, `codeigniter4`, …) goes out as is; any
+  framework from the user's own `etc\frameworks.json` goes out as `"user-defined"`, because an id
+  someone chose themselves can name their company or their client; a Custom folder goes out as
+  `"custom"`, never the folder; nothing matching is `"unknown"`.
+
+  **Backend compatibility** (checked against `laravel-api`): `EventRequest` validates
+  `event_type` as any string up to 64 characters and `payload` as `nullable|array`, so both
+  events are accepted and stored without a backend change. Charting them is a change in the
+  dashboard.
 
 **Heartbeat** (`HeartbeatPayload` in `services/telemetry.rs`):
 
@@ -162,9 +181,12 @@ mengganggu user" requirement from Fase 2.5.
   filesystem/config beyond the fields listed above. The heartbeat's `device_name` (the
   Windows account name) is the one deliberate exception, and it's the only thing that
   identifies the person rather than the install.
-- `event_name` is limited to a service's display name, an error kind, or omitted — never
-  free text a user typed (that's what support tickets are for, a separate, explicit,
-  user-initiated action documented in `docs/v2/rezure-app-v2-phases-tasks.md`'s Fase 2.1).
+- `event_name` is limited to a service's display name, an error kind, a built-in framework id
+  (or `user-defined` / `custom` / `unknown`), or omitted — never free text a user typed (that's
+  what support tickets are for, a separate, explicit, user-initiated action documented in
+  `docs/v2/rezure-app-v2-phases-tasks.md`'s Fase 2.1).
 - `error.report` never carries the error's message. Messages hold paths, project names
   and hostnames, so only the kind (`AppError::code()`) and the service id go out.
-- `payload` holds version numbers and service ids only.
+- The framework events never carry the project's name, path, domain, its `composer.json` or
+  `package.json`, a Custom folder, or the id of a framework the user defined themselves.
+- `payload` holds version numbers, service ids and built-in framework ids only.

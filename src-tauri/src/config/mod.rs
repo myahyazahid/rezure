@@ -6,5 +6,6 @@ pub mod connections;
 pub mod device;
 pub mod links;
 pub mod profiles;
+pub mod project_frameworks;
 pub mod settings;
 pub mod stickers;

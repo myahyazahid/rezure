@@ -24,7 +24,8 @@
 //! ├── bin\        runtimes Rezure downloaded and checksum-verified
 //! ├── custom\     runtimes added by hand — drop a folder in, it's installed
 //! ├── data\       service state: nginx config, MariaDB's datadir, php.ini
-//! ├── etc\        settings.json, profiles.json, links.json
+//! ├── etc\        settings.json, profiles.json, links.json,
+//! │               frameworks.json (the user's own), project-frameworks.json
 //! ├── current\    the PHP junction that goes on PATH
 //! ├── www\        projects
 //! ├── dumps\      exported .sql files

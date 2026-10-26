@@ -70,6 +70,11 @@ struct ProjectState {
     domain: String,
     path: String,
     linked: bool,
+    /// The framework's label, as the Projects page shows it.
+    framework: String,
+    /// The served folder relative to `path` — empty when nginx serves the
+    /// project folder itself. An agent looking for `index.php` needs this.
+    docroot: String,
     /// The version that actually serves it — its pin when that's installed,
     /// the active version otherwise.
     php: String,
@@ -165,6 +170,11 @@ fn project_states(
                 domain: project.domain.clone(),
                 path: project.path.clone(),
                 linked: matches!(project.kind, ProjectKind::Linked),
+                framework: project.stack.clone(),
+                docroot: Path::new(&project.docroot)
+                    .strip_prefix(&project.path)
+                    .map(|sub| sub.display().to_string())
+                    .unwrap_or_default(),
                 php: pin.unwrap_or(active_php).to_string(),
                 pinned: pin.is_some_and(|version| version != active_php),
             }
@@ -250,12 +260,23 @@ fn render_agents_md(state: &MachineState) -> String {
             "None yet. A project is a folder in `{home}\\www\\`.\n"
         ));
     } else {
-        out.push_str("| Project | URL | Folder | PHP |\n|---|---|---|---|\n");
+        out.push_str(
+            "| Project | URL | Folder | Framework (served folder) | PHP |\n|---|---|---|---|---|\n",
+        );
         for project in &state.projects {
             let folder = if project.linked {
                 format!("`{}` (linked)", project.path)
             } else {
                 format!("`{}`", project.path)
+            };
+            let framework = if project.docroot.is_empty() {
+                escape_cell(&project.framework)
+            } else {
+                format!(
+                    "{} (`{}\\`)",
+                    escape_cell(&project.framework),
+                    project.docroot
+                )
             };
             let php = match (project.php.is_empty(), project.pinned) {
                 (true, _) => "-".to_string(),
@@ -263,7 +284,7 @@ fn render_agents_md(state: &MachineState) -> String {
                 (false, false) => project.php.clone(),
             };
             out.push_str(&format!(
-                "| {} | http://{} | {folder} | {php} |\n",
+                "| {} | http://{} | {folder} | {framework} | {php} |\n",
                 escape_cell(&project.name),
                 project.domain,
             ));
@@ -279,7 +300,11 @@ fn render_agents_md(state: &MachineState) -> String {
          `{home}\\data\\` is regenerated, so edits there don't last.\n\
          - Run `php artisan`, `composer` and `npm` from the terminal a project card opens, \
          which has that project's PHP and Node first on `PATH`. Elsewhere, check \
-         `where php` first.\n"
+         `where php` first.\n\
+         - A project's framework decides the folder Nginx serves (the table above). If it's \
+         wrong, the user changes it from the framework badge on the Projects page. A \
+         framework Rezure doesn't recognise can be added to `{home}\\etc\\frameworks.json` \
+         (format in the guide), then **Reload** on the Projects page.\n"
     ));
     out
 }
@@ -340,6 +365,10 @@ mod tests {
             path: format!(r"C:\rezure\www\{id}"),
             domain: format!("{id}.test"),
             stack: "Laravel".to_string(),
+            framework: "laravel".to_string(),
+            detected_framework: "laravel".to_string(),
+            framework_overridden: false,
+            docroot: format!(r"C:\rezure\www\{id}\public"),
             has_hosts_entry: true,
             last_opened_at: None,
             open_count: 0,
@@ -426,6 +455,8 @@ mod tests {
             ("8.3.33", false)
         );
         assert!(states[2].linked);
+        assert_eq!(states[0].framework, "Laravel");
+        assert_eq!(states[0].docroot, "public");
     }
 
     #[test]
@@ -447,22 +478,44 @@ mod tests {
 
     #[test]
     fn agents_md_names_rezure_and_lists_each_project() {
-        let md = render_agents_md(&state(vec![ProjectState {
-            name: "shop".to_string(),
-            domain: "shop.test".to_string(),
-            path: r"D:\code\shop".to_string(),
-            linked: true,
-            php: "7.4.33".to_string(),
-            pinned: true,
-        }]));
+        let md = render_agents_md(&state(vec![
+            ProjectState {
+                name: "shop".to_string(),
+                domain: "shop.test".to_string(),
+                path: r"D:\code\shop".to_string(),
+                linked: true,
+                framework: "CodeIgniter 4".to_string(),
+                docroot: "public".to_string(),
+                php: "7.4.33".to_string(),
+                pinned: true,
+            },
+            ProjectState {
+                name: "blog".to_string(),
+                domain: "blog.test".to_string(),
+                path: r"C:\rezure\www\blog".to_string(),
+                linked: false,
+                framework: "WordPress".to_string(),
+                docroot: String::new(),
+                php: "8.3.33".to_string(),
+                pinned: false,
+            },
+        ]));
 
         assert!(md.starts_with(MARKER));
         assert!(md.contains("not by Laragon or XAMPP"));
         assert!(md.contains(r"C:\rezure\docs\how-rezure-works.md"));
         assert!(md.contains("MariaDB 11.2.2 on `127.0.0.1:3306`"));
         assert!(
-            md.contains(r"| shop | http://shop.test | `D:\code\shop` (linked) | 7.4.33 (pinned) |")
+            md.contains(
+                r"| shop | http://shop.test | `D:\code\shop` (linked) | CodeIgniter 4 (`public\`) | 7.4.33 (pinned) |"
+            ),
+            "{md}"
         );
+        assert!(
+            md.contains(r"| blog | http://blog.test | `C:\rezure\www\blog` | WordPress | 8.3.33 |"),
+            "{md}"
+        );
+        assert!(md.contains(r"C:\rezure\etc\frameworks.json"));
     }
 
     #[test]

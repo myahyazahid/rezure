@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useProjectsStore } from '@/stores/projects'
+import { servedFolderLabel } from '@/composables/servedFolder'
 import SearchInput from '@/components/common/SearchInput.vue'
 import BasePill from '@/components/common/BasePill.vue'
 import ProjectActionButtons from '@/components/projects/ProjectActionButtons.vue'
@@ -10,9 +11,23 @@ import ProjectDoctorModal from '@/components/projects/ProjectDoctorModal.vue'
 import ProjectShareModal from '@/components/projects/ProjectShareModal.vue'
 import ProjectPhpVersionModal from '@/components/projects/ProjectPhpVersionModal.vue'
 import ProjectNodeVersionModal from '@/components/projects/ProjectNodeVersionModal.vue'
+import ProjectFrameworkModal from '@/components/projects/ProjectFrameworkModal.vue'
 import BusyOverlay from '@/components/common/BusyOverlay.vue'
+import type { ProjectInfo } from '@/types/project'
 
 const store = useProjectsStore()
+
+// For the framework pickers, and for the problems banner below: a mistake in
+// the user's own frameworks.json should be visible without opening a picker.
+onMounted(() => store.fetchFrameworks())
+
+function frameworkTitle(project: ProjectInfo) {
+  if (project.missing) return "The folder isn't there, so its framework can't be checked"
+  const served = `served from ${servedFolderLabel(project.path, project.docroot)}`
+  return project.frameworkOverridden
+    ? `Set manually (detected: ${store.frameworkLabel(project.detectedFramework)}), ${served} — click to change`
+    : `Detected from the project's files, ${served} — click to change`
+}
 
 /**
  * The three slow paths on this page, most disruptive first.
@@ -31,6 +46,9 @@ const busy = computed(() => {
   }
   if (store.linking) {
     return { label: 'Adding project…', detail: 'Writing its vhost and reloading nginx.' }
+  }
+  if (store.settingFramework || store.reloadingFrameworks) {
+    return { label: 'Applying framework…', detail: 'Rewriting vhosts and reloading nginx.' }
   }
   if (store.syncingHosts) {
     return {
@@ -188,6 +206,31 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
       {{ store.openError }}
     </p>
 
+    <!-- Skipped definitions in the user's own frameworks.json, or projects
+         set to a framework that no longer exists. Nothing is broken by
+         these — the projects fall back to detection — but the user meant
+         something that isn't happening. -->
+    <div
+      v-if="store.frameworkCatalog.problems.length > 0"
+      class="mt-3 flex items-start justify-between gap-3 rounded-xl bg-amber-100/50 px-3.5 py-2.5 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+    >
+      <div class="min-w-0">
+        <p class="font-semibold">Some framework settings aren't being used</p>
+        <ul class="mt-1 list-disc space-y-0.5 pl-5 text-xs">
+          <li v-for="problem in store.frameworkCatalog.problems" :key="problem">{{ problem }}</li>
+        </ul>
+      </div>
+      <button
+        type="button"
+        class="glass-btn shrink-0 rounded-full px-3 py-1 text-xs font-semibold transition disabled:opacity-50"
+        :disabled="store.reloadingFrameworks"
+        title="Re-read etc\frameworks.json after fixing it"
+        @click="store.reloadFrameworks()"
+      >
+        {{ store.reloadingFrameworks ? 'Reloading…' : 'Reload' }}
+      </button>
+    </div>
+
     <NewProjectModal v-if="showNewProjectModal" @close="showNewProjectModal = false" />
     <LinkProjectModal v-if="showLinkProjectModal" @close="showLinkProjectModal = false" />
 
@@ -197,6 +240,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
     <ProjectShareModal />
     <ProjectPhpVersionModal />
     <ProjectNodeVersionModal />
+    <ProjectFrameworkModal />
 
     <BusyOverlay :show="busy !== null" :label="busy?.label ?? ''" :detail="busy?.detail ?? ''" />
 
@@ -321,7 +365,22 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
               Linked
             </span>
           </p>
-          <BasePill class="shrink-0">{{ project.stack }}</BasePill>
+          <button
+            type="button"
+            class="shrink-0 rounded-full transition hover:opacity-80 disabled:cursor-default disabled:hover:opacity-100"
+            :disabled="project.missing"
+            :title="frameworkTitle(project)"
+            @click="store.openFrameworkModal(project.id)"
+          >
+            <BasePill>
+              {{ project.stack }}
+              <span
+                v-if="project.frameworkOverridden"
+                class="ml-1.5 h-1.5 w-1.5 rounded-full bg-accent-500"
+                aria-label="set manually"
+              ></span>
+            </BasePill>
+          </button>
         </div>
         <p class="mt-1 truncate font-mono text-xs text-neutral-500">{{ project.path }}</p>
         <p
@@ -391,7 +450,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
       >
         <span class="flex-1">Project</span>
         <span class="w-36 shrink-0">Domain</span>
-        <span class="w-24 shrink-0">Stack</span>
+        <span class="w-28 shrink-0">Framework</span>
         <span class="w-80 shrink-0 text-right">Actions</span>
       </div>
 
@@ -441,8 +500,25 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
           >
             {{ project.domain }}
           </span>
-          <span class="w-24 shrink-0">
-            <BasePill>{{ project.stack }}</BasePill>
+          <span class="w-28 shrink-0">
+            <!-- The badge is the way in to correcting it: detection reads
+                 marker files, and a project can always fool it. -->
+            <button
+              type="button"
+              class="max-w-full rounded-full transition hover:opacity-80 disabled:cursor-default disabled:hover:opacity-100"
+              :disabled="project.missing"
+              :title="frameworkTitle(project)"
+              @click="store.openFrameworkModal(project.id)"
+            >
+              <BasePill class="max-w-full">
+                <span class="truncate">{{ project.stack }}</span>
+                <span
+                  v-if="project.frameworkOverridden"
+                  class="ml-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent-500"
+                  aria-label="set manually"
+                ></span>
+              </BasePill>
+            </button>
           </span>
           <!-- Every control keeps its column across all rows. The buttons used
                to be dropped rather than hidden, so a row without an unlink

@@ -17,10 +17,12 @@ use uuid::Uuid;
 
 use crate::config::api;
 use crate::config::device::DeviceIdState;
+use crate::config::project_frameworks::FrameworkOverride;
 use crate::config::settings::SettingsState;
 use crate::db;
 use crate::db::DbState;
 use crate::services::db_engine::Engine;
+use crate::services::frameworks::{self, Registry};
 use crate::services::{db_profiles, mssql_localdb, php, postgres, ServiceInfo};
 use crate::utils::error::AppError;
 
@@ -222,6 +224,40 @@ fn error_context(action: &str, service_id: &str) -> Value {
     json!({ "action": action, "service": service_id })
 }
 
+/// Queues a `project.linked` or `project.framework_changed` event: which
+/// framework detection found, and what the user chose instead (`null`:
+/// they kept detection). Together these show where detection gets projects
+/// wrong, and which frameworks people use that Rezure doesn't know yet.
+///
+/// Framework ids only, never the project's name, path or domain — and only
+/// built-in ids verbatim, since an id the user defined themselves can name
+/// their company or their client (see `Registry::reportable_id`).
+pub fn record_framework(
+    app: &AppHandle,
+    event_type: &str,
+    detected: &str,
+    choice: Option<&FrameworkOverride>,
+) {
+    let (effective, context) = framework_context(&frameworks::registry(), detected, choice);
+    record(app, event_type, Some(&effective), Some(context));
+}
+
+/// The event's name (the framework the project ended up served as) and its
+/// payload, both already reduced to what may leave the machine.
+fn framework_context(
+    registry: &Registry,
+    detected: &str,
+    choice: Option<&FrameworkOverride>,
+) -> (String, Value) {
+    let detected = registry.reportable_id(detected);
+    let chosen = choice.map(|choice| match choice {
+        FrameworkOverride::Framework(id) => registry.reportable_id(id),
+        FrameworkOverride::Docroot(_) => frameworks::CUSTOM.to_string(),
+    });
+    let effective = chosen.clone().unwrap_or_else(|| detected.clone());
+    (effective, json!({ "detected": detected, "chosen": chosen }))
+}
+
 /// The versions in use when `started` came up — what a `service.start` event
 /// carries so the dashboard can chart which stacks people run. A PHP service
 /// reports its own version (a project's pinned one, say); anything else
@@ -404,6 +440,49 @@ fn discard_row(db_state: &DbState, id: &str) {
 mod tests {
     use super::*;
     use crate::db::init_migrations_for_test;
+
+    #[test]
+    fn a_kept_detection_reports_null_as_the_choice() {
+        let registry = frameworks::builtin_registry();
+        let (name, payload) = framework_context(&registry, "codeigniter4", None);
+
+        assert_eq!(name, "codeigniter4");
+        assert_eq!(
+            payload,
+            json!({ "detected": "codeigniter4", "chosen": null })
+        );
+    }
+
+    /// The case the dashboard is for: detection said one thing, the user
+    /// said another.
+    #[test]
+    fn a_correction_reports_both_sides() {
+        let registry = frameworks::builtin_registry();
+        let choice = FrameworkOverride::Framework("codeigniter4".to_string());
+        let (name, payload) = framework_context(&registry, "node", Some(&choice));
+
+        assert_eq!(name, "codeigniter4");
+        assert_eq!(
+            payload,
+            json!({ "detected": "node", "chosen": "codeigniter4" })
+        );
+    }
+
+    /// A Custom folder is the user's own path — only the fact that they
+    /// needed one goes out, never the folder.
+    #[test]
+    fn a_custom_docroot_is_reported_without_the_folder() {
+        let registry = frameworks::builtin_registry();
+        let choice = FrameworkOverride::Docroot("client-acme/htdocs".to_string());
+        let (name, payload) = framework_context(&registry, "unknown", Some(&choice));
+
+        assert_eq!(name, "custom");
+        assert_eq!(
+            payload,
+            json!({ "detected": "unknown", "chosen": "custom" })
+        );
+        assert!(!payload.to_string().contains("acme"));
+    }
 
     fn queued_payload(conn: &Connection) -> Value {
         let payload: String = conn

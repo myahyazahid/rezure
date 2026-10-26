@@ -17,6 +17,7 @@ pub mod db_profiles;
 pub mod doctor;
 pub mod donate;
 pub mod donate_images;
+pub mod frameworks;
 pub mod hosts;
 pub mod launcher;
 pub mod localdb_bridge;

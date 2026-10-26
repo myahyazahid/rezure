@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
 import { useProjectsStore } from '@/stores/projects'
-import type { LinkPreview } from '@/types/project'
+import { servedFolderLabel } from '@/composables/servedFolder'
+import FrameworkPicker from '@/components/projects/FrameworkPicker.vue'
+import type { FrameworkChoice, LinkPreview } from '@/types/project'
 
 const emit = defineEmits<{ close: [] }>()
 const store = useProjectsStore()
@@ -13,6 +15,16 @@ const domain = ref('')
 const pathError = ref<string | null>(null)
 const checking = ref(false)
 
+/** The user's correction of what was detected — `null` keeps detection. */
+const choice = ref<FrameworkChoice>(null)
+const choiceError = ref<string | null>(null)
+/** "Custom folder…" picked with no folder typed yet. */
+const choicePending = ref(false)
+
+onMounted(() => {
+  if (store.frameworkCatalog.frameworks.length === 0) store.fetchFrameworks()
+})
+
 function errorMessage(e: unknown): string {
   if (typeof e === 'string') return e
   if (e instanceof Error) return e.message
@@ -20,19 +32,18 @@ function errorMessage(e: unknown): string {
 }
 
 /**
- * Picks a folder and asks the backend what linking it would produce — the
- * name, stack, docroot and domain — so the user sees the outcome and any
- * refusal before committing, not after.
+ * Asks the backend what linking `path` would produce — the name, framework,
+ * docroot and domain — so the user sees the outcome and any refusal before
+ * committing, not after. Starts over from detection for a new folder.
  */
-async function pickFolder() {
-  const picked = await openFileDialog({ directory: true, multiple: false })
-  if (typeof picked !== 'string') return
-
+async function previewFolder(path: string) {
   checking.value = true
   pathError.value = null
+  choiceError.value = null
   preview.value = null
+  choice.value = null
   try {
-    const result = await store.previewLink(picked)
+    const result = await store.previewLink(path)
     preview.value = result
     name.value = result.name
     domain.value = result.domain
@@ -43,9 +54,28 @@ async function pickFolder() {
   }
 }
 
+async function pickFolder() {
+  const picked = await openFileDialog({ directory: true, multiple: false })
+  if (typeof picked !== 'string') return
+  await previewFolder(picked)
+}
+
+// A different framework means a different docroot, and only Rust knows
+// which — so every change is previewed again rather than guessed here. The
+// name and domain the user may have edited are left as they are.
+watch(choice, async (next, previous) => {
+  if (!preview.value || JSON.stringify(next) === JSON.stringify(previous)) return
+  choiceError.value = null
+  try {
+    preview.value = await store.previewLink(preview.value.path, next)
+  } catch (e) {
+    choiceError.value = errorMessage(e)
+  }
+})
+
 async function confirm() {
-  if (!preview.value) return
-  const ok = await store.linkProject(preview.value.path, name.value, domain.value)
+  if (!preview.value || choiceError.value || choicePending.value) return
+  const ok = await store.linkProject(preview.value.path, name.value, domain.value, choice.value)
   if (ok) emit('close')
 }
 </script>
@@ -95,25 +125,62 @@ async function confirm() {
       </p>
 
       <template v-if="preview">
+        <!-- Picking a project's public/ folder is the usual workaround when
+             detection was wrong. It serves, but the project's folder and
+             terminal buttons would open public/ — so offer the project. -->
+        <div
+          v-if="preview.suggestion"
+          class="mt-4 rounded-xl bg-amber-100/50 px-3.5 py-2.5 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+        >
+          This looks like the
+          <span class="font-mono">{{ preview.suggestion.folder }}/</span>
+          folder of a {{ preview.suggestion.framework }} project. Rezure serves that folder on its
+          own when you add the project itself.
+          <button
+            type="button"
+            class="mt-2 block truncate font-semibold underline underline-offset-2"
+            :title="preview.suggestion.path"
+            @click="previewFolder(preview.suggestion.path)"
+          >
+            Add {{ preview.suggestion.path.split(/[\\/]/).pop() }} instead
+          </button>
+        </div>
+
         <div class="glass-inset mt-4 rounded-xl p-3.5">
           <p class="truncate font-mono text-xs text-neutral-500" :title="preview.path">
             {{ preview.path }}
           </p>
+          <!-- Worth showing: the folder nginx uses isn't always the one that
+               was picked (Laravel and CodeIgniter 4 serve public/). From the
+               preview, not the picker: a docroot that isn't there falls back
+               to the folder itself, and only Rust knows that. -->
           <p class="mt-1.5 text-xs text-neutral-500">
-            Detected as
-            <strong class="text-neutral-700 dark:text-neutral-200">{{ preview.stack }}</strong>
-            <!-- Worth showing: Laravel is served from public/, so the folder
-                 nginx uses isn't always the one that was picked. -->
-            <template v-if="preview.docroot !== preview.path">
-              · served from
-              <span class="font-mono">{{ preview.docroot.split(/[\\/]/).pop() }}/</span>
-            </template>
+            Served from
+            <span class="font-mono text-neutral-700 dark:text-neutral-200">{{
+              servedFolderLabel(preview.path, preview.docroot)
+            }}</span>
           </p>
           <p
-            v-if="preview.stack === 'Unknown'"
+            v-if="preview.framework === 'unknown'"
             class="mt-1.5 text-xs text-amber-600 dark:text-amber-400"
           >
-            No framework markers found here — it'll still be served as static files.
+            No framework markers found here — it'll be served from the folder itself. Pick the
+            framework below if you know it.
+          </p>
+        </div>
+
+        <div class="mt-4">
+          <label class="block text-sm font-semibold text-neutral-700 dark:text-neutral-200">
+            Framework
+          </label>
+          <FrameworkPicker
+            v-model="choice"
+            class="mt-1.5"
+            :detected="preview.detectedFramework"
+            @pending="choicePending = $event"
+          />
+          <p v-if="choiceError" class="mt-1.5 text-xs text-red-600 dark:text-red-400">
+            {{ choiceError }}
           </p>
         </div>
 
@@ -155,7 +222,14 @@ async function confirm() {
         <button
           type="button"
           class="glass-accent rounded-full px-4 py-2 text-sm font-semibold transition disabled:opacity-50"
-          :disabled="!preview || store.linking || !name.trim() || !domain.trim()"
+          :disabled="
+            !preview ||
+            store.linking ||
+            !name.trim() ||
+            !domain.trim() ||
+            choiceError !== null ||
+            choicePending
+          "
           @click="confirm"
         >
           {{ store.linking ? 'Adding…' : 'Add project' }}

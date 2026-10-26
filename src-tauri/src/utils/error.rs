@@ -172,6 +172,12 @@ pub enum AppError {
     #[error("{path} is already a project here (\"{name}\")")]
     ProjectAlreadyLinked { path: String, name: String },
 
+    #[error("there's no framework called \"{0}\" — reload the list and pick again")]
+    UnknownFramework(String),
+
+    #[error("\"{docroot}\" can't be served — {reason}")]
+    InvalidDocroot { docroot: String, reason: String },
+
     #[error("can't start {name} — {holder}")]
     PortInUseBy {
         port: u16,
@@ -302,6 +308,8 @@ impl AppError {
             Self::PortHolderProtected { .. } => "PortHolderProtected",
             Self::UnusableProjectPath { .. } => "UnusableProjectPath",
             Self::ProjectAlreadyLinked { .. } => "ProjectAlreadyLinked",
+            Self::UnknownFramework { .. } => "UnknownFramework",
+            Self::InvalidDocroot { .. } => "InvalidDocroot",
             Self::PortInUseBy { .. } => "PortInUseBy",
             Self::AttachmentRejected { .. } => "AttachmentRejected",
             Self::ConnectionNotFound { .. } => "ConnectionNotFound",

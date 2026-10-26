@@ -12,7 +12,7 @@ there: put it in the `www` folder, or point Rezure at it wherever it already liv
 | Where it lives | `C:\rezure\www\<name>` | anywhere else |
 | How it's added | drop the folder in | **Add folder** on the Projects page |
 | How it's removed | move the folder out | **Remove** (the folder is left alone) |
-| Recorded in | nothing — the folder *is* the record | `%APPDATA%\Rezure\links.json` |
+| Recorded in | nothing — the folder *is* the record | `C:\rezure\etc\links.json` |
 
 Both behave identically once listed: same virtual host generation, same hosts-file entry, same
 Open / folder / terminal buttons, same "Used by" matching on the Databases page.
@@ -29,10 +29,17 @@ everywhere by virtue of appearing there.
 before anything is saved:
 
 - the **name**, from the folder (editable),
-- the detected **stack**,
-- the **document root** nginx will actually serve — for Laravel that's `public/`, not the
-  folder you picked,
+- the detected **framework** — with **Change** next to it if detection got it wrong (see
+  [Frameworks](#frameworks)),
+- the **document root** nginx will actually serve — for Laravel and CodeIgniter 4 that's
+  `public/`, not the folder you picked,
 - the **domain** (editable).
+
+If the folder you picked is the `public/` (or `web/`, `webroot/`) folder *of* a project — the
+usual workaround when an older Rezure served a project from the wrong folder — the dialog says so
+and offers to add the project folder instead. Linking `public/` directly does serve the site, but
+the project's folder and terminal buttons then open `public/`, and its name and domain are taken
+by the wrong folder.
 
 Nothing is copied, moved, or written inside the folder. Rezure records the path.
 
@@ -56,8 +63,55 @@ You can set any free domain you like at link time.
 
 The first two are refused rather than warned about: there is no correct version of them.
 
-A folder with **no recognizable stack** is *not* refused. You picked it deliberately; Rezure
-notes that it found no framework markers and serves it as static files.
+A folder with **no recognizable framework** is *not* refused. You picked it deliberately; Rezure
+notes that it found no framework markers and serves it from the folder itself.
+
+---
+
+## Frameworks
+
+Every project is served as some framework, and the framework decides one thing: **which folder
+nginx serves**. Laravel and CodeIgniter 4 keep their front controller in `public/index.php`, so
+they're served from `public/`; WordPress and plain PHP are served from the project folder. Get the
+framework wrong and the site 404s even though the code is fine.
+
+### How it's detected
+
+Rezure reads marker files — `artisan`, `spark`, `wp-config.php`, packages in `composer.json` and
+`package.json` — and weighs every framework that matches. The **most specific wins**, not the one
+that happens to be checked first:
+
+| Priority | Kind | Examples |
+|---|---|---|
+| 90 | PHP frameworks with their own marker file | Laravel, CodeIgniter 3/4, WordPress, Bedrock, Drupal, Joomla |
+| 80 | PHP frameworks recognised through Composer | Symfony, Yii 2, CakePHP, Slim, Laminas |
+| 55 / 50 | JavaScript frameworks | Next.js, Nuxt, Astro / Vue, React, Svelte, Angular |
+| 30 | Any PHP app with `public/index.php` and no `index.php` of its own | |
+| 20 / 15 / 10 | Plain PHP / Node / static HTML | |
+
+So a CodeIgniter 4 app that keeps a `package.json` to build its CSS is CodeIgniter 4, not Node,
+and a Laravel app on Inertia is Laravel, not Vue. Nothing is run to find out — only files are read.
+
+The full list, and the format, are in [frameworks.md](frameworks.md).
+
+### Correcting it
+
+Click the framework badge on a project (list or grid view). Pick another framework, or
+**Custom folder…** to serve a subfolder of your choosing. **Auto** goes back to detection. The
+change is live immediately: the vhost is rewritten and nginx reloaded.
+
+This works for scanned and linked projects alike. A badge with a dot was set by hand. Choices are
+kept in `C:\rezure\etc\project-frameworks.json`, by project id:
+
+- a project in `www` is identified by its folder name, so **renaming the folder drops its choice**;
+- removing a linked project drops its choice with it.
+
+### Adding a framework Rezure doesn't know
+
+Describe it in `C:\rezure\etc\frameworks.json` and click **Reload frameworks.json** in the
+framework dialog (or restart the app). No release needed — see
+[frameworks.md](frameworks.md#your-own-definitions). If something in that file can't be used, the
+Projects page lists what and why; the rest of the file still applies.
 
 ---
 
@@ -137,14 +191,23 @@ It also draws a cleaner line:
 | `links.json` | *which* projects exist — configuration, declared by the user |
 | SQLite `projects` | history *about* projects — derived, and disposable |
 
-### Stack detection
+### Framework detection
 
-Marker files, in order: `artisan` → Laravel, `wp-config.php` → WordPress, then `package.json`
-dependencies (Next.js, Nuxt, Vue, React, Svelte, else Node), then `composer.json`/`index.php` →
-PHP, then `index.html` → Static, else Unknown.
+`services::frameworks` holds a registry of definitions — built-in ones from
+`src-tauri/resources/frameworks.json`, with the user's `etc\frameworks.json` merged over them —
+and `services::projects::scan_projects` resolves every project against it, applying any choice
+from `etc\project-frameworks.json` on top. Because that happens inside the one scan everything
+reads, the corrected docroot reaches vhost generation, the project list and `AGENTS.md` without
+any of them knowing about overrides. `ProjectInfo` carries the result: `framework` (effective id),
+`detected_framework`, `framework_overridden`, the label as `stack`, and the absolute `docroot`.
 
-The stack decides the document root: Laravel projects are served from `public/`, everything
-else from the project root.
+Definitions are data, but how nginx serves a project isn't: a definition only names a serve
+profile (today only `php`), and the template behind it lives in `services::vhosts`. All vhosts
+share one `nginx.conf`, so a definition able to add directives could take every site down.
+
+Choices live in JSON rather than SQLite for the same structural reason as `links.json`, and one
+more: SQLite here is derived, disposable history, while a framework choice is a declaration that
+must survive the database being reset.
 
 ---
 
@@ -153,6 +216,16 @@ else from the project root.
 **A linked project's domain doesn't resolve in the browser**
 It needs a hosts-file entry. Use **Sync hosts file** — it prompts for admin rights once and
 writes every project's domain at the same time.
+
+**The site 404s (or lists a directory) although the project works elsewhere**
+Check where it's served from: hover the framework badge. A front-controller framework served from
+the project folder instead of `public/` answers every URL with a 404. Click the badge and pick the
+right framework, or **Custom folder…** if it uses its own layout.
+
+**"Some framework settings aren't being used"**
+An entry in `etc\frameworks.json` was skipped (the message says why), or a project is set to a
+framework that's no longer defined — it's served as detected meanwhile. Fix the file, then click
+**Reload** next to the message.
 
 **"it's already inside your www folder"**
 The folder is picked up by the scan automatically; there's nothing to add.
