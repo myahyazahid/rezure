@@ -12,6 +12,13 @@ Fase tambahan di antara v3 dan v4, fokus menambah dukungan Node.js version switc
 
 ### Cara kerja (ringkas)
 
+> **Diubah di v3.3.0.** Project JavaScript/Node sekarang disajikan nginx lewat dev server-nya
+> (serve profile `proxy`), dan Rezure bisa menjalankan dev server itu sebagai `Service` yang
+> opt-in per project — tidak di Dashboard, tidak ikut Start all, tidak di-restart otomatis. Pin
+> versi Node per project dari fase ini ikut dipakai dev server. Lihat
+> `docs/v3/rezure-app-v3.3.0-phases-tasks.md`. Paragraf di bawah dibiarkan apa adanya sebagai
+> catatan keputusan saat itu.
+
 Beda dari PHP: Node **tidak** dijalankan Rezure sebagai service yang terus nyala (tidak ada proses yang di-proxy nginx), jadi tidak butuh pool/port ala `services::php_pool` (v3 Fase 3.11). Node dipakai ephemeral — lewat terminal yang dibuka dari project card, `npm install`, dev server yang user start sendiri — jadi "pakai versi tertentu buat satu project" cukup soal PATH resolution di titik `services::launcher::open_terminal` men-spawn terminal baru, bukan soal proses yang harus tetap hidup.
 
 - **Versi aktif global** (`services::node`, `OnceLock<Mutex<String>>` — pola identik `services::php`) dipakai project yang tidak pin apa-apa.

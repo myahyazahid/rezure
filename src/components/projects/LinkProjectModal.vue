@@ -154,7 +154,11 @@ async function confirm() {
                was picked (Laravel and CodeIgniter 4 serve public/). From the
                preview, not the picker: a docroot that isn't there falls back
                to the folder itself, and only Rust knows that. -->
-          <p class="mt-1.5 text-xs text-neutral-500">
+          <p v-if="preview.serve === 'proxy'" class="mt-1.5 text-xs text-neutral-500">
+            Served through its dev server — Rezure gives it a port and starts it when you click
+            Open.
+          </p>
+          <p v-else class="mt-1.5 text-xs text-neutral-500">
             Served from
             <span class="font-mono text-neutral-700 dark:text-neutral-200">{{
               servedFolderLabel(preview.path, preview.docroot)

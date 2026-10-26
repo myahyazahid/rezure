@@ -119,14 +119,15 @@ const degraded = computed(
     props.service.workers.running < props.service.workers.total,
 )
 
-/** The first of this service's ports something else is holding — with
- *  several workers the conflict can be on any one of them. */
-async function findBlocker(): Promise<PortHolder | null> {
-  for (const port of ports.value) {
-    const holder = await store.portHolder(port).catch(() => null)
-    if (holder) return holder
-  }
-  return null
+/** Every one of this service's ports something else is holding. With several
+ *  workers a leftover from an earlier run usually holds all of them, one
+ *  process per port — freeing only the first left the next start failing on
+ *  the second. */
+async function findBlockers(): Promise<PortHolder[]> {
+  const holders = await Promise.all(
+    ports.value.map((port) => store.portHolder(port).catch(() => null)),
+  )
+  return holders.filter((holder): holder is PortHolder => holder !== null)
 }
 
 function toggleExpanded() {
@@ -142,12 +143,19 @@ function errorMessage(e: unknown): string {
 /** Set when a start failed because something else owns the port. Drives the
  *  "take it back" offer, which is the only way out of that failure short of
  *  hunting the process down by hand. */
-const blocker = ref<PortHolder | null>(null)
+const blockers = ref<PortHolder[]>([])
+/** The one the panel describes. A system holder goes first: it can't be
+ *  freed, so offering to free the rest would only lead to another failure. */
+const blocker = computed<PortHolder | null>(
+  () => blockers.value.find((b) => b.kind === 'system') ?? blockers.value[0] ?? null,
+)
+/** How many other ports are held besides the one described. */
+const moreBlocked = computed(() => Math.max(0, blockers.value.length - 1))
 const freeing = ref(false)
 
 async function onPrimaryAction() {
   error.value = null
-  blocker.value = null
+  blockers.value = []
   try {
     await (isRunning.value ? store.stop(props.service.id) : store.start(props.service.id))
   } catch (e) {
@@ -155,22 +163,27 @@ async function onPrimaryAction() {
     // A port conflict is the one failure with an obvious next action, so
     // find out who's responsible rather than leaving the message as advice.
     if (error.value.includes('port')) {
-      blocker.value = await findBlocker()
+      blockers.value = await findBlockers()
     }
   }
 }
 
-/** Kills the port's owner, then starts the service. Two steps on purpose —
- *  if freeing fails, that's what gets reported, not a confusing start error. */
+/** Kills whatever holds each of the service's ports, then starts it. Two
+ *  steps on purpose — if freeing fails, that's what gets reported, not a
+ *  confusing start error. */
 async function freePortAndStart() {
   freeing.value = true
   error.value = null
   try {
-    await store.freePort(blocker.value?.port ?? props.service.port)
-    blocker.value = null
+    for (const held of blockers.value) {
+      await store.freePort(held.port)
+    }
+    blockers.value = []
     await store.start(props.service.id)
   } catch (e) {
     error.value = errorMessage(e)
+    // Something new may have taken a port meanwhile; say who, again.
+    if (error.value.includes('port')) blockers.value = await findBlockers()
   } finally {
     freeing.value = false
   }
@@ -489,6 +502,16 @@ function requestForceStop() {
       <p class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
         {{ blocker.description }}
       </p>
+      <p v-if="moreBlocked > 0" class="mt-0.5 text-xs text-neutral-600 dark:text-neutral-300">
+        Port{{ moreBlocked > 1 ? 's' : '' }}
+        {{
+          blockers
+            .filter((b) => b !== blocker)
+            .map((b) => b.port)
+            .join(', ')
+        }}
+        {{ moreBlocked > 1 ? 'are' : 'is' }} held too — all of them are freed together.
+      </p>
       <p
         v-if="blocker.path"
         class="mt-1 truncate font-mono text-xs text-neutral-500"
@@ -518,7 +541,7 @@ function requestForceStop() {
         <button
           type="button"
           class="rounded-full px-4 py-1.5 text-sm font-semibold text-neutral-600 dark:text-neutral-300"
-          @click="blocker = null"
+          @click="blockers = []"
         >
           Cancel
         </button>

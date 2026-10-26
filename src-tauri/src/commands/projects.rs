@@ -1,8 +1,11 @@
 use tauri::{AppHandle, State};
 
+use crate::commands::dev_servers::start_and_wait;
+use crate::config;
 use crate::db::projects::ProjectInfo;
 use crate::db::{self, DbState};
-use crate::services::frameworks::{self, FrameworkCatalog};
+use crate::services::dev_servers::{self, DevSpec};
+use crate::services::frameworks::{self, FrameworkCatalog, ServeProfile};
 use crate::services::scaffold::ProjectTemplate;
 use crate::services::{
     hosts, launcher, projects, scaffold, telemetry, vhosts, ServiceManager, ServiceStatus,
@@ -49,15 +52,29 @@ fn reload_nginx_if_running(manager: &ServiceManager) {
 /// call from `list_projects`, which runs on every visit to the Projects
 /// page: without it, simply opening that page would cycle nginx's workers.
 ///
+/// Also reconciles the dev servers (`ServiceManager::sync_dev_servers`)
+/// against the same scan, with each project's Node.js pin from SQLite, and
+/// returns their specs — so a caller about to start one starts it as it is
+/// now, not as it was when the app opened.
+///
 /// Best-effort throughout — a vhost hiccup should leave a warning in the log,
 /// not fail the command the user actually asked for.
-pub(crate) fn sync_vhosts_and_reload(manager: &ServiceManager, db_state: &DbState, context: &str) {
-    let php_versions = {
+pub(crate) fn sync_vhosts_and_reload(
+    manager: &ServiceManager,
+    db_state: &DbState,
+    context: &str,
+) -> Vec<DevSpec> {
+    let (php_versions, node_versions) = {
         let conn = db_state.0.lock().unwrap();
-        db::projects::fetch_php_versions(&conn).unwrap_or_else(|err| {
+        let php = db::projects::fetch_php_versions(&conn).unwrap_or_else(|err| {
             log::warn!("failed to load PHP version overrides {context}: {err}");
             Default::default()
-        })
+        });
+        let node = db::projects::fetch_node_versions(&conn).unwrap_or_else(|err| {
+            log::warn!("failed to load Node.js version overrides {context}: {err}");
+            Default::default()
+        });
+        (php, node)
     };
 
     match vhosts::sync_vhosts(&php_versions, |wanted| manager.sync_php_pool(wanted)) {
@@ -65,8 +82,19 @@ pub(crate) fn sync_vhosts_and_reload(manager: &ServiceManager, db_state: &DbStat
             if sync.changed {
                 reload_nginx_if_running(manager);
             }
+            let specs = dev_servers::specs(
+                &sync.projects,
+                &frameworks::registry(),
+                &config::dev_servers::load(),
+                &node_versions,
+            );
+            manager.sync_dev_servers(&specs);
+            specs
         }
-        Err(err) => log::warn!("failed to sync nginx vhosts {context}: {err}"),
+        Err(err) => {
+            log::warn!("failed to sync nginx vhosts {context}: {err}");
+            Vec::new()
+        }
     }
 }
 
@@ -75,12 +103,13 @@ pub fn list_projects(
     db_state: State<'_, DbState>,
     manager: State<'_, ServiceManager>,
 ) -> Result<Vec<ProjectInfo>, AppError> {
-    let mut detected = projects::scan_projects()?;
-
     // A folder dropped into `www` by hand shows up in this scan and nowhere
     // else, so this is the only place its vhost gets written — and without
-    // the reload nginx would keep 404ing it until its next restart.
+    // the reload nginx would keep 404ing it until its next restart. Before
+    // the scan below, so a `proxy` project's port picked by this sync is in
+    // the list already.
     sync_vhosts_and_reload(&manager, &db_state, "while listing projects");
+    let mut detected = projects::scan_projects()?;
 
     // Best-effort, same reasoning: a SQLite hiccup shouldn't stop the list
     // from loading, just leave it without history for this call.
@@ -148,19 +177,26 @@ pub fn set_project_php_version(
 }
 
 /// Pins (or, with `version: null`, clears back to the global default) the
-/// Node.js version `open_project_terminal` resolves for this one project.
+/// Node.js version this one project's terminal and dev server resolve.
 ///
-/// No vhost/nginx resync here, unlike [`set_project_php_version`] — Node
-/// isn't proxied through nginx in this app, so a plain SQLite write is the
-/// whole change; the next "Open terminal" click reads it fresh.
+/// The resync is for the dev server alone (nothing in nginx depends on
+/// Node): its spec carries the version, so a stopped one is rebuilt with the
+/// new one at once, and a running one at its next stop.
 #[tauri::command]
 pub fn set_project_node_version(
     id: String,
     version: Option<String>,
     db_state: State<'_, DbState>,
+    manager: State<'_, ServiceManager>,
 ) -> Result<(), AppError> {
     let conn = db_state.0.lock().unwrap();
     db::projects::set_node_version(&conn, &id, version.as_deref())?;
+    drop(conn);
+    sync_vhosts_and_reload(
+        &manager,
+        &db_state,
+        "after setting a project's Node.js version",
+    );
     Ok(())
 }
 
@@ -246,8 +282,25 @@ fn mark_opened(db_state: &State<'_, DbState>, id: &str) {
 /// Opens the project's site in the default browser. Takes the project's
 /// id, not a URL — the domain is re-resolved from the scan on this side so
 /// the frontend can't ask the OS to open something Rezure didn't detect.
+///
+/// A `proxy` project with Open-starts-it on (the default) has its dev server
+/// started first, and the browser is only opened once that answers — a tab
+/// opened sooner would land on the "not running" page. If it fails to come
+/// up, the browser isn't opened at all and the error says why.
 #[tauri::command]
-pub fn open_project_site(id: String, db_state: State<'_, DbState>) -> Result<(), AppError> {
+pub async fn open_project_site(
+    id: String,
+    db_state: State<'_, DbState>,
+    manager: State<'_, ServiceManager>,
+) -> Result<(), AppError> {
+    let project = projects::find(&id)?;
+    if project.serve == ServeProfile::Proxy {
+        let specs = sync_vhosts_and_reload(&manager, &db_state, "before opening a project");
+        if dev_servers::starts_on_open(project.serve, &id, &specs) {
+            let service = manager.find(&dev_servers::service_id(&id))?;
+            start_and_wait(service).await?;
+        }
+    }
     launcher::open_site(&id)?;
     mark_opened(&db_state, &id);
     Ok(())

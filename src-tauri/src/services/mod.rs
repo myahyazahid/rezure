@@ -14,6 +14,7 @@ pub mod database;
 pub mod db_clients;
 pub mod db_engine;
 pub mod db_profiles;
+pub mod dev_servers;
 pub mod doctor;
 pub mod donate;
 pub mod donate_images;
@@ -183,6 +184,11 @@ pub type ServiceHandle = Arc<dyn Service>;
 /// `process::real_services` is the only place that supplies one.
 pub type PhpPoolFactory = Arc<dyn Fn(&str, u16) -> ServiceHandle + Send + Sync>;
 
+/// Builds a project's dev server from its spec — see
+/// [`ServiceManager::sync_dev_servers`]. A closure for the same reason as
+/// [`PhpPoolFactory`].
+pub type DevServerFactory = Arc<dyn Fn(&dev_servers::DevSpec) -> ServiceHandle + Send + Sync>;
+
 /// Tauri-managed state holding every registered service.
 ///
 /// The list is no longer fixed at construction: a project pinning a PHP
@@ -190,10 +196,16 @@ pub type PhpPoolFactory = Arc<dyn Fn(&str, u16) -> ServiceHandle + Send + Sync>;
 /// appear (and disappear again once nothing pins it anymore) while the app
 /// is running — see [`sync_php_pool`](Self::sync_php_pool). Nginx, the
 /// default PHP service and the database are registered once at startup and
-/// never removed; only pooled `"php-<version>"` entries come and go.
+/// never removed; pooled `"php-<version>"` entries and projects' dev servers
+/// (`"dev-<project>"`, see [`sync_dev_servers`](Self::sync_dev_servers)) come
+/// and go.
 pub struct ServiceManager {
     services: Mutex<Vec<ServiceHandle>>,
     php_factory: Option<PhpPoolFactory>,
+    dev_factory: Option<DevServerFactory>,
+    /// The spec each registered dev server was built from, to tell a changed
+    /// one from an unchanged one without asking the service.
+    dev_specs: Mutex<BTreeMap<String, dev_servers::DevSpec>>,
 }
 
 impl ServiceManager {
@@ -201,7 +213,16 @@ impl ServiceManager {
         Self {
             services: Mutex::new(services),
             php_factory: None,
+            dev_factory: None,
+            dev_specs: Mutex::new(BTreeMap::new()),
         }
+    }
+
+    /// Attaches the factory [`sync_dev_servers`](Self::sync_dev_servers)
+    /// builds a project's dev server with.
+    pub fn with_dev_factory(mut self, factory: DevServerFactory) -> Self {
+        self.dev_factory = Some(factory);
+        self
     }
 
     /// Attaches the factory [`sync_php_pool`](Self::sync_php_pool) uses to
@@ -339,5 +360,226 @@ impl ServiceManager {
         }
 
         assignment
+    }
+
+    /// Reconciles the registered dev servers against `specs` — one per
+    /// `proxy` project, from [`dev_servers::specs`].
+    ///
+    /// A project that's gone, or no longer `proxy`, has its dev server
+    /// stopped and unregistered. One whose spec changed (another port,
+    /// script, Node.js version) is rebuilt — but only while it's stopped: a
+    /// running dev server keeps the spec it was started with until it stops,
+    /// and the next sync after that picks the change up. A new one is
+    /// registered and, like every other service here, left stopped.
+    ///
+    /// A no-op if no factory was attached.
+    pub fn sync_dev_servers(&self, specs: &[dev_servers::DevSpec]) {
+        let Some(factory) = &self.dev_factory else {
+            return;
+        };
+        let wanted: BTreeMap<String, &dev_servers::DevSpec> = specs
+            .iter()
+            .map(|spec| (dev_servers::service_id(&spec.project_id), spec))
+            .collect();
+
+        let stale: Vec<ServiceHandle> = {
+            let mut services = self.services.lock().unwrap();
+            let mut stale = Vec::new();
+            services.retain(|service| {
+                if !dev_servers::is_dev_service(service.id()) || wanted.contains_key(service.id()) {
+                    true
+                } else {
+                    stale.push(service.clone());
+                    false
+                }
+            });
+            stale
+        };
+        {
+            let mut known = self.dev_specs.lock().unwrap();
+            known.retain(|id, _| wanted.contains_key(id));
+        }
+        for service in stale {
+            if let Err(err) = service.stop() {
+                log::warn!(
+                    "failed to stop {} while removing its dev server: {err}",
+                    service.id()
+                );
+            }
+        }
+
+        let mut services = self.services.lock().unwrap();
+        let mut known = self.dev_specs.lock().unwrap();
+        for (id, spec) in wanted {
+            if known.get(&id) == Some(spec) {
+                continue;
+            }
+            match services.iter().position(|service| service.id() == id) {
+                Some(index) => {
+                    if services[index].info().status != ServiceStatus::Stopped {
+                        continue;
+                    }
+                    services[index] = factory(spec);
+                }
+                None => services.push(factory(spec)),
+            }
+            known.insert(id, spec.clone());
+        }
+    }
+
+    /// The spec a project's registered dev server was built from.
+    pub fn dev_spec(&self, project_id: &str) -> Option<dev_servers::DevSpec> {
+        self.dev_specs
+            .lock()
+            .unwrap()
+            .get(&dev_servers::service_id(project_id))
+            .cloned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::frameworks::PortMode;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    /// A service that records what was done to it.
+    struct Fake {
+        id: String,
+        port: u16,
+        running: AtomicBool,
+        stops: Arc<AtomicUsize>,
+    }
+
+    impl Service for Fake {
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn info(&self) -> ServiceInfo {
+            ServiceInfo {
+                id: self.id.clone(),
+                name: self.id.clone(),
+                category: "Test".to_string(),
+                status: if self.running.load(Ordering::SeqCst) {
+                    ServiceStatus::Running
+                } else {
+                    ServiceStatus::Stopped
+                },
+                version: String::new(),
+                port: self.port,
+                cpu_percent: None,
+                cpu_history: Vec::new(),
+                workers: None,
+                ports: vec![self.port],
+                installed: true,
+                install_id: None,
+                web_url: None,
+                endpoint: None,
+            }
+        }
+        fn start(&self) -> Result<ServiceInfo, AppError> {
+            self.running.store(true, Ordering::SeqCst);
+            Ok(self.info())
+        }
+        fn stop(&self) -> Result<ServiceInfo, AppError> {
+            self.running.store(false, Ordering::SeqCst);
+            self.stops.fetch_add(1, Ordering::SeqCst);
+            Ok(self.info())
+        }
+    }
+
+    fn spec(project: &str, port: u16) -> dev_servers::DevSpec {
+        dev_servers::DevSpec {
+            project_id: project.to_string(),
+            name: project.to_string(),
+            domain: format!("{project}.test"),
+            framework: "Astro".to_string(),
+            dir: PathBuf::from(format!(r"C:\nowhere\{project}")),
+            port,
+            port_mode: PortMode::Flag,
+            port_mode_setting: None,
+            default_port_mode: PortMode::Flag,
+            script: Some("dev".to_string()),
+            script_setting: None,
+            scripts: vec!["dev".to_string()],
+            package_manager: dev_servers::PackageManager::Npm,
+            node_pin: None,
+            auto_start: true,
+        }
+    }
+
+    fn manager(stops: &Arc<AtomicUsize>) -> ServiceManager {
+        let nginx: ServiceHandle = Arc::new(Fake {
+            id: "nginx".to_string(),
+            port: 80,
+            running: AtomicBool::new(true),
+            stops: Arc::clone(stops),
+        });
+        let stops = Arc::clone(stops);
+        ServiceManager::new(vec![nginx]).with_dev_factory(Arc::new(move |spec| {
+            Arc::new(Fake {
+                id: dev_servers::service_id(&spec.project_id),
+                port: spec.port,
+                running: AtomicBool::new(false),
+                stops: Arc::clone(&stops),
+            }) as ServiceHandle
+        }))
+    }
+
+    fn ids(manager: &ServiceManager) -> Vec<String> {
+        manager
+            .handles()
+            .iter()
+            .map(|s| s.id().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn dev_servers_come_and_go_with_their_projects() {
+        let stops = Arc::new(AtomicUsize::new(0));
+        let manager = manager(&stops);
+
+        manager.sync_dev_servers(&[spec("a", 4400), spec("b", 4401)]);
+        assert_eq!(ids(&manager), ["nginx", "dev-a", "dev-b"]);
+
+        // "b" is gone (unlinked, or no longer proxied): stopped and dropped.
+        manager.find("dev-b").unwrap().start().unwrap();
+        manager.sync_dev_servers(&[spec("a", 4400)]);
+        assert_eq!(ids(&manager), ["nginx", "dev-a"]);
+        assert_eq!(stops.load(Ordering::SeqCst), 1);
+        // Rezure's own services are never touched.
+        assert_eq!(
+            manager.find("nginx").unwrap().info().status,
+            ServiceStatus::Running
+        );
+    }
+
+    #[test]
+    fn a_changed_spec_waits_for_a_running_dev_server_to_stop() {
+        let stops = Arc::new(AtomicUsize::new(0));
+        let manager = manager(&stops);
+        manager.sync_dev_servers(&[spec("a", 4400)]);
+        let running = manager.find("dev-a").unwrap();
+        running.start().unwrap();
+
+        // Moved to another port while running: it keeps the one it has.
+        manager.sync_dev_servers(&[spec("a", 4410)]);
+        assert_eq!(manager.find("dev-a").unwrap().info().port, 4400);
+        assert_eq!(manager.dev_spec("a").unwrap().port, 4400);
+
+        // Once stopped, the next sync rebuilds it with the new one.
+        running.stop().unwrap();
+        manager.sync_dev_servers(&[spec("a", 4410)]);
+        assert_eq!(manager.find("dev-a").unwrap().info().port, 4410);
+        assert_eq!(manager.dev_spec("a").unwrap().port, 4410);
+        assert_eq!(ids(&manager), ["nginx", "dev-a"]);
+    }
+
+    #[test]
+    fn without_a_factory_nothing_is_registered() {
+        let manager = ServiceManager::new(Vec::new());
+        manager.sync_dev_servers(&[spec("a", 4400)]);
+        assert!(manager.handles().is_empty());
     }
 }

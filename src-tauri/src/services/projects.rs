@@ -11,8 +11,9 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use super::frameworks::{self, FrameworkCatalog, Registry};
+use super::frameworks::{self, FrameworkCatalog, Registry, ServeProfile};
 use super::hosts;
+use crate::config::dev_servers::{self, DevServerStore};
 use crate::config::links::{self, LinkStore};
 use crate::config::project_frameworks::{self, FrameworkOverride, OverrideStore};
 use crate::db::projects::{ProjectInfo, ProjectKind};
@@ -68,8 +69,9 @@ pub fn www_root() -> Result<PathBuf, AppError> {
 pub fn scan_projects() -> Result<Vec<ProjectInfo>, AppError> {
     let registry = frameworks::registry();
     let overrides = project_frameworks::load();
-    let mut projects = scan_www(&registry, &overrides)?;
-    projects.extend(linked_projects(&projects, &registry, &overrides));
+    let dev = dev_servers::load();
+    let mut projects = scan_www(&registry, &overrides, &dev)?;
+    projects.extend(linked_projects(&projects, &registry, &overrides, &dev));
     projects.sort_by_key(|p| p.name.to_lowercase());
     Ok(projects)
 }
@@ -98,6 +100,7 @@ fn linked_projects(
     scanned: &[ProjectInfo],
     registry: &Registry,
     overrides: &OverrideStore,
+    dev: &DevServerStore,
 ) -> Vec<ProjectInfo> {
     let store = links::load();
     let mut taken: Vec<String> = scanned.iter().map(|p| p.domain.clone()).collect();
@@ -120,25 +123,29 @@ fn linked_projects(
 
         // A folder that isn't there can't be inspected; the badge would
         // otherwise read "Unknown" as though the project had no framework.
-        let (stack, framework, detected_framework, framework_overridden, docroot) = if missing {
-            (
-                "Missing".to_string(),
-                frameworks::UNKNOWN.to_string(),
-                frameworks::UNKNOWN.to_string(),
-                choice.is_some(),
-                link.path.clone(),
-            )
-        } else {
-            let serving = registry.serving(&path, choice);
-            (
-                serving.label,
-                serving.framework,
-                serving.detected,
-                serving.overridden,
-                serving.docroot.display().to_string(),
-            )
-        };
+        let (stack, framework, detected_framework, framework_overridden, docroot, serve) =
+            if missing {
+                (
+                    "Missing".to_string(),
+                    frameworks::UNKNOWN.to_string(),
+                    frameworks::UNKNOWN.to_string(),
+                    choice.is_some(),
+                    link.path.clone(),
+                    ServeProfile::Php,
+                )
+            } else {
+                let serving = registry.serving(&path, choice);
+                (
+                    serving.label,
+                    serving.framework,
+                    serving.detected,
+                    serving.overridden,
+                    serving.docroot.display().to_string(),
+                    serving.serve,
+                )
+            };
 
+        let dev_port = dev_port(dev, &link.id, serve);
         projects.push(ProjectInfo {
             id: link.id,
             name: link.name,
@@ -153,6 +160,8 @@ fn linked_projects(
             detected_framework,
             framework_overridden,
             docroot,
+            serve,
+            dev_port,
             last_opened_at: None,
             open_count: 0,
             kind: ProjectKind::Linked,
@@ -168,7 +177,11 @@ fn linked_projects(
 }
 
 /// Scans `www_root()` for project folders.
-fn scan_www(registry: &Registry, overrides: &OverrideStore) -> Result<Vec<ProjectInfo>, AppError> {
+fn scan_www(
+    registry: &Registry,
+    overrides: &OverrideStore,
+    dev: &DevServerStore,
+) -> Result<Vec<ProjectInfo>, AppError> {
     let root = www_root()?;
     fs::create_dir_all(&root)
         .map_err(|e| AppError::Io(format!("could not create {}: {e}", root.display())))?;
@@ -210,6 +223,8 @@ fn scan_www(registry: &Registry, overrides: &OverrideStore) -> Result<Vec<Projec
             detected_framework: serving.detected,
             framework_overridden: serving.overridden,
             docroot: serving.docroot.display().to_string(),
+            serve: serving.serve,
+            dev_port: dev_port(dev, folder_name, serving.serve),
             // Filled in by `commands::projects::list_projects` from SQLite —
             // a bare scan has no way to know this.
             last_opened_at: None,
@@ -226,6 +241,16 @@ fn scan_www(registry: &Registry, overrides: &OverrideStore) -> Result<Vec<Projec
     }
 
     Ok(projects)
+}
+
+/// A `proxy` project's saved dev server port. Only read here — choosing one
+/// for a project that has none yet is the vhost sync's job
+/// (`dev_servers::assign_ports`), since a scan must not write.
+fn dev_port(dev: &DevServerStore, id: &str, serve: ServeProfile) -> Option<u16> {
+    match serve {
+        ServeProfile::Proxy => dev.get(id).map(|config| config.port),
+        ServeProfile::Php => None,
+    }
 }
 
 /// What linking a folder would produce, without doing it.
@@ -246,6 +271,9 @@ pub struct LinkPreview {
     pub detected_framework: String,
     /// The folder nginx would actually serve — `public/` for Laravel.
     pub docroot: String,
+    /// `proxy` when it would be served through a dev server rather than
+    /// from a folder.
+    pub serve: ServeProfile,
     /// True when the domain had to be adjusted to avoid a clash, so the
     /// dialog can say why it isn't the obvious one.
     pub domain_adjusted: bool,
@@ -452,6 +480,7 @@ pub fn prepare_link(
 
     Ok(LinkPreview {
         docroot: serving.docroot.display().to_string(),
+        serve: serving.serve,
         path: path.to_string(),
         name,
         domain,
@@ -588,8 +617,8 @@ pub fn link(
     })
 }
 
-/// Forgets a linked project, and the framework chosen for it. Never touches
-/// the folder itself.
+/// Forgets a linked project, and the framework and dev server settings chosen
+/// for it. Never touches the folder itself.
 pub fn unlink(id: &str) -> Result<(), AppError> {
     let mut store = links::load();
     links::remove(&mut store, id)?;
@@ -601,6 +630,14 @@ pub fn unlink(id: &str) -> Result<(), AppError> {
     if overrides.set(id, None) {
         if let Err(err) = project_frameworks::save(&overrides) {
             log::warn!("unlinked {id} but couldn't forget its framework choice: {err}");
+        }
+    }
+    // Same for its dev server — and a port still held by a project that's
+    // gone is one no other project can be given.
+    let mut dev = dev_servers::load();
+    if dev.set(id, None) {
+        if let Err(err) = dev_servers::save(&dev) {
+            log::warn!("unlinked {id} but couldn't forget its dev server settings: {err}");
         }
     }
     Ok(())
@@ -849,7 +886,12 @@ mod tests {
         // anything flagged missing must carry the Missing stack, and
         // anything present must not be flagged.
         let registry = frameworks::builtin_registry();
-        for project in linked_projects(&scanned, &registry, &OverrideStore::default()) {
+        for project in linked_projects(
+            &scanned,
+            &registry,
+            &OverrideStore::default(),
+            &DevServerStore::default(),
+        ) {
             if project.missing {
                 assert_eq!(project.stack, "Missing");
                 assert_eq!(project.docroot, project.path);

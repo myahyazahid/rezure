@@ -51,7 +51,7 @@ they serve the projects.** Rezure's projects are served by Rezure. See
 | `{{home}}\custom\<runtime>\<name>\` | Runtimes added by hand. They're used, but Rezure didn't verify them. |
 | `{{home}}\current\php` | A junction to the active PHP version's folder. |
 | `{{home}}\data\` | Runtime state: generated Nginx and PHP config, the default database's data, PID files. |
-| `{{home}}\etc\` | Settings (`settings.json`), database profiles (`profiles.json`), linked projects (`links.json`), framework choices per project (`project-frameworks.json`), **your own framework definitions (`frameworks.json`)**, the CA bundle (`cacert.pem`), and **PHP overrides (`php\conf.d\`)**. |
+| `{{home}}\etc\` | Settings (`settings.json`), database profiles (`profiles.json`), linked projects (`links.json`), framework choices per project (`project-frameworks.json`), dev server ports and scripts (`dev-servers.json`), **your own framework definitions (`frameworks.json`)**, the CA bundle (`cacert.pem`), and **PHP overrides (`php\conf.d\`)**. |
 | `{{home}}\dumps\` | SQL exports made from the Databases page. |
 | `{{home}}\rezure.db` | Rezure's own SQLite database (project history, PHP/Node version pins). |
 
@@ -84,9 +84,10 @@ they serve the projects.** Rezure's projects are served by Rezure. See
 
 Rezure recognises a project's framework from marker files (`artisan`, `spark`,
 `wp-config.php`, packages in `composer.json` or `package.json`), and the
-framework decides which folder Nginx serves. When several match, the most
-specific wins: a CodeIgniter 4 app with a `package.json` for its CSS is still
-CodeIgniter 4.
+framework decides how Nginx serves it: which folder, for PHP, or through the
+project's dev server, for JavaScript and Node (see "Dev servers" below). When
+several match, the most specific wins: a CodeIgniter 4 app with a `package.json`
+for its CSS is still CodeIgniter 4.
 
 - **Wrong framework?** The user changes it from the framework badge on the
   Projects page: pick another framework, or **Custom** with a subfolder to serve.
@@ -119,10 +120,38 @@ CodeIgniter 4.
 | `detect` | `{ "file": "path" }`, `{ "dir": "path" }`, `{ "composer": "vendor/package" }`, `{ "npm": "package" }`, combined with `{ "any": [...] }`, `{ "all": [...] }` and `{ "not": {...} }`. Paths are relative to the project. |
 | `category` | Optional heading in the app's framework picker (`PHP`, `JavaScript`, ...). Left out: "Your frameworks". |
 | `docroot` | Optional subfolder to serve, relative, no `..`. Left out: the project folder. If the subfolder doesn't exist in a project, that project is served from its own folder. |
+| `serve` | Optional: `php` (the default) or `proxy` — every request goes to the project's dev server instead of its files. A `proxy` definition has no `docroot`. |
+| `dev` | Only with `proxy`: `{ "script": "dev", "port": "vite" }`. `port` is how the dev server is told its port: `vite` (`--port N --strictPort`), `flag` (`--port N`), `env` (only `PORT`), `fixed` (the app picks its own). |
 
-Definitions only choose a folder. Every project gets the same Nginx rules
-(static files, everything else through `index.php`); there's no way to add
-Nginx directives through them.
+Definitions only choose a folder or a dev server. Every project of a profile gets
+the same Nginx rules; there's no way to add Nginx directives through them.
+
+## Dev servers
+
+Projects detected as Vue, React, Svelte, Angular, Astro, Next.js, Nuxt or Node
+are served by their own dev server. Nginx passes every request for the domain to
+`127.0.0.1` (or `[::1]`) on the project's port, shown in the `AGENTS.md` project
+table ("dev server on :4400").
+
+- **Rezure runs it.** The user clicks Open (it starts the dev server, then opens
+  the browser) or uses **Projects → Dev servers**, which also sets the port,
+  how the port is passed, and the `package.json` script. The command is
+  `npm run <script> -- --port <port>` (or pnpm/yarn/bun, from the lockfile), in
+  the project folder, on the project's Node version.
+- **Don't start a second copy** of it from a terminal: Astro and Next refuse to
+  run twice in one folder, and Rezure's Start then reports it as "already running
+  outside Rezure" (and offers to stop yours). To see its
+  output, use the Log in Dev servers.
+- If you change how the app listens (a custom server, a `concurrently` wrapper),
+  it must still listen on the port Rezure shows, or the user switches that
+  project to "The app's own port" with the port it uses.
+- Vite rejects hosts other than `localhost` by default. Rezure passes the
+  project's domain to it through `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS`; with an
+  older Vite, add `server: { allowedHosts: ['.test'] }` to `vite.config`.
+- Settings are in `{{home}}\etc\dev-servers.json`. Don't edit it while the app
+  runs; the app writes it.
+- A built `dist/` can be served as plain files instead: the user picks
+  **Custom** with that folder on the framework badge.
 
 ## Web server (Nginx)
 
@@ -310,7 +339,8 @@ PHP Extensions, `pdo_pgsql` has to be turned on there.
 ## Node and Composer
 
 - Node versions live in `{{home}}\bin\node\<version>\`. A project can pin its own
-  Node version. It applies to the terminal the project card opens, nowhere else.
+  Node version. It applies to the terminal the project card opens and to the
+  project's dev server.
 - Composer lives in `{{home}}\bin\composer\<version>\composer.phar`. **Rezure
   doesn't put a `composer` command on `PATH`.** Either use a globally installed
   Composer (it runs with whichever `php` comes first on `PATH`), or run

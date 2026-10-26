@@ -35,6 +35,8 @@ interface Option {
   label: string
   detail: string | null
   docroot: string | null
+  /** Served through its own dev server rather than from a folder. */
+  devServer: boolean
   own: boolean
 }
 
@@ -52,6 +54,8 @@ const autoOption = computed<Option>(() => ({
       ? 'No framework markers found'
       : `Detected: ${store.frameworkLabel(props.detected)}`,
   docroot: store.frameworkCatalog.frameworks.find((f) => f.id === props.detected)?.docroot ?? null,
+  devServer:
+    store.frameworkCatalog.frameworks.find((f) => f.id === props.detected)?.serve === 'proxy',
   own: false,
 }))
 
@@ -60,6 +64,7 @@ const CUSTOM_OPTION: Option = {
   label: 'Custom folder…',
   detail: 'Serve a subfolder you name',
   docroot: null,
+  devServer: false,
   own: false,
 }
 
@@ -95,6 +100,7 @@ const rows = computed<Row[]>(() => {
       label: framework.label,
       detail: null,
       docroot: framework.docroot,
+      devServer: framework.serve === 'proxy',
       own: framework.source === 'user',
     })
   }
@@ -316,7 +322,14 @@ onUnmounted(() => {
                 Yours
               </span>
               <span
-                v-if="row.option.docroot"
+                v-if="row.option.devServer"
+                class="glass-inset shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-neutral-500 dark:text-neutral-400"
+                title="Served through its own dev server, which Rezure can start"
+              >
+                dev server
+              </span>
+              <span
+                v-else-if="row.option.docroot"
                 class="glass-inset shrink-0 rounded-md px-1.5 py-0.5 font-mono text-[11px] text-neutral-500 dark:text-neutral-400"
                 :title="`Served from ${row.option.docroot}/`"
               >

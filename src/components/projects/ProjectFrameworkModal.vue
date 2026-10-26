@@ -64,8 +64,15 @@ function save() {
       <div class="glass-inset mt-4 rounded-xl p-3.5 text-xs text-neutral-500">
         Served as
         <strong class="text-neutral-700 dark:text-neutral-200">{{ project.stack }}</strong>
-        from
-        <span class="font-mono">{{ servedFolderLabel(project.path, project.docroot) }}</span>
+        <template v-if="project.serve === 'proxy'">
+          through its dev server<template v-if="project.devPort">
+            on port <span class="font-mono">{{ project.devPort }}</span></template
+          >
+        </template>
+        <template v-else>
+          from
+          <span class="font-mono">{{ servedFolderLabel(project.path, project.docroot) }}</span>
+        </template>
         <template v-if="project.frameworkOverridden">
           · set manually, detection says
           {{ store.frameworkLabel(project.detectedFramework) }}

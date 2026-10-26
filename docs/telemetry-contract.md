@@ -189,4 +189,7 @@ mengganggu user" requirement from Fase 2.5.
   and hostnames, so only the kind (`AppError::code()`) and the service id go out.
 - The framework events never carry the project's name, path, domain, its `composer.json` or
   `package.json`, a Custom folder, or the id of a framework the user defined themselves.
+- Nothing about a project's dev server is sent. Its service id (`dev-<project>`) and name are the
+  project's, so starting, stopping or a crash of one records no `service.*` or `error.report`
+  event at all (`commands::dev_servers`, and the guards in `commands::services`).
 - `payload` holds version numbers, service ids and built-in framework ids only.

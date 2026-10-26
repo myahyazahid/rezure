@@ -10,6 +10,7 @@ import type {
 } from '@/types/project'
 import type { ProjectDiagnosis } from '@/types/php'
 import { useServicesStore } from '@/stores/services'
+import { useDevServersStore } from '@/stores/devServers'
 
 function errorMessage(e: unknown): string {
   if (typeof e === 'string') return e
@@ -36,6 +37,9 @@ export const useProjectsStore = defineStore('projects', () => {
   const syncingHosts = ref(false)
   const hostsError = ref<string | null>(null)
   const openError = ref<string | null>(null)
+  /** The `proxy` project whose Open just failed — its dev server didn't come
+   *  up — so the error can offer that dev server's log. */
+  const openErrorFor = ref<string | null>(null)
 
   /** The project whose requirements check is open, or null. One at a time:
    *  the result is about a single project and shown in a modal. */
@@ -117,7 +121,26 @@ export const useProjectsStore = defineStore('projects', () => {
     }
   }
 
-  const openSite = (id: string) => launch('open_project_site', id)
+  /**
+   * Opens a project in the browser. For a `proxy` project Rust starts its dev
+   * server first (unless Open-starts-it is off) and only opens the browser
+   * once it answers, so the row shows it starting meanwhile.
+   */
+  async function openSite(id: string) {
+    const project = projects.value.find((p) => p.id === id)
+    const devServers = useDevServersStore()
+    const proxied = project?.serve === 'proxy'
+    const starting = proxied && devServers.statusOf(id) !== 'running'
+    openErrorFor.value = null
+    if (starting) devServers.markStarting(id, true)
+    try {
+      await launch('open_project_site', id)
+      if (openError.value && proxied) openErrorFor.value = id
+    } finally {
+      if (starting) devServers.markStarting(id, false)
+      if (proxied) await devServers.fetchStatuses()
+    }
+  }
   const openFolder = (id: string) => launch('open_project_folder', id)
   const openTerminal = (id: string) => launch('open_project_terminal', id)
 
@@ -343,9 +366,8 @@ export const useProjectsStore = defineStore('projects', () => {
   /**
    * Pins (or, with `version: null`, clears back to the global default) the
    * Node.js version a terminal opened for this project resolves `node`/
-   * `npm`/`npx` as. Unlike `setPhpVersion`, this never starts or restarts
-   * anything — it only takes effect the next time a terminal is opened for
-   * this project, so there's nothing else to refresh here.
+   * `npm`/`npx` as, and its dev server runs on. A running dev server keeps
+   * the version it started with until it's restarted.
    */
   async function setNodeVersion(id: string, version: string | null) {
     settingNodeVersion.value = true
@@ -466,6 +488,7 @@ export const useProjectsStore = defineStore('projects', () => {
     syncingHosts,
     hostsError,
     openError,
+    openErrorFor,
     allHostsReady,
     unresolvedProjects,
     doctorFor,

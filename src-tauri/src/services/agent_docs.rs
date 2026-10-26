@@ -25,6 +25,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::db::projects::{ProjectInfo, ProjectKind};
 use crate::db::{self, DbState};
+use crate::services::frameworks::ServeProfile;
 use crate::services::{db_profiles, mssql_localdb, php, postgres, projects};
 use crate::utils::paths;
 
@@ -75,6 +76,9 @@ struct ProjectState {
     /// The served folder relative to `path` — empty when nginx serves the
     /// project folder itself. An agent looking for `index.php` needs this.
     docroot: String,
+    /// Set for a `proxy` project: the port its dev server must listen on.
+    /// `Some(None)` while it has none yet.
+    dev_port: Option<Option<u16>>,
     /// The version that actually serves it — its pin when that's installed,
     /// the active version otherwise.
     php: String,
@@ -175,6 +179,7 @@ fn project_states(
                     .strip_prefix(&project.path)
                     .map(|sub| sub.display().to_string())
                     .unwrap_or_default(),
+                dev_port: (project.serve == ServeProfile::Proxy).then_some(project.dev_port),
                 php: pin.unwrap_or(active_php).to_string(),
                 pinned: pin.is_some_and(|version| version != active_php),
             }
@@ -269,7 +274,17 @@ fn render_agents_md(state: &MachineState) -> String {
             } else {
                 format!("`{}`", project.path)
             };
-            let framework = if project.docroot.is_empty() {
+            let framework = if let Some(port) = project.dev_port {
+                match port {
+                    Some(port) => {
+                        format!(
+                            "{} (dev server on :{port})",
+                            escape_cell(&project.framework)
+                        )
+                    }
+                    None => format!("{} (dev server)", escape_cell(&project.framework)),
+                }
+            } else if project.docroot.is_empty() {
                 escape_cell(&project.framework)
             } else {
                 format!(
@@ -304,7 +319,12 @@ fn render_agents_md(state: &MachineState) -> String {
          - A project's framework decides the folder Nginx serves (the table above). If it's \
          wrong, the user changes it from the framework badge on the Projects page. A \
          framework Rezure doesn't recognise can be added to `{home}\\etc\\frameworks.json` \
-         (format in the guide), then **Reload** on the Projects page.\n"
+         (format in the guide), then **Reload** on the Projects page.\n\
+         - A project marked \"dev server\" is served by its own process, not by files: Nginx \
+         passes every request to the port in the table. The user starts and stops it from \
+         the Rezure app (Open, or **Projects → Dev servers**), which also sets its port and \
+         script. Don't start a second copy of it yourself on that port, and don't edit \
+         `{home}\\etc\\dev-servers.json` while Rezure runs.\n"
     ));
     out
 }
@@ -357,6 +377,7 @@ fn write_owned(path: &Path, content: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::frameworks::ServeProfile;
 
     fn project(id: &str, kind: ProjectKind) -> ProjectInfo {
         ProjectInfo {
@@ -368,6 +389,8 @@ mod tests {
             framework: "laravel".to_string(),
             detected_framework: "laravel".to_string(),
             framework_overridden: false,
+            serve: ServeProfile::Php,
+            dev_port: None,
             docroot: format!(r"C:\rezure\www\{id}\public"),
             has_hosts_entry: true,
             last_opened_at: None,
@@ -486,6 +509,7 @@ mod tests {
                 linked: true,
                 framework: "CodeIgniter 4".to_string(),
                 docroot: "public".to_string(),
+                dev_port: None,
                 php: "7.4.33".to_string(),
                 pinned: true,
             },
@@ -496,6 +520,18 @@ mod tests {
                 linked: false,
                 framework: "WordPress".to_string(),
                 docroot: String::new(),
+                dev_port: None,
+                php: "8.3.33".to_string(),
+                pinned: false,
+            },
+            ProjectState {
+                name: "astro-web".to_string(),
+                domain: "astro-web.test".to_string(),
+                path: r"C:\rezure\www\astro-web".to_string(),
+                linked: false,
+                framework: "Astro".to_string(),
+                docroot: String::new(),
+                dev_port: Some(Some(4400)),
                 php: "8.3.33".to_string(),
                 pinned: false,
             },
@@ -516,6 +552,13 @@ mod tests {
             "{md}"
         );
         assert!(md.contains(r"C:\rezure\etc\frameworks.json"));
+        assert!(
+            md.contains(
+                r"| astro-web | http://astro-web.test | `C:\rezure\www\astro-web` | Astro (dev server on :4400) | 8.3.33 |"
+            ),
+            "{md}"
+        );
+        assert!(md.contains(r"C:\rezure\etc\dev-servers.json"));
     }
 
     #[test]

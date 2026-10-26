@@ -188,6 +188,7 @@ pub fn service_id(version: &str) -> String {
 mod tests {
     use super::*;
     use crate::db::projects::ProjectKind;
+    use crate::services::frameworks::ServeProfile;
 
     fn project(id: &str, php_version: Option<&str>) -> ProjectInfo {
         ProjectInfo {
@@ -199,6 +200,8 @@ mod tests {
             framework: "php".to_string(),
             detected_framework: "php".to_string(),
             framework_overridden: false,
+            serve: ServeProfile::Php,
+            dev_port: None,
             docroot: format!("C:/rezure/www/{id}"),
             has_hosts_entry: false,
             last_opened_at: None,

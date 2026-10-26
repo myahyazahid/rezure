@@ -1,3 +1,7 @@
+/** How nginx serves a project: its files through PHP, or every request
+ *  passed to its dev server (see `services::dev_servers`). */
+export type ServeProfile = 'php' | 'proxy'
+
 export interface ProjectInfo {
   id: string
   name: string
@@ -13,6 +17,10 @@ export interface ProjectInfo {
   frameworkOverridden: boolean
   /** The folder nginx serves, absolute — `public\` for Laravel and CodeIgniter 4. */
   docroot: string
+  serve: ServeProfile
+  /** The port a `proxy` project's dev server listens on, or `null` for a
+   *  `php` project (and briefly for a `proxy` one, until a port is picked). */
+  devPort: number | null
   /** Whether `domain` currently resolves to 127.0.0.1 via the OS hosts file. */
   hasHostsEntry: boolean
   /** Unix seconds of the last time this project was opened, or `null` if never. */
@@ -34,9 +42,8 @@ export interface ProjectInfo {
    *  A terminal opened for this project resolves `php` as the same version. */
   phpVersion: string | null
   /** This project's own pinned Node.js version, or `null` to follow the
-   *  global active version. Unlike `phpVersion`, this never spawns anything
-   *  of its own — it only changes what a terminal opened for this project
-   *  resolves `node`/`npm`/`npx` as. */
+   *  global active version. What a terminal opened for this project resolves
+   *  `node`/`npm`/`npx` as, and what its dev server runs on. */
   nodeVersion: string | null
 }
 
@@ -52,6 +59,8 @@ export interface LinkPreview {
   detectedFramework: string
   /** The folder nginx would serve — `public/` for Laravel. */
   docroot: string
+  /** `proxy`: served through a dev server, not from `docroot`. */
+  serve: ServeProfile
   /** True when the domain had to be suffixed to avoid a clash. */
   domainAdjusted: boolean
   /** Set when the picked folder is the docroot *of* a project above it. */
@@ -73,6 +82,7 @@ export interface FrameworkSummary {
   label: string
   /** The subfolder it's served from, or `null` for the project folder itself. */
   docroot: string | null
+  serve: ServeProfile
   /** `user` when it comes from the user's own `etc\frameworks.json`. */
   source: 'builtin' | 'user'
   /** The heading it's listed under. The catalog arrives ordered by it, so a

@@ -6,7 +6,7 @@ Nginx meneruskan domain itu ke port proses tersebut (serve profile **`proxy`**),
 menyalakan serta mematikan prosesnya sendiri dari halaman Projects.
 
 Dibangun di atas registry framework v3.2.0: field `serve` di definisi framework sudah ada dan
-sengaja dibiarkan berisi satu profile (`php`) sampai rilis ini. **v3.2.0 harus rilis dulu.**
+sengaja dibiarkan berisi satu profile (`php`) sampai rilis ini. v3.2.0 dirilis lebih dulu.
 
 Penomoran fase di dokumen ini (Fase 1–4) lokal untuk rilis v3.3.0.
 
@@ -65,12 +65,19 @@ Rezure mengelola prosesnya (mis. dev server dijalankan dari IDE).
 ### Template `proxy`
 
 ```nginx
+# Vite listens on `localhost`, which on most Windows machines is `::1` only;
+# Next and most Node apps answer on 127.0.0.1. Both, IPv6 as the backup.
+upstream rezure_dev_9router_2da1b2c3 {
+    server 127.0.0.1:20128;
+    server [::1]:20128 backup;
+}
+
 server {
     listen 80;
     server_name 9router.test;
 
     location / {
-        proxy_pass http://127.0.0.1:20128;
+        proxy_pass http://rezure_dev_9router_2da1b2c3;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;          # HMR Vite/Next lewat websocket
         proxy_set_header Connection $connection_upgrade; # map di nginx.conf utama
@@ -82,8 +89,8 @@ server {
         proxy_read_timeout 1h;    # koneksi HMR dan stream yang lama tidak diputus
     }
 
-    error_page 502 504 /__rezure_dev_server_down.html;
-    location = /__rezure_dev_server_down.html {
+    error_page 502 504 /rezure-dev-server-down.html;
+    location = /rezure-dev-server-down.html {
         root "<runtime>/nginx/pages";
         internal;
     }
@@ -268,48 +275,55 @@ baru. Untuk project `proxy`:
 Belum ada proses yang dikelola Rezure.
 
 ### Tasks
-- [ ] `ServeProfile::Proxy` di `services::frameworks`; validasi menolak `proxy` + `docroot`
-- [ ] Field `dev` di `FrameworkDef` (`script`, `port: PortMode`), divalidasi seperti field lain
-      (`deny_unknown_fields`, nama script `[A-Za-z0-9:_-]`, maks. 64)
-- [ ] `ProjectInfo` mendapat `serve: ServeProfile` dan `dev_port: Option<u16>`; `src/types/project.ts`
-      ikut
-- [ ] `config::dev_servers` (baru): load/save `etc/dev-servers.json`, pola `config::project_frameworks`
-      (file rusak → kosong + warn, entri rusak dilewati satu per satu, BOM diterima)
-- [ ] Alokasi port: project `proxy` tanpa entri dapat port bebas pertama dari `DEV_PORT_RANGE`
-      (4400–4499), langsung disimpan. Dipanggil dari jalur sync vhost, bukan dari scan (scan tetap
-      hanya membaca)
-- [ ] `services::dev_ports` (baru): validasi port (rentang, unik antar project, daftar port Rezure,
-      peringatan excluded range Windows) — fungsi murni + satu fungsi yang membaca `netsh`
-- [ ] `vhosts`: template `proxy`, `map $connection_upgrade` di `ensure_main_config`, halaman
-      `__rezure_dev_server_down.html` ditulis ke `<runtime>/nginx/pages/`
-- [ ] Command `set_dev_server_config(id, port?, port_mode?, script?, auto_start?)` → validasi, simpan,
-      `sync_vhosts_and_reload`; `list_dev_servers` → baris modal (tanpa status proses dulu)
-- [ ] `unlink_project` ikut menghapus entri `dev-servers.json`
-- [ ] Error baru di `AppError` dengan `code()`: `InvalidDevPort { port, reason }`,
-      `DevPortTaken { port, by }`
-- [ ] Ubah `frameworks.json` built-in sesuai tabel default di atas
-- [ ] UI minimal: tombol **Dev servers** + `DevServersModal.vue` berisi kolom Project/Domain/Port
-      (bisa diedit) — store baru `stores/devServers.ts`, tipe `src/types/devServer.ts`
+- [x] `ServeProfile::Proxy` di `services::frameworks`; validasi menolak `proxy` + `docroot`.
+      `Serving` dan `FrameworkSummary` ikut membawa `serve`; Custom folder selalu `php`
+- [x] Field `dev` di `FrameworkDef` (`DevDefaults { script, port: PortMode }`), `deny_unknown_fields`,
+      `dev` tanpa `serve: "proxy"` ditolak. Nama script lewat `frameworks::validate_script_name`:
+      `[A-Za-z0-9:_.-]`, maks. 64, tidak diawali `-`/`.` (titik ditambahkan dari rencana karena
+      script seperti `serve.local` ada di dunia nyata)
+- [x] `ProjectInfo` mendapat `serve` dan `dev_port`; `src/types/project.ts` ikut. `LinkPreview`
+      juga mendapat `serve`, supaya dialog Add folder bilang "lewat dev server" alih-alih nama folder
+- [x] `config::dev_servers` (baru): `etc/dev-servers.json`, pola `config::project_frameworks`
+- [x] Alokasi port: `dev_servers::assign_ports`, dipanggil dari `vhosts::sync_vhosts`; scan hanya
+      membaca. `list_projects` sekarang sync dulu baru scan, supaya port yang baru dipilih langsung
+      tampil
+- [x] Validasi port di `services::dev_servers` (bukan modul `dev_ports` terpisah — terlalu kecil):
+      ≥ 1024, tidak dipakai project lain, bukan port Rezure (80/443, 3306 + port profil aktif, 5432,
+      1025/8025, 14330, 9100–9399 untuk pool PHP)
+- [x] `vhosts`: template `proxy` (upstream per project `127.0.0.1` + `[::1]` backup), `map
+      $connection_upgrade` di `ensure_main_config`, halaman `rezure-dev-server-down.html` di
+      `<runtime>/nginx/pages/` yang me-refresh diri tiap 4 detik
+- [x] Command `set_dev_server_config(id, change)` dan `list_dev_servers`
+- [x] `unlink` ikut menghapus entri `dev-servers.json`
+- [x] Error baru di `AppError` dengan `code()`: `InvalidDevPort`, `DevPortTaken`, `InvalidDevScript`,
+      `DevServerNotReady`, `DevServerFailed`, `DevServerRunning`, `NotADevServerProject`
+- [x] `frameworks.json` built-in sesuai tabel default
+- [x] Tombol **Dev servers** + `DevServersModal.vue`, store `stores/devServers.ts`, tipe
+      `src/types/devServer.ts`
+- [x] **Keputusan 4:** vhost `php` menjawab 404 untuk semua dotfile kecuali `.well-known`
+      (`location ~ /\.(?!well-known(?:/|$))`), menggantikan aturan lama `/\.ht`. Vhost `proxy`
+      sengaja tidak: Vite menyajikan modulnya dari `/node_modules/.vite/`
 
 ### Test
-- [ ] `vhost_config` untuk `proxy`: berisi `proxy_pass http://127.0.0.1:<p>`, header Upgrade, tidak
-      ada `fastcgi_pass` dan `root`
-- [ ] Main config berisi `map $http_upgrade $connection_upgrade`, kurung seimbang
-- [ ] Validasi definisi: `proxy` + `docroot` ditolak, `portMode` tak dikenal ditolak, script dengan
-      spasi/`&`/`"` ditolak
-- [ ] Validasi port: <1024, port Rezure, duplikat antar project ditolak
-- [ ] Alokasi port deterministik dan melewati port yang sudah dipakai project lain
-- [ ] `dev-servers.json` rusak → kosong, tidak panic
-- [ ] Fixture `nextjs`, `astro`, `vue`, dst. masih terdeteksi sama (hanya `serve` yang berubah)
+- [x] `proxy_vhosts_pass_everything_to_the_dev_server`, `php_vhosts_hide_dotfiles_but_not_well_known`,
+      `dev_upstream_names_are_distinct_and_plain`
+- [x] `the_real_nginx_accepts_both_profiles` (`#[ignore]`): config dengan `map`, upstream PHP, vhost
+      `php` dan `proxy` lewat `nginx -t` asli — **lulus** ("syntax is ok", "test is successful")
+- [x] `proxy_definitions_are_checked_for_what_cannot_apply_to_them`,
+      `script_names_that_mean_something_to_cmd_are_refused`,
+      `javascript_frameworks_are_proxied_and_php_ones_are_not`, `a_custom_docroot_is_never_proxied`
+- [x] `ports_rezure_or_another_project_uses_are_refused`, `ports_are_picked_from_the_range_and_kept`
+- [x] `config::dev_servers`: round trip, entri minimal, file rusak, entri rusak, `owner_of`
+- [x] Fixture yang ada tetap terdeteksi sama (`every_fixture_is_detected_as_its_folder_name`)
 
 ### Verifikasi
-- [ ] 9router: set port 20128, jalankan manual → `9router.test` terbuka, respons streaming tidak
-      tertahan (bukan muncul sekaligus di akhir)
-- [ ] 9router dimatikan → halaman 502 Rezure, bukan 502 bawaan nginx
-- [ ] Project PHP yang sudah ada: vhost-nya **tidak berubah** (`VhostSync::changed` false untuk
-      file mereka). Hanya `nginx.conf` utama yang berubah karena `map`
-- [ ] `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, `npm run lint`,
-      `npm run type-check`
+- [ ] 9router: set port 20128 + "The app's own port", jalankan → `9router.test` terbuka, respons
+      streaming tidak tertahan
+- [ ] Dev server mati → halaman "dev server isn't running", bukan 502 bawaan nginx
+- [ ] Upgrade dari v3.2.0: semua vhost `php` berubah sekali (aturan dotfile), nginx reload sekali,
+      situs PHP tetap jalan; `/.env` di project CI3/WordPress → 404
+- [x] `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test --lib` (616 lulus),
+      `npm run lint`, `npm run type-check`, `npm run build-only`
 
 ---
 
@@ -319,53 +333,72 @@ Belum ada proses yang dikelola Rezure.
 dipaksakan, log yang terlihat, dan tidak ada proses yatim.
 
 ### Tasks
-- [ ] `Launch::DevServer { project_id, dir, script, port, port_mode, node_pin }` di
-      `services::process`, memakai `ProcessService` yang sama (log, pid file, CPU sampling)
-- [ ] Pembentukan perintah sebagai fungsi murni: package manager dari lockfile, argumen per
-      `portMode`, env `PORT` dan `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS`. Argumen ke `.cmd`
-      (npm/pnpm/yarn di Windows dijalankan lewat `cmd.exe`) hanya dari himpunan karakter aman —
-      nama script dan port sudah divalidasi di Fase 1, jadi tidak ada string user yang mentah
-- [ ] `PATH` dengan folder Node yang di-pin di depan (`node::terminal_bin_dir`); tidak ada Node sama
-      sekali → error yang jelas, bukan "program not found"
-- [ ] Readiness: `wait_until_accepting` dengan timeout yang di-reset oleh output. Proses keluar
-      sebelum siap → `DevServerExited { tail }` berisi baris log terakhir
-- [ ] `portMode: fixed`: kalau port tidak listen dalam batas waktu tapi pohon prosesnya listen di
-      port lain → error menyebut port itu
-- [ ] Stop lewat `kill_process_tree`; pid file supaya sisa dari Rezure yang crash dibereskan saat
-      launch berikutnya
-- [ ] `ServiceManager::sync_dev_servers`, dipanggil di jalur yang sama dengan `sync_php_pool`;
-      category `dev-server` difilter dari `list` Dashboard dan dari Start/Restart/Stop all;
-      `stop_all()` saat exit tetap menghentikannya
-- [ ] State baris (`DevServerState`: `NeedsInstall`, `NodeMissing`, `ScriptMissing`,
-      `PackageManagerMissing`, `PortHeld { holder }`, `Ready`, `Starting`, `Running`) dihitung di
-      Rust dan dikirim lewat `list_dev_servers`
-- [ ] Command `start_dev_server`, `stop_dev_server`, `install_dev_dependencies` (`<pm> install` sebagai
-      proses sekali jalan, log ke panel yang sama). Semuanya `async` + `spawn_blocking`, tidak
-      menahan UI
-- [ ] Modal: kolom Script (dropdown dari `package.json`), Open auto, Status, ▶/■, Log
-      (`ServiceLogPanel.vue` dipakai ulang), Install, Stop all, dan alur bebaskan port
-- [ ] Badge jumlah yang jalan di tombol Dev servers, diperbarui lewat `supervisor::CHANGED_EVENT`
+- [x] `Launch::DevServer(Box<DevSpec>)` di `services::process` dan `ProcessService::dev_server`,
+      memakai mesin yang sama (log, pid file, CPU). `DevSpec` membawa semua yang sudah di-resolve:
+      port, port mode, script, package manager, pin Node, auto start
+- [x] Perintah: `cmd.exe /d /s /c "<pm> run <script> [--] <args>"` lewat `raw_arg`, dirakit hanya dari
+      package manager (enum), nama script tervalidasi, dan angka port. npm saja yang pakai `--`
+      (pnpm meneruskan `--` mentah ke Vite). Env: `PORT`, `BROWSER=none`,
+      `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=<domain>`, `NO_COLOR`/`FORCE_COLOR=0` untuk log polos
+- [x] `PATH` dengan folder Node yang di-pin di depan (`launcher::path_with_first` dibuka ke crate);
+      Node/package manager yang tidak ada → `DevServerIssue` yang jelas
+- [x] Readiness: loop khusus `wait_for_dev_server` (bukan `wait_until_accepting`): cek `127.0.0.1`
+      **dan** `[::1]`, quiet timeout 120 dtk (build pertama `ng serve` bisa lama tanpa output), maks. 300 dtk. Proses keluar → error berisi 3 baris
+      output terakhir (buffer 12 baris di `ProcessService::tail`)
+- [x] Port salah terdeteksi dari pohon proses (`ports::ports_held_by_tree`) untuk **semua** mode —
+      setelah 4 dtk untuk `fixed`, 20 dtk untuk yang diberi port
+- [x] Stop lewat `kill_process_tree`. Orphan: pid file + cocokkan `cmd.exe` **dan** cwd = folder
+      project (cwd ditambahkan karena `cmd.exe` dipakai semua terminal di mesin)
+- [x] Cek port sebelum start juga lewat `ports::holder` — bind `127.0.0.1` saja tidak melihat
+      listener `::1`
+- [x] `ServiceManager::sync_dev_servers` + `DevServerFactory`, dipanggil dari
+      `sync_vhosts_and_reload` (yang sekarang mengembalikan spec). Id `dev-<project>` (bukan
+      `dev:`: id juga jadi nama folder di `data\`). Spec berubah → service dibangun ulang hanya saat
+      berhenti
+- [x] Disaring dari Services/Manage services (`service_visibility`), jadi tidak ikut Start/Restart/
+      Stop all; tetap kena `stop_all()` saat exit. `restarts_on_crash` false
+- [x] Masalah per baris (`DevServerIssue`: `NoPackageJson`, `NodeMissing`, `PackageManagerMissing`,
+      `ScriptMissing`, `NeedsInstall`) dihitung di Rust. *Beda dari rencana:* `PortHeld` tidak
+      dihitung saat list (satu `netstat` per baris tiap modal dibuka); port bentrok muncul saat Start
+      sebagai `PortInUseBy`, lalu modal menawarkan "Free port N and start" lewat
+      `port_holder`/`free_port` yang sudah ada
+- [x] Command `start_dev_server`, `stop_dev_server`, `stop_all_dev_servers`,
+      `install_dev_dependencies`, `dev_server_statuses` — semuanya off async runtime
+- [x] Modal: port, cara memberi port, script (dropdown dari `package.json`), "Open starts it",
+      perintah persis, status, Start/Stop/Save/Revert, Log (`ServiceLogPanel.vue`), Install,
+      Stop all, bebaskan port. Port/script terkunci selama jalan (Rust juga menolak:
+      `DevServerRunning`)
+- [x] Badge jumlah yang jalan di tombol Dev servers. *Beda dari rencana:* lewat polling
+      `dev_server_statuses` tiap 4 dtk selama halaman Projects terbuka, bukan `CHANGED_EVENT` —
+      supervisor tidak mengawasi service yang tidak restart otomatis, jadi event itu tidak pernah
+      datang untuk dev server
+- [x] Tanpa telemetry: crash sink dev server hanya notifikasi; `start/stop/restart_service` melewati
+      telemetry untuk id `dev-`; `docs/telemetry-contract.md` ikut diperbarui
 
 ### Test
-- [ ] Pembentukan perintah untuk keempat `portMode` × empat package manager
-- [ ] Deteksi package manager dari lockfile, termasuk dua lockfile sekaligus (urutan tetap)
-- [ ] `sync_dev_servers` mendaftarkan yang baru, melepas (dan menghentikan) yang hilang, tidak
-      menyentuh service lain
-- [ ] Service `dev-server` tidak ada di daftar Dashboard dan dilewati Start all, tapi dihentikan
-      `stop_all()`
-- [ ] `#[ignore]` end-to-end: fixture `server.js` kecil (`http.createServer` di `process.env.PORT`)
-      → start, port siap, stop, port bebas lagi dan tidak ada `node.exe` sisa dari pohon itu
+- [x] `each_port_mode_tells_the_dev_server_its_port_its_own_way` (empat mode × empat PM)
+- [x] `the_lockfile_decides_the_package_manager` (termasuk beberapa lockfile sekaligus)
+- [x] `the_script_is_the_choice_then_the_framework_then_dev_then_start`,
+      `package_scripts_skips_names_cmd_would_misread`
+- [x] `dev_servers_come_and_go_with_their_projects`,
+      `a_changed_spec_waits_for_a_running_dev_server_to_stop`
+- [x] `dev_servers_are_never_on_the_services_page`
+- [x] `#[ignore]` end-to-end dengan Node sungguhan, **semua lulus**:
+      `a_dev_server_starts_answers_and_stops_cleanly` (port bebas lagi, tak ada `node` sisa),
+      `a_dev_server_on_the_wrong_port_says_which_one` (~8 dtk),
+      `a_dev_server_that_dies_reports_its_last_words`
+- [x] `netstat_rows_are_parsed_and_everything_else_skipped`,
+      `a_tree_reports_the_ports_its_processes_listen_on`
 
 ### Verifikasi
-- [ ] Per framework built-in, project nyata dibuat dari template resminya: Vite+Vue, Vite+React,
-      Svelte, Astro, Next, Nuxt, Angular — start dari modal, domain terbuka, **HMR jalan lewat
-      domain**, port tidak bergeser saat port default-nya sengaja dipakai proses lain. Hasilnya
-      menentukan `dev.port` final tiap definisi
-- [ ] Vite Host check: `astro-web.test` tidak kena "Blocked request"
-- [ ] Rezure ditutup normal → tidak ada `node.exe` sisa. Rezure di-kill dari Task Manager → launch
+- [ ] Per framework built-in, project nyata dari template resminya (Vite+Vue, Vite+React, Svelte,
+      Astro, Next, Nuxt, Angular): start dari modal, domain terbuka, **HMR jalan lewat domain**, port
+      tidak bergeser saat port default-nya dipakai proses lain. Hasilnya menentukan `dev.port` final
+- [ ] Vite Host check: `astro-web.test` tidak kena "Blocked request" (env
+      `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` belum diuji ke Vite sungguhan)
+- [ ] Rezure ditutup normal → tidak ada `node.exe` sisa. Rezure di-kill dari Task Manager → Start
       berikutnya membereskannya
-- [ ] Project dengan compile error → status Stopped, log menampilkan error-nya, tidak ada loop
-      restart
+- [ ] Project dengan compile error → log menampilkan error-nya, tidak ada loop restart
 
 ---
 
@@ -374,71 +407,97 @@ dipaksakan, log yang terlihat, dan tidak ada proses yatim.
 **Tujuan:** Untuk project `proxy`, klik Open cukup — tidak perlu membuka modal dulu.
 
 ### Tasks
-- [ ] `open_project_site`: untuk project `proxy` yang mati dan `autoStart` → start, tunggu siap, baru
-      buka browser. Gagal → tidak membuka browser, kembalikan error dengan `code()` supaya UI bisa
-      menawarkan "Lihat log"
-- [ ] Baris dan kartu project: titik status di tombol Open (mati/starting/jalan), state "Starting…"
-      selama menunggu, toast saat gagal
-- [ ] Kolom/badge Framework menampilkan port (`Astro · :4400`)
-- [ ] Filter "Running" di halaman Projects (opsional, kalau tidak membuat toolbar terlalu padat)
+- [x] `open_project_site` jadi async: project `proxy` dengan auto start → `start_and_wait` (juga
+      menunggu start yang sedang berjalan dari modal), baru buka browser. Gagal → browser tidak
+      dibuka, error dikembalikan
+- [x] Tombol Open: titik status (abu-abu/hijau), spinner menggantikan ikon globe saat starting,
+      lebar tetap supaya kolom Actions tidak bergeser. Gagal → pesan di bawah header dengan
+      **View log** yang membuka modal pada log project itu (pesan, bukan toast — mengikuti pola
+      `openError` yang sudah ada)
+- [x] Badge Framework menampilkan port (`Astro · :4400`); kolom Framework dilebarkan `w-28` → `w-32`.
+      Dialog framework dan picker menyebut "dev server" alih-alih folder
+- [ ] Filter "Running" — tidak dikerjakan (opsional); badge di tombol Dev servers sudah menjawabnya
 
 ### Test
-- [ ] Logika keputusan Open sebagai fungsi murni: profile `php` → langsung buka; `proxy` jalan →
-      langsung buka; `proxy` mati + `autoStart` → start dulu; `proxy` mati tanpa `autoStart` →
-      langsung buka
+- [x] `open_starts_only_a_proxy_project_that_asks_for_it` (`dev_servers::starts_on_open`)
 
 ### Verifikasi
-- [ ] Open project Astro yang mati → "Starting…" → browser terbuka di halaman yang sudah jadi,
-      bukan 502
+- [ ] Open project Astro yang mati → spinner → browser terbuka di halaman yang sudah jadi
 - [ ] Open saat `node_modules` belum ada → tidak start, pesan menyarankan Install
-- [ ] Fitur Share pada project `proxy` tetap jalan (tunnel → nginx → dev server)
+- [ ] Share pada project `proxy` (tunnel → nginx → dev server)
 
 ---
 
 ## Fase 4 — Dokumentasi
 
-- [ ] `docs/v1/frameworks.md`: bagian Serve profile ditulis ulang (`php` dan `proxy`), field `dev`,
-      tabel `portMode`, aturan `proxy` + `docroot`
-- [ ] `docs/v1/projects.md`: bagian "Dev servers" — cara kerja proxy, modal, Open auto-start,
-      `dev-servers.json`, troubleshooting (502, Vite "Blocked request", HMR tidak jalan, port
-      bergeser, proses sisa)
-- [ ] `docs/v3/rezure-app-v3.5-phases-tasks.md`: catatan bahwa keputusan "Node tidak di-proxy nginx"
-      diubah di v3.3.0, dengan rujukan ke dokumen ini
-- [ ] `services::agent_docs` + `agent-docs/how-rezure-works.md`: project `proxy`, port-nya, dan
-      bahwa `dev-servers.json` tidak boleh diedit saat app jalan
-- [ ] Doc comment layout di `utils/paths.rs` ditambah `dev-servers.json`
+- [x] `docs/v1/frameworks.md`: tabel field (`serve`, `dev`), bagian "Serve profiles" dan "Dev server
+      defaults", penutup "Serving a project some other way" ditulis ulang
+- [x] `docs/v1/projects.md`: bagian "Dev servers" (Open, dialog, cara memberi port, batasan), bagian
+      internal "Dev servers", troubleshooting (halaman not running, Vite "Blocked request", HMR,
+      port salah, Install)
+- [x] `docs/v3/rezure-app-v3.5-phases-tasks.md`: catatan keputusan diubah di v3.3.0
+- [x] `services::agent_docs`: kolom framework menulis "Astro (dev server on :4400)" + aturan baru;
+      `agent-docs/how-rezure-works.md`: bagian "Dev servers", field `serve`/`dev`, Node pin, layout
+- [x] Doc comment `utils/paths.rs`, `services::node`, `ProjectInfo::node_version`
+- [x] `docs/telemetry-contract.md`: dev server tidak pernah dikirim
 - [ ] Changelog v3.3.0 (diambil dari API, ditulis bersama rilisnya)
 
 ---
 
-## Keputusan yang perlu diambil maintainer
+## Keputusan
 
-Rekomendasi ditulis tebal; dokumen di atas sudah mengikuti rekomendasinya.
+Diambil maintainer sesuai rekomendasi ("gas kerjakan fase 1–4"):
 
-1. **Mengubah keputusan v3.5.** v3.5 memutuskan Node tidak dijalankan Rezure sebagai service. Rilis
-   ini menjadikan dev server service yang opt-in per project. **Rekomendasi: ubah**, dengan batas
-   yang tetap dijaga — tidak di Dashboard, tidak ikut Start all, tidak restart otomatis.
-2. **Next/Nuxt/Astro/Vue/React/Svelte/Angular/Node generik pindah ke `proxy` secara default.**
-   Project yang sudah terdeteksi sebagai framework itu berubah dari "folder mentah" (yang memang
-   tidak pernah jalan) menjadi "502 sampai dev server dinyalakan". **Rekomendasi: ya.** Project yang
-   menyajikan `dist/` lewat Custom folder tidak terpengaruh.
-3. **Rentang port 4400–4499, konstanta, bukan setting.** Di luar port default tool populer (3000,
-   4200, 4321, 5173, 8080) dan di luar rentang dinamis Windows (49152+). **Rekomendasi: konstanta
-   dulu**; jadi setting kalau ada yang butuh.
-4. **Menolak dotfile di profile `php` juga** (`location ~ /\.(?!well-known/)` → 404). Kebocoran `.env`
-   bukan hanya di project Node: CodeIgniter 3, WordPress, dan PHP generik juga disajikan dari root.
-   Ini mengubah semua vhost yang ada (nginx reload sekali saat upgrade). **Rekomendasi: ya, di
-   Fase 1** — risikonya kecil dibanding `.env` yang bisa diunduh, dan `share` membuat situs lokal
-   bisa diakses dari luar.
-5. **Telemetry.** **Rekomendasi: tidak menambah event di v3.3.0.** `project.framework_changed` dari
-   v3.2.0 sudah cukup untuk melihat siapa yang memakai framework `proxy`; event start/stop dev
-   server ditunda sampai ada pertanyaan yang perlu dijawab datanya.
+1. **Keputusan v3.5 diubah.** Dev server jadi service yang opt-in per project — tidak di Dashboard,
+   tidak ikut Start all, tidak restart otomatis.
+2. **Framework JavaScript dan Node generik pindah ke `proxy`.** Custom folder tetap `php`.
+3. **Rentang port 4400–4499, konstanta.**
+4. **Dotfile ditolak di profile `php`**, dikerjakan di Fase 1.
+5. **Tidak ada event telemetry baru**, dan dev server sengaja tidak pernah tercatat.
+
+---
+
+## Setelah uji coba maintainer (26 Okt 2026)
+
+Dua temuan dari pemakaian nyata, keduanya sudah diperbaiki:
+
+1. **whitescale (Astro) gagal start karena `npm run dev` sudah jalan di terminal.** Astro punya
+   lockfile sendiri dan langsung exit 1 ("Another astro dev server is already running"). Pesan itu
+   tertutup karena error hanya mengambil 3 baris terakhir, yang ternyata stack trace.
+   - [x] `dev_servers::outside_servers`: proses node/bun/deno yang working folder-nya folder project,
+         bukan turunan Rezure ini, dan memegang port. Dicek sebelum spawn
+         (`DevServerNotReady` dengan pid dan port-nya) dan jadi issue `AlreadyRunning` di modal
+   - [x] Tombol **Stop it and start here** (`stop_outside_dev_server` → start): yang dimatikan
+         runtime teratas di folder itu, bukan terminal tempat perintahnya diketik; port ditunggu
+         sampai lepas
+   - [x] `dev_servers::summarize_failure`: buffer output 12 → 40 baris, stack frame dan banner npm
+         dibuang, baris error pertama yang ditampilkan, plus langkah perbaikan untuk kegagalan yang
+         dikenal (sudah jalan / lock / EADDRINUSE → stop salinan lain; modul tidak ada → Install)
+   - [x] Banner gagal Open: "View log" → **Fix in Dev servers** (modal terbuka di baris itu)
+2. **9router (Next 16) berhenti di "Loading…".** Next 16 menolak (`403 Unauthorized`) request ke
+   `/_next/*` dan `/__nextjs*` yang `Origin`-nya bukan `localhost`/`allowedDevOrigins` — termasuk
+   websocket HMR. Dikonfirmasi dari log Next sendiri ("Blocked cross-origin request to Next.js dev
+   resource /_next/webpack-hmr from "9router.test"").
+   - [x] Vhost `proxy` mendapat `location ~ ^/(_next/|__nextjs)` yang membuang `Origin` hanya bila
+         sama dengan domain project; Origin situs lain tetap diteruskan dan tetap ditolak Next
+   - [x] Diverifikasi dengan nginx dan Next 16 sungguhan (port uji, bukan 80): langsung ke Next
+         dengan Origin `9router.test` → `Unauthorized`; lewat vhost baru → diperlakukan sama seperti
+         `localhost`; Origin `evil.test` lewat vhost → tetap `Unauthorized`; `/login` → 200
+
+Test baru: `a_failure_is_explained_by_its_message_not_its_stack_trace` (output Astro asli),
+`a_missing_dependency_points_at_install`, `an_unfamiliar_failure_still_shows_its_last_words…`,
+`a_server_started_outside_rezure_is_found_and_stopped` (`#[ignore]`, Node asli — lulus), dan
+asersi `Origin` di `proxy_vhosts_pass_everything_to_the_dev_server`.
 
 ---
 
 ## Status
 
-Rencana; belum ada yang diimplementasikan. Menunggu v3.2.0 dirilis dan keputusan di atas.
+Fase 1–4 sudah diimplementasikan. Semua pengecekan otomatis lulus, termasuk test `#[ignore]` dengan
+Node dan `nginx -t` sungguhan (lihat Test di Fase 1 dan 2). Yang tersisa: verifikasi manual di app
+sungguhan (daftar "Verifikasi" Fase 1–3, terutama HMR dan Vite host check per framework) dan
+changelog. v3.2.0 belum dirilis dan versi masih 3.1.1, jadi rilis ini menumpang di working tree yang
+sama.
 
 ---
 
@@ -447,8 +506,12 @@ Rencana; belum ada yang diimplementasikan. Menunggu v3.2.0 dirilis dan keputusan
 - **Profile `static` dan `spa`** untuk hasil build (`dist/`, `build/`, `out/`, `.output/public`,
   `dist/<nama>/browser`) — tanpa proses sama sekali, `spa` dengan `try_files … /index.html`. Butuh
   pilihan "Dev / Build" per project karena folder build baru ada setelah `npm run build`
-- Deteksi otomatis port untuk `portMode: fixed` (tanpa user mengisi), dari port yang di-listen pohon
-  proses setelah start
+- Peringatan port di rentang yang dicadangkan Windows/Hyper-V
+  (`netsh int ipv4 show excludedportrange protocol=tcp`) — dari rencana Fase 1, belum dikerjakan;
+  start tetap gagal dengan pesan yang jelas kalau kena
+- Deteksi otomatis port untuk `fixed` (tanpa user mengisi) — mesinnya sudah ada
+  (`ports::ports_held_by_tree`), yang kurang tinggal menyimpannya
+- Filter "Running" di halaman Projects
 - Dev server untuk runtime lain (Python `uvicorn`/`manage.py runserver`, Go) — `portMode` dan
   package manager-nya beda, tapi profile `proxy` dan `Service`-nya sama
 - Monorepo (Turborepo/Nx) — beberapa app dalam satu folder, jadi beberapa domain/port per project

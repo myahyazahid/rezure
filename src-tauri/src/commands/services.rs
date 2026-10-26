@@ -1,6 +1,7 @@
 use tauri::{AppHandle, Manager, State};
 
 use crate::config::settings::SettingsState;
+use crate::services::dev_servers;
 use crate::services::ports::{self, PortHolder};
 use crate::services::service_visibility::{self, ManagedService};
 use crate::services::telemetry;
@@ -77,6 +78,10 @@ pub async fn start_service(
 ) -> Result<ServiceInfo, AppError> {
     let service = manager.find(&id)?;
     let result = run_blocking(&id, move || service.start()).await;
+    // A dev server's id and name are its project's — never reported.
+    if dev_servers::is_dev_service(&id) {
+        return result;
+    }
     match &result {
         Ok(info) => telemetry::record(
             &app,
@@ -97,6 +102,9 @@ pub async fn stop_service(
 ) -> Result<ServiceInfo, AppError> {
     let service = manager.find(&id)?;
     let result = run_blocking(&id, move || service.stop()).await;
+    if dev_servers::is_dev_service(&id) {
+        return result;
+    }
     match &result {
         Ok(info) => telemetry::record(&app, "service.stop", Some(&info.name), None),
         Err(err) => telemetry::record_error(&app, err, "service.stop", &id),
@@ -176,6 +184,9 @@ pub async fn restart_service(
 ) -> Result<ServiceInfo, AppError> {
     let service = manager.find(&id)?;
     let result = run_blocking(&id, move || service.restart()).await;
+    if dev_servers::is_dev_service(&id) {
+        return result;
+    }
     if let Err(err) = &result {
         telemetry::record_error(&app, err, "service.restart", &id);
     }

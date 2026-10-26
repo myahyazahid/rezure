@@ -7,6 +7,7 @@ pub mod composer;
 pub mod connections;
 pub mod database;
 pub mod db_profiles;
+pub mod dev_servers;
 pub mod donate;
 pub mod node;
 pub mod php;

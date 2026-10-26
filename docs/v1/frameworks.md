@@ -1,7 +1,7 @@
 # Frameworks
 
-Rezure works out which framework a project is from its files, and the framework decides which
-folder nginx serves. This page is the reference for the definitions behind that: what Rezure
+Rezure works out which framework a project is from its files, and the framework decides how nginx
+serves it: from which folder, or through the project's own dev server. This page is the reference for the definitions behind that: what Rezure
 ships with, the format, and the two ways to add one — for everyone, or for your machine only.
 
 For what this looks like in the app (the badge, correcting a project), see
@@ -27,12 +27,50 @@ For what this looks like in the app (the badge, correcting a project), see
 | `label` | yes | What the Projects page shows, at most 40 characters. |
 | `priority` | yes | 0–100. When several definitions match, the highest wins; on a tie, the one listed first. |
 | `detect` | yes | When a project is this framework — see [Detect rules](#detect-rules). |
-| `docroot` | no | The subfolder nginx serves, relative to the project. Left out, the project folder itself. If a project doesn't have that subfolder, it's served from its own folder — so one definition can cover two layouts. |
+| `docroot` | no | The subfolder nginx serves, relative to the project. Left out, the project folder itself. If a project doesn't have that subfolder, it's served from its own folder — so one definition can cover two layouts. Not allowed with `"serve": "proxy"`. |
 | `category` | no | The heading the framework pickers list it under, at most 24 characters. Built-ins use `PHP`, `JavaScript` and `Generic`; headings are ordered by the highest priority in them. A definition of your own without one is listed first, under "Your frameworks". Detection never reads it. |
-| `serve` | no | The serve profile. Only `php` exists (the default): files as they are, everything else through `index.php` over FastCGI. |
+| `serve` | no | The serve profile: `php` (the default) or `proxy` — see [Serve profiles](#serve-profiles). |
+| `dev` | no | Only with `"serve": "proxy"`: how its dev server is run — see [Dev server defaults](#dev-server-defaults). |
 
 Unknown fields are refused rather than ignored, so a typo like `docRoot` is reported instead of
 silently doing nothing.
+
+### Serve profiles
+
+| Profile | What nginx does | Built-ins |
+|---|---|---|
+| `php` | Serves the `docroot`'s files as they are; everything else goes to `index.php` over FastCGI. Dotfiles (`.env`, `.git`) answer 404, `.well-known` aside. | Every PHP framework, `static` |
+| `proxy` | Passes every request to the project's dev server on its own port, websockets (hot reload) included. Rezure picks the port and can start the server — see [projects.md](projects.md#dev-servers). | Next.js, Nuxt, Astro, Vue, React, Svelte, Angular, Node |
+
+A project given a **Custom folder** is always `php`, whatever its framework says — that's how a
+built `dist/` is served as plain files.
+
+### Dev server defaults
+
+```json
+{
+  "id": "astro",
+  "label": "Astro",
+  "priority": 55,
+  "detect": { "npm": "astro" },
+  "serve": "proxy",
+  "dev": { "script": "dev", "port": "flag" }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `script` | The `package.json` script that starts the dev server. Letters, digits and `:` `_` `.` `-` only, at most 64. Left out, or not in a project's `package.json`: `dev`, then `start`. |
+| `port` | How the dev server is told the port Rezure gave it. Left out: `env`. |
+
+| `port` | Added to the command | For |
+|---|---|---|
+| `vite` | `--port <p> --strictPort` | Vite-based tools. `--strictPort` makes Vite fail instead of quietly taking the next port. |
+| `flag` | `--port <p>` | Next.js, Nuxt, Astro, `ng serve` |
+| `env` | nothing | Tools that read `PORT`, which is set in every case |
+| `fixed` | nothing | Apps with a port of their own; the user enters it in Dev servers |
+
+Both are defaults: a project's own choice in the Dev servers dialog wins over them.
 
 ### Detect rules
 
@@ -142,8 +180,8 @@ A one-off layout doesn't need a definition: on the project's framework dialog, p
 folder…** and name the subfolder to serve. It's kept per project in
 `C:\rezure\etc\project-frameworks.json`; don't edit that file by hand while the app is running.
 
-What no definition can do is change the nginx rules themselves. Every project gets the same
-`server` block, and all of them are loaded from one `nginx.conf`, so a definition able to add
-directives could stop every site. Serve profiles beyond `php` — a static or single-page-app
-profile, or a reverse proxy to a dev server — would be added in Rust, in `services::vhosts`, and
-then become available to definitions by name.
+What no definition can do is change the nginx rules themselves. Every project of a profile gets
+the same `server` block, and all of them are loaded from one `nginx.conf`, so a definition able to
+add directives could stop every site. A new profile — a single-page-app one for a built `dist/`
+that routes everything to `index.html`, say — is added in Rust, in `services::vhosts`, and then
+becomes available to definitions by name.

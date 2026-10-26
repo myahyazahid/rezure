@@ -12,13 +12,15 @@
 //! request through, so two projects on different PHP versions need two
 //! concurrently-running processes on two different ports — hence the pool.
 //!
-//! Node isn't served through nginx here. It's invoked ephemerally — a
-//! terminal opened from a project card, `npm install`, a dev server the user
-//! starts themselves — so "using a specific version for a project" only
-//! means resolving the right `node.exe`/`npm` at the moment something is
-//! spawned, by putting that version's folder first on the *child process's*
-//! `PATH`. No port, no long-running service, no `ServiceManager` entry.
-//! See [`terminal_bin_dir`] and `services::launcher::open_terminal`.
+//! Node has no shared runtime to pool. Every process that needs it — a
+//! terminal opened from a project card, `npm install`, a project's dev
+//! server (`services::dev_servers`) — is that project's own, so "using a
+//! specific version for a project" only means resolving the right
+//! `node.exe`/`npm` at the moment something is spawned, by putting that
+//! version's folder first on the *child process's* `PATH`. A dev server does
+//! get a port and a `ServiceManager` entry, but per project, not per version.
+//! See [`terminal_bin_dir`], `services::launcher::open_terminal` and
+//! `services::dev_servers`.
 //!
 //! # Global active vs. per-project pin
 //!

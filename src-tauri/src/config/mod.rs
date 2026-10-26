@@ -3,6 +3,7 @@
 pub mod api;
 pub mod changelog_state;
 pub mod connections;
+pub mod dev_servers;
 pub mod device;
 pub mod links;
 pub mod profiles;

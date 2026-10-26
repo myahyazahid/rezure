@@ -2,9 +2,10 @@
 //! portable binary (see [`crate::services::binaries`]) and tracks it with
 //! `sysinfo`.
 
+use std::collections::VecDeque;
 use std::fs;
 use std::io::{BufRead, BufReader, Read};
-use std::net::TcpListener;
+use std::net::{Ipv6Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
@@ -19,14 +20,18 @@ use super::binaries;
 use super::database;
 use super::db_engine;
 use super::db_profiles;
+use super::dev_servers::{self, DevSpec};
+use super::frameworks::PortMode;
 use super::php_ini;
 use super::php_pool;
+use super::ports;
 use super::postgres;
 use super::vhosts;
 use super::{
     Service, ServiceHandle, ServiceInfo, ServiceManager, ServiceStatus, WorkerCount,
     CPU_HISTORY_LEN,
 };
+use crate::config::links;
 use crate::utils::command::HiddenWindow;
 use crate::utils::elevation;
 use crate::utils::error::AppError;
@@ -125,7 +130,20 @@ enum Launch {
     /// on until it accepts connections, and asked to shut down rather than
     /// killed.
     Postgres,
+    /// A project's dev server: `cmd.exe /d /s /c "npm run dev -- --port …"`
+    /// in the project folder — see `services::dev_servers`. Waited on until
+    /// its port answers, like a database, but holds nothing a kill could
+    /// damage, so it's stopped the way nginx is.
+    DevServer(Box<DevSpec>),
 }
+
+/// The category a dev server is listed under.
+pub const DEV_SERVER_CATEGORY: &str = "Dev server";
+
+/// How many of a dev server's last output lines are kept, to say why it
+/// didn't come up. Enough to reach back past a stack trace to the message
+/// above it (`dev_servers::summarize_failure` picks that out).
+const TAIL_LINES: usize = 40;
 
 pub struct ProcessService {
     id: String,
@@ -157,6 +175,10 @@ pub struct ProcessService {
     phase: AtomicU8,
     /// When the service last wrote a line of output. See [`OutputClock`].
     output: OutputClock,
+    /// A dev server's last lines of output — what it said before it died is
+    /// usually the whole explanation (a missing module, a syntax error).
+    /// `None` for the other services, whose logs say it already.
+    tail: Option<Arc<Mutex<VecDeque<String>>>>,
 }
 
 const PHASE_IDLE: u8 = 0;
@@ -238,6 +260,7 @@ impl ProcessService {
             cpu_history: Mutex::new(Vec::new()),
             phase: AtomicU8::new(PHASE_IDLE),
             output: OutputClock::default(),
+            tail: None,
         })
     }
 
@@ -265,6 +288,7 @@ impl ProcessService {
             cpu_history: Mutex::new(Vec::new()),
             phase: AtomicU8::new(PHASE_IDLE),
             output: OutputClock::default(),
+            tail: None,
         })
     }
 
@@ -293,6 +317,7 @@ impl ProcessService {
             cpu_history: Mutex::new(Vec::new()),
             phase: AtomicU8::new(PHASE_IDLE),
             output: OutputClock::default(),
+            tail: None,
         }
     }
 
@@ -319,6 +344,7 @@ impl ProcessService {
             cpu_history: Mutex::new(Vec::new()),
             phase: AtomicU8::new(PHASE_IDLE),
             output: OutputClock::default(),
+            tail: None,
         })
     }
 
@@ -343,6 +369,7 @@ impl ProcessService {
             cpu_history: Mutex::new(Vec::new()),
             phase: AtomicU8::new(PHASE_IDLE),
             output: OutputClock::default(),
+            tail: None,
         })
     }
 
@@ -366,6 +393,42 @@ impl ProcessService {
             cpu_history: Mutex::new(Vec::new()),
             phase: AtomicU8::new(PHASE_IDLE),
             output: OutputClock::default(),
+            tail: None,
+        }
+    }
+
+    /// A project's dev server, built from `spec` — see
+    /// `ServiceManager::sync_dev_servers`, the only caller.
+    pub fn dev_server(spec: &DevSpec, log_sink: LogSink) -> Self {
+        let tail: Arc<Mutex<VecDeque<String>>> = Arc::default();
+        let kept = Arc::clone(&tail);
+        let sink: LogSink = Arc::new(move |id, stream, line| {
+            if !line.trim().is_empty() {
+                let mut kept = kept.lock().unwrap();
+                if kept.len() == TAIL_LINES {
+                    kept.pop_front();
+                }
+                kept.push_back(line.to_string());
+            }
+            log_sink(id, stream, line);
+        });
+        Self {
+            id: dev_servers::service_id(&spec.project_id),
+            name: spec.name.clone(),
+            category: DEV_SERVER_CATEGORY,
+            port: spec.port,
+            workers: 1,
+            web_port: None,
+            launch: Launch::DevServer(Box::new(spec.clone())),
+            log_sink: sink,
+            crash_sink: no_op_crash_sink(),
+            crashed: AtomicBool::new(false),
+            children: empty_slots(1),
+            sys: Mutex::new(System::new()),
+            cpu_history: Mutex::new(Vec::new()),
+            phase: AtomicU8::new(PHASE_IDLE),
+            output: OutputClock::default(),
+            tail: Some(tail),
         }
     }
 
@@ -397,6 +460,7 @@ impl ProcessService {
                 .map(|profile| profile.version)
                 .unwrap_or_default(),
             Launch::Postgres => postgres::active_id(),
+            Launch::DevServer(spec) => spec.node_pin.clone().unwrap_or_else(super::node::active_id),
         }
     }
 
@@ -452,7 +516,7 @@ impl ProcessService {
             Launch::Nginx => Some("nginx"),
             Launch::Mailpit => Some("mailpit"),
             Launch::Postgres => Some(postgres::SERVICE_ID),
-            Launch::Php { .. } | Launch::Database => None,
+            Launch::Php { .. } | Launch::Database | Launch::DevServer(_) => None,
         }
     }
 
@@ -502,6 +566,8 @@ impl ProcessService {
                 db_profiles::resolve_server_exe(&profile)
             }
             Launch::Postgres => postgres::active_exe(),
+            // What's spawned; the dev server itself runs under it.
+            Launch::DevServer(_) => Ok(dev_servers::shell()),
         }
     }
 
@@ -630,6 +696,7 @@ impl ProcessService {
                     .args(["-c", "listen_addresses=127.0.0.1"]);
                 cmd
             }
+            Launch::DevServer(spec) => dev_servers::command(spec)?,
         };
 
         // Piped, not inherited: a GUI-subsystem build has no console handles
@@ -652,9 +719,11 @@ impl ProcessService {
     fn bind_addr(&self) -> &'static str {
         match self.launch {
             Launch::Nginx => "0.0.0.0",
-            Launch::Php { .. } | Launch::Database | Launch::Mailpit | Launch::Postgres => {
-                "127.0.0.1"
-            }
+            Launch::Php { .. }
+            | Launch::Database
+            | Launch::Mailpit
+            | Launch::Postgres
+            | Launch::DevServer(_) => "127.0.0.1",
         }
     }
 
@@ -895,6 +964,33 @@ const READY_QUIET_TIMEOUT: Duration = Duration::from_secs(90);
 const READY_MAX_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 const READY_POLL_INTERVAL: Duration = Duration::from_millis(200);
+
+/// How long a starting dev server may go without output or a listener.
+/// Generous: `ng serve` only listens once its first build is done, and on a
+/// large project that build can print nothing for a minute or more.
+const DEV_READY_QUIET_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// The outer bound for a dev server, however much it logs.
+const DEV_READY_MAX_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// When a `fixed` dev server listening somewhere else is reported.
+const DEV_WRONG_PORT_FIXED: Duration = Duration::from_secs(4);
+
+/// The same for a dev server Rezure told its port — later, since some open
+/// a helper port before the real one.
+const DEV_WRONG_PORT_TOLD: Duration = Duration::from_secs(20);
+
+/// Whether something answers on `port` over either loopback address. Vite
+/// listens on `localhost`, which on most Windows machines means `::1` only.
+fn dev_server_answers(port: u16) -> bool {
+    let timeout = Duration::from_millis(250);
+    [
+        SocketAddr::from(([127, 0, 0, 1], port)),
+        SocketAddr::from((Ipv6Addr::LOCALHOST, port)),
+    ]
+    .iter()
+    .any(|addr| TcpStream::connect_timeout(addr, timeout).is_ok())
+}
 
 /// Why a database didn't come up.
 #[derive(Debug, PartialEq, Eq)]
@@ -1165,9 +1261,33 @@ impl ProcessService {
         for &worker in &missing {
             self.reap_orphan(worker)?;
         }
+        // A copy started from a terminal would make this one fail (Astro and
+        // Next keep a lock file) or fight it for the port — said up front, by
+        // name, rather than as whatever the second copy dies of.
+        if let Launch::DevServer(spec) = &self.launch {
+            if let Some(servers) = dev_servers::outside_servers(std::slice::from_ref(spec.as_ref()))
+                .remove(&spec.project_id)
+            {
+                return Err(AppError::DevServerNotReady {
+                    name: self.name.clone(),
+                    reason: dev_servers::DevServerIssue::AlreadyRunning { servers }.describe(),
+                });
+            }
+        }
         for &worker in &missing {
             for port in self.ports_for(worker) {
                 ensure_port_available(self.bind_addr(), port, &self.name)?;
+                if matches!(self.launch, Launch::DevServer(_)) {
+                    // Vite listens on `::1` only on most machines, which the
+                    // IPv4 bind above can't see.
+                    if let Some(holder) = ports::holder(port) {
+                        return Err(AppError::PortInUseBy {
+                            port,
+                            name: self.name.clone(),
+                            holder: holder.description,
+                        });
+                    }
+                }
             }
         }
 
@@ -1182,10 +1302,26 @@ impl ProcessService {
             }
         }
 
-        // Only a database is waited on. nginx and `php-cgi` either bind or
-        // die immediately, while a database does its riskiest work — opening
-        // somebody's datadir — after the process already exists, so "spawned"
-        // and "working" are genuinely different answers for it alone.
+        // A dev server is waited on too: `npm` starting is not the server
+        // listening, and the browser Open is about to point at it would get
+        // a 502 in between.
+        if let Launch::DevServer(spec) = &self.launch {
+            if let Some((_, child)) = spawned.first_mut() {
+                if let Err(reason) = self.wait_for_dev_server(child, spec) {
+                    self.discard(spawned);
+                    return Err(AppError::DevServerFailed {
+                        name: self.name.clone(),
+                        reason,
+                    });
+                }
+            }
+        }
+
+        // Of Rezure's own services, only a database is waited on. nginx and
+        // `php-cgi` either bind or die immediately, while a database does its
+        // riskiest work — opening somebody's datadir — after the process
+        // already exists, so "spawned" and "working" are genuinely different
+        // answers for it alone.
         if self.is_stateful() {
             if let Some((_, child)) = spawned.first_mut() {
                 if let Err(not_ready) = wait_until_accepting(child, self.readiness(), &self.output)
@@ -1272,6 +1408,77 @@ impl ProcessService {
         let _ = child.wait();
     }
 
+    /// Waits until a dev server answers on its port, or says why it won't.
+    ///
+    /// Not [`wait_until_accepting`]: a dev server that came up on a port of
+    /// its own choosing would otherwise be waited on for minutes, when the
+    /// answer — "it's on :3001, not :20128" — is there as soon as it listens.
+    fn wait_for_dev_server(&self, child: &mut Child, spec: &DevSpec) -> Result<(), String> {
+        let started = Instant::now();
+        // A `fixed` app owns its port, so a different one is a wrong guess
+        // to report at once; any other mode was told the port, and a server
+        // still compiling may listen on a helper port first.
+        let wrong_port_after = match spec.port_mode {
+            PortMode::Fixed => DEV_WRONG_PORT_FIXED,
+            _ => DEV_WRONG_PORT_TOLD,
+        };
+        let mut next_tree_check = started + wrong_port_after;
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    return Err(format!("it exited ({status}){}", self.tail_text()));
+                }
+                Err(err) => return Err(format!("couldn't check on it: {err}")),
+                Ok(None) => {}
+            }
+            if dev_server_answers(spec.port) {
+                return Ok(());
+            }
+
+            let now = Instant::now();
+            if now >= next_tree_check {
+                let held = ports::ports_held_by_tree(child.id());
+                if !held.is_empty() && !held.contains(&spec.port) {
+                    let held: Vec<String> = held.iter().map(|port| format!(":{port}")).collect();
+                    return Err(format!(
+                        "it's listening on {} instead of :{} — set that port in Dev servers, or make the app use :{}",
+                        held.join(", "),
+                        spec.port,
+                        spec.port
+                    ));
+                }
+                next_tree_check = now + Duration::from_secs(3);
+            }
+            if started.elapsed() >= DEV_READY_MAX_TIMEOUT {
+                return Err(format!(
+                    "nothing answered on :{} after {}s{}",
+                    spec.port,
+                    DEV_READY_MAX_TIMEOUT.as_secs(),
+                    self.tail_text()
+                ));
+            }
+            if self.output.quiet_for() >= DEV_READY_QUIET_TIMEOUT {
+                return Err(format!(
+                    "no output and nothing on :{} for {}s{}",
+                    spec.port,
+                    DEV_READY_QUIET_TIMEOUT.as_secs(),
+                    self.tail_text()
+                ));
+            }
+            std::thread::sleep(READY_POLL_INTERVAL);
+        }
+    }
+
+    /// What a dev server said before it failed, and how to fix it when that's
+    /// a familiar failure — see `dev_servers::summarize_failure`.
+    fn tail_text(&self) -> String {
+        let Some(tail) = &self.tail else {
+            return String::new();
+        };
+        let lines: Vec<String> = tail.lock().unwrap().iter().cloned().collect();
+        dev_servers::summarize_failure(&lines)
+    }
+
     /// How [`wait_until_accepting`] tells a just-spawned database is ready.
     fn readiness(&self) -> Box<dyn Fn() -> bool> {
         let port = self.current_port();
@@ -1312,6 +1519,9 @@ impl ProcessService {
         // The quiet timeout in `wait_until_accepting` counts from here until
         // the first line of output arrives.
         self.output.touch();
+        if let Some(tail) = &self.tail {
+            tail.lock().unwrap().clear();
+        }
 
         // A pooled PHP service's folder (`data/php-<version>`) is never created
         // by anything else, and without it this write fails silently — which
@@ -1381,11 +1591,29 @@ impl ProcessService {
             sys.refresh_processes_specifics(
                 ProcessesToUpdate::Some(&[sys_pid]),
                 true,
-                ProcessRefreshKind::nothing().with_exe(UpdateKind::Always),
+                ProcessRefreshKind::nothing()
+                    .with_exe(UpdateKind::Always)
+                    .with_cwd(UpdateKind::Always),
             );
-            sys.process(sys_pid)
+            let process = sys.process(sys_pid);
+            let same_exe = process
                 .and_then(|p| p.exe())
-                .is_some_and(|exe| exe == expected_exe)
+                .is_some_and(|exe| exe == expected_exe);
+            match &self.launch {
+                // A dev server runs as `cmd.exe`, which every terminal on
+                // the machine is too — so it's only ours when it's also
+                // sitting in this project's folder.
+                Launch::DevServer(spec) => {
+                    same_exe
+                        && process.and_then(|p| p.cwd()).is_some_and(|cwd| {
+                            links::same_path(
+                                &cwd.display().to_string(),
+                                &spec.dir.display().to_string(),
+                            )
+                        })
+                }
+                _ => same_exe,
+            }
         };
 
         if is_ours {
@@ -1431,6 +1659,7 @@ pub(super) fn kill_process_tree(pid: u32) {
 /// catches at build time.
 pub fn real_services(app: AppHandle) -> ServiceManager {
     let log_app = app.clone();
+    let dev_app = app.clone();
     let sink: LogSink = Arc::new(move |service_id, stream, line| {
         let payload = ServiceLogLine {
             service_id: service_id.to_string(),
@@ -1488,6 +1717,7 @@ pub fn real_services(app: AppHandle) -> ServiceManager {
     // same log/crash wiring as the default "php" service.
     let php_pool_sink = sink.clone();
     let php_pool_crash_sink = crash_sink.clone();
+    let sink_for_dev = sink.clone();
 
     // Registration order is only the order the Services page lists them in:
     // nothing starts or stops in this order (Start all runs them
@@ -1526,7 +1756,38 @@ pub fn real_services(app: AppHandle) -> ServiceManager {
         )
     });
 
-    ServiceManager::new(services).with_php_factory(php_factory)
+    // A dev server gets the notification but never telemetry: its id
+    // carries the project's name, which isn't Rezure's to send anywhere.
+    let dev_sink = sink_for_dev;
+    let dev_crash_sink: CrashSink = Arc::new(move |service_id| {
+        let Some(settings) = dev_app.try_state::<crate::config::settings::SettingsState>() else {
+            return;
+        };
+        if !settings.0.lock().unwrap().notify_on_crash {
+            return;
+        }
+        let project = dev_servers::project_id_of(service_id).unwrap_or(service_id);
+        use tauri_plugin_notification::NotificationExt;
+        if let Err(err) = dev_app
+            .notification()
+            .builder()
+            .title("Rezure")
+            .body(format!("The dev server for {project} stopped"))
+            .show()
+        {
+            log::warn!("failed to show crash notification for {service_id}: {err}");
+        }
+    });
+    let dev_factory: super::DevServerFactory = Arc::new(move |spec| {
+        Arc::new(
+            ProcessService::dev_server(spec, dev_sink.clone())
+                .with_crash_sink(dev_crash_sink.clone()),
+        )
+    });
+
+    ServiceManager::new(services)
+        .with_php_factory(php_factory)
+        .with_dev_factory(dev_factory)
 }
 
 #[cfg(test)]
@@ -2351,5 +2612,119 @@ mod tests {
 
         let body = body.expect("curl must be available to run this test");
         assert_eq!(body, "pipeline ok: /foo?x=1");
+    }
+
+    /// A project folder with a one-file Node server that listens on `PORT`,
+    /// and an empty `node_modules` so it reads as installed.
+    fn node_project(name: &str, server: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "rezure-test-dev-server-{name}-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("node_modules")).unwrap();
+        fs::write(
+            dir.join("package.json"),
+            r#"{ "name": "rezure-dev-test", "scripts": { "start": "node server.js" } }"#,
+        )
+        .unwrap();
+        fs::write(dir.join("server.js"), server).unwrap();
+        dir
+    }
+
+    fn free_port() -> u16 {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.local_addr().unwrap().port()
+    }
+
+    fn dev_spec(dir: &Path, port: u16, port_mode: PortMode) -> DevSpec {
+        DevSpec {
+            project_id: "rezure-dev-test".to_string(),
+            name: "rezure-dev-test".to_string(),
+            domain: "rezure-dev-test.test".to_string(),
+            framework: "Node".to_string(),
+            dir: dir.to_path_buf(),
+            port,
+            port_mode,
+            port_mode_setting: None,
+            default_port_mode: PortMode::Env,
+            script: Some("start".to_string()),
+            script_setting: None,
+            scripts: vec!["start".to_string()],
+            package_manager: dev_servers::PackageManager::Npm,
+            node_pin: None,
+            auto_start: true,
+        }
+    }
+
+    /// The whole dev server path with a real `npm run start`: started, waited
+    /// on until it answers, then stopped with nothing left holding the port.
+    /// Needs Node.js (Rezure's or on `PATH`). Run with
+    /// `cargo test --lib services::process::tests::a_dev_server_starts_answers_and_stops_cleanly -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn a_dev_server_starts_answers_and_stops_cleanly() {
+        let dir = node_project(
+            "lifecycle",
+            "require('http').createServer((q, r) => r.end('dev ok')).listen(process.env.PORT, () => console.log('listening on ' + process.env.PORT));",
+        );
+        let port = free_port();
+        let spec = dev_spec(&dir, port, PortMode::Env);
+        let service =
+            ProcessService::dev_server(&spec, Arc::new(|_, _, line| println!("  | {line}")));
+
+        let info = service.start().expect("the dev server must start");
+        assert_eq!(info.status, ServiceStatus::Running);
+        assert!(dev_server_answers(port));
+
+        let info = service.stop().unwrap();
+        assert_eq!(info.status, ServiceStatus::Stopped);
+        std::thread::sleep(Duration::from_millis(500));
+        assert!(
+            !dev_server_answers(port),
+            "stopping npm must take the node it started down with it"
+        );
+        assert!(ports::holder(port).is_none());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A `fixed` app that listens somewhere else is reported with the port
+    /// it actually took, in seconds rather than after the full timeout.
+    #[test]
+    #[ignore]
+    fn a_dev_server_on_the_wrong_port_says_which_one() {
+        let actual = free_port();
+        let dir = node_project(
+            "wrong-port",
+            &format!("require('http').createServer((q, r) => r.end('x')).listen({actual});"),
+        );
+        let expected = free_port();
+        let spec = dev_spec(&dir, expected, PortMode::Fixed);
+        let service = ProcessService::dev_server(&spec, no_op_sink());
+
+        let started = Instant::now();
+        let err = service.start().unwrap_err().to_string();
+        println!("{err} (after {:?})", started.elapsed());
+        assert!(err.contains(&format!(":{actual}")), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(30));
+        assert_eq!(service.info().status, ServiceStatus::Stopped);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A dev server that crashes on start reports what it said.
+    #[test]
+    #[ignore]
+    fn a_dev_server_that_dies_reports_its_last_words() {
+        let dir = node_project(
+            "dies",
+            "console.error('Cannot find module vite'); process.exit(1);",
+        );
+        let spec = dev_spec(&dir, free_port(), PortMode::Env);
+        let service = ProcessService::dev_server(&spec, no_op_sink());
+
+        let err = service.start().unwrap_err().to_string();
+        println!("{err}");
+        assert!(err.contains("Cannot find module vite"), "{err}");
+        let _ = fs::remove_dir_all(&dir);
     }
 }

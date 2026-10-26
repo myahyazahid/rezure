@@ -63,19 +63,24 @@ impl PortHolder {
     }
 }
 
-/// The PID listening on `port`, via `netstat -ano`.
+/// Every listening TCP socket, as `(port, pid)`, via `netstat -ano`.
 ///
 /// `netstat` rather than a Windows API call: it needs no new dependency,
 /// and it's the same "shell out to a tool that ships with Windows" approach
 /// `process::kill_process_tree` already takes with `taskkill`.
-fn listening_pid(port: u16) -> Option<u32> {
-    let output = Command::new("netstat")
+pub(crate) fn listening_sockets() -> Vec<(u16, u32)> {
+    let Ok(output) = Command::new("netstat")
         .args(["-ano", "-p", "TCP"])
         .hidden()
         .output()
-        .ok()?;
-    let text = String::from_utf8_lossy(&output.stdout);
+    else {
+        return Vec::new();
+    };
+    parse_listening(&String::from_utf8_lossy(&output.stdout))
+}
 
+fn parse_listening(text: &str) -> Vec<(u16, u32)> {
+    let mut sockets = Vec::new();
     for line in text.lines() {
         // Every field is optional per line, and a missing one means "not a
         // connection row" — `netstat` opens with a blank line and a header.
@@ -94,11 +99,55 @@ fn listening_pid(port: u16) -> Option<u32> {
         let Some((_, bound_port)) = local.rsplit_once(':') else {
             continue;
         };
-        if bound_port.parse::<u16>() == Ok(port) {
-            return pid.parse().ok();
+        if let (Ok(port), Ok(pid)) = (bound_port.parse::<u16>(), pid.parse::<u32>()) {
+            sockets.push((port, pid));
         }
     }
-    None
+    sockets
+}
+
+/// The PID listening on `port`.
+fn listening_pid(port: u16) -> Option<u32> {
+    listening_sockets()
+        .into_iter()
+        .find(|(bound, _)| *bound == port)
+        .map(|(_, pid)| pid)
+}
+
+/// The ports `root` and every process it started are listening on, sorted.
+///
+/// What tells a dev server that came up on the wrong port apart from one
+/// that's still starting: `npm` runs the real server as a grandchild, so
+/// `root` itself never listens on anything.
+pub fn ports_held_by_tree(root: u32) -> Vec<u16> {
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
+
+    let mut tree = std::collections::HashSet::from([root]);
+    // Bounded: a recycled pid could in principle close a loop.
+    for _ in 0..16 {
+        let before = tree.len();
+        for (pid, process) in sys.processes() {
+            if process
+                .parent()
+                .is_some_and(|parent| tree.contains(&parent.as_u32()))
+            {
+                tree.insert(pid.as_u32());
+            }
+        }
+        if tree.len() == before {
+            break;
+        }
+    }
+
+    let mut ports: Vec<u16> = listening_sockets()
+        .into_iter()
+        .filter(|(_, pid)| tree.contains(pid))
+        .map(|(port, _)| port)
+        .collect();
+    ports.sort_unstable();
+    ports.dedup();
+    ports
 }
 
 /// Identifies whoever is listening on `port`, or `None` if it's free.
@@ -281,6 +330,30 @@ pub fn holder_path(holder: &PortHolder) -> Option<PathBuf> {
 mod tests {
     use super::*;
     use std::net::TcpListener;
+
+    #[test]
+    fn netstat_rows_are_parsed_and_everything_else_skipped() {
+        let text = "
+Active Connections
+
+  Proto  Local Address          Foreign Address        State           PID
+  TCP    0.0.0.0:80             0.0.0.0:0              LISTENING       4120
+  TCP    [::1]:5173             [::]:0                 LISTENING       912
+  TCP    127.0.0.1:51000        127.0.0.1:80           ESTABLISHED     77
+";
+        assert_eq!(parse_listening(text), vec![(80, 4120), (5173, 912)]);
+    }
+
+    /// The tree includes the root itself: this test process listening on a
+    /// port of its own is found from its own pid.
+    #[test]
+    fn a_tree_reports_the_ports_its_processes_listen_on() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let held = ports_held_by_tree(std::process::id());
+        drop(listener);
+        assert!(held.contains(&port), "{held:?} should contain {port}");
+    }
 
     #[test]
     fn a_free_port_has_no_holder() {

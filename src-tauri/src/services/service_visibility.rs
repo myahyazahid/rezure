@@ -15,6 +15,7 @@
 
 use serde::Serialize;
 
+use super::dev_servers;
 use super::{ServiceInfo, ServiceManager, ServiceStatus};
 use crate::config::settings::{self, SettingsState};
 use crate::utils::error::AppError;
@@ -68,9 +69,14 @@ pub fn hidden(state: &SettingsState) -> Vec<String> {
 /// Removing one stops it, but something else can start it again — the
 /// project requirements check starts Mailpit — and a running service with no
 /// row would hold its port with no way to stop it from the page.
+///
+/// Projects' dev servers are never listed: they belong to the Projects page
+/// (its Dev servers dialog), and being on this page would put them in Start
+/// all, which they must never be part of — see `services::dev_servers`.
 pub fn visible(services: Vec<ServiceInfo>, hidden: &[String]) -> Vec<ServiceInfo> {
     services
         .into_iter()
+        .filter(|s| !dev_servers::is_dev_service(&s.id))
         .filter(|s| !is_hidden(hidden, &s.id) || s.status != ServiceStatus::Stopped)
         .collect()
 }
@@ -80,7 +86,7 @@ pub fn visible(services: Vec<ServiceInfo>, hidden: &[String]) -> Vec<ServiceInfo
 pub fn catalog(services: &[ServiceInfo], hidden: &[String]) -> Vec<ManagedService> {
     services
         .iter()
-        .filter(|s| group_of(&s.id) == s.id)
+        .filter(|s| group_of(&s.id) == s.id && !dev_servers::is_dev_service(&s.id))
         .map(|s| ManagedService {
             id: s.id.clone(),
             name: s.name.clone(),
@@ -109,7 +115,10 @@ pub fn set_shown(
     let handles = manager.handles();
     // Only the ids the Manage services list offers: a pooled PHP version is
     // shown or hidden with PHP, never by itself.
-    if group_of(id) != id || !handles.iter().any(|s| s.id() == id) {
+    if group_of(id) != id
+        || dev_servers::is_dev_service(id)
+        || !handles.iter().any(|s| s.id() == id)
+    {
         return Err(AppError::ServiceNotFound(id.to_string()));
     }
 
@@ -161,6 +170,21 @@ mod tests {
 
     fn ids(services: &[ServiceInfo]) -> Vec<&str> {
         services.iter().map(|s| s.id.as_str()).collect()
+    }
+
+    /// A dev server is the Projects page's, never a Services page row — and
+    /// so never part of Start all.
+    #[test]
+    fn dev_servers_are_never_on_the_services_page() {
+        let services = vec![
+            info("nginx", ServiceStatus::Running),
+            info("dev-astro-web", ServiceStatus::Running),
+            info("dev-blog", ServiceStatus::Stopped),
+        ];
+        assert_eq!(ids(&visible(services.clone(), &[])), ["nginx"]);
+        let catalog = catalog(&services, &[]);
+        assert_eq!(catalog.len(), 1);
+        assert_eq!(catalog[0].id, "nginx");
     }
 
     #[test]

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useProjectsStore } from '@/stores/projects'
+import { useDevServersStore } from '@/stores/devServers'
 
 const props = defineProps<{
   projectId: string
@@ -8,9 +9,29 @@ const props = defineProps<{
   path: string
   phpVersion: string | null
   nodeVersion: string | null
+  /** Served through a dev server (`serve: 'proxy'`) rather than from files. */
+  devServer?: boolean
 }>()
 
 const store = useProjectsStore()
+const devServers = useDevServersStore()
+
+/** A `proxy` project's dev server, as the Open button shows it. */
+const devStatus = computed(() => (props.devServer ? devServers.statusOf(props.projectId) : null))
+
+const openTitle = computed(() => {
+  const url = `http://${props.domain}`
+  switch (devStatus.value) {
+    case null:
+      return `Open ${url}`
+    case 'running':
+      return `Open ${url} — its dev server is running`
+    case 'starting':
+      return 'Starting its dev server — the browser opens once it answers'
+    default:
+      return `Open ${url} — starts its dev server first`
+  }
+})
 
 const ICON_BUTTON_CLASS =
   'flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition'
@@ -43,13 +64,22 @@ function onShareClick() {
   <!-- One toolbar, like a service row's: Open is the raised primary action and
        the rest stay bare until hovered, instead of seven bordered bubbles. -->
   <div class="glass-inset flex shrink-0 items-center gap-0.5 rounded-full p-1">
+    <!-- Same width in every state, so the row's actions column never shifts:
+         a dev server starting swaps the globe for a spinner, and its state
+         is a dot on the button rather than another word. -->
     <button
       type="button"
-      class="glass-accent flex h-7 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-semibold transition"
-      :title="`Open http://${props.domain}`"
+      class="glass-accent relative flex h-7 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-semibold transition disabled:cursor-wait"
+      :title="openTitle"
+      :disabled="devStatus === 'starting'"
       @click="store.openSite(props.projectId)"
     >
+      <span
+        v-if="devStatus === 'starting'"
+        class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent"
+      />
       <svg
+        v-else
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -63,6 +93,12 @@ function onShareClick() {
         />
       </svg>
       Open
+      <span
+        v-if="devStatus && devStatus !== 'starting'"
+        class="absolute top-0.5 right-0.5 h-2 w-2 rounded-full ring-2 ring-white/70 dark:ring-black/40"
+        :class="devStatus === 'running' ? 'bg-emerald-500' : 'bg-neutral-400/80'"
+        :aria-label="devStatus === 'running' ? 'dev server running' : 'dev server stopped'"
+      ></span>
     </button>
 
     <!-- Neutral like the other icon buttons while idle, filled with the accent once a
@@ -180,10 +216,9 @@ function onShareClick() {
     </button>
 
     <!-- Pins this project to its own Node.js version, same shape and
-         behavior as the PHP pin button above — filled once pinned. Unlike
-         the PHP pin, this doesn't start anything of its own; it only
-         changes what a terminal opened from this card resolves node/npm/npx
-         as (see ProjectNodeVersionModal.vue). -->
+         behavior as the PHP pin button above — filled once pinned. It's
+         what a terminal opened from this card resolves node/npm/npx as, and
+         what the project's dev server runs on (see ProjectNodeVersionModal.vue). -->
     <button
       type="button"
       :class="[ICON_BUTTON_CLASS, props.nodeVersion ? ON_CLASS : 'glass-ghost']"

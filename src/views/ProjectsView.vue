@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useProjectsStore } from '@/stores/projects'
+import { useDevServersStore } from '@/stores/devServers'
 import { servedFolderLabel } from '@/composables/servedFolder'
 import SearchInput from '@/components/common/SearchInput.vue'
 import BasePill from '@/components/common/BasePill.vue'
@@ -12,18 +13,42 @@ import ProjectShareModal from '@/components/projects/ProjectShareModal.vue'
 import ProjectPhpVersionModal from '@/components/projects/ProjectPhpVersionModal.vue'
 import ProjectNodeVersionModal from '@/components/projects/ProjectNodeVersionModal.vue'
 import ProjectFrameworkModal from '@/components/projects/ProjectFrameworkModal.vue'
+import DevServersModal from '@/components/projects/DevServersModal.vue'
 import BusyOverlay from '@/components/common/BusyOverlay.vue'
 import type { ProjectInfo } from '@/types/project'
 
 const store = useProjectsStore()
+const devServers = useDevServersStore()
 
 // For the framework pickers, and for the problems banner below: a mistake in
 // the user's own frameworks.json should be visible without opening a picker.
-onMounted(() => store.fetchFrameworks())
+// The dev servers' status is polled while the page is open, so one that
+// exits on its own doesn't keep its green dot.
+onMounted(() => {
+  store.fetchFrameworks()
+  devServers.startPolling()
+})
+onUnmounted(() => devServers.stopPolling())
+
+/** Whether this project runs as a dev server Rezure can start. */
+function isDevServer(project: ProjectInfo) {
+  return project.serve === 'proxy' && !project.missing && !project.domainInvalid
+}
+
+/** The framework badge's text: a `proxy` project's port goes with it, since
+ *  that's where its domain is sent. */
+function frameworkBadge(project: ProjectInfo) {
+  return project.serve === 'proxy' && project.devPort
+    ? `${project.stack} · :${project.devPort}`
+    : project.stack
+}
 
 function frameworkTitle(project: ProjectInfo) {
   if (project.missing) return "The folder isn't there, so its framework can't be checked"
-  const served = `served from ${servedFolderLabel(project.path, project.docroot)}`
+  const served =
+    project.serve === 'proxy'
+      ? `served through its dev server${project.devPort ? ` on port ${project.devPort}` : ''}`
+      : `served from ${servedFolderLabel(project.path, project.docroot)}`
   return project.frameworkOverridden
     ? `Set manually (detected: ${store.frameworkLabel(project.detectedFramework)}), ${served} — click to change`
     : `Detected from the project's files, ${served} — click to change`
@@ -131,6 +156,33 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
       </div>
 
       <div class="flex flex-wrap items-center gap-2">
+        <!-- Next to Sync hosts file: both are about getting a project's
+             domain to answer. The count is how many are running now. -->
+        <button
+          type="button"
+          class="glass-btn flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-neutral-700 transition dark:text-neutral-200"
+          title="Ports and dev servers of JavaScript and Node projects"
+          @click="devServers.openModal()"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="h-4 w-4"
+          >
+            <rect x="3" y="4" width="18" height="7" rx="2" />
+            <rect x="3" y="13" width="18" height="7" rx="2" />
+            <path stroke-linecap="round" d="M7 7.5h.01M7 16.5h.01M11 7.5h6M11 16.5h6" />
+          </svg>
+          Dev servers
+          <span
+            v-if="devServers.runningCount > 0"
+            class="rounded-full bg-emerald-500/15 px-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300"
+            >{{ devServers.runningCount }}</span
+          >
+        </button>
+
         <button
           type="button"
           class="glass-btn flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-neutral-700 transition disabled:opacity-50 dark:text-neutral-200"
@@ -204,6 +256,16 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
     </p>
     <p v-if="store.openError" class="mt-3 text-sm text-red-600 dark:text-red-400">
       {{ store.openError }}
+      <!-- The dialog has the fix (stop the copy running elsewhere, Install)
+           and the dev server's full output, opened on this project. -->
+      <button
+        v-if="store.openErrorFor"
+        type="button"
+        class="ml-1 font-semibold underline underline-offset-2"
+        @click="devServers.openModal(store.openErrorFor)"
+      >
+        Fix in Dev servers
+      </button>
     </p>
 
     <!-- Skipped definitions in the user's own frameworks.json, or projects
@@ -241,6 +303,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
     <ProjectPhpVersionModal />
     <ProjectNodeVersionModal />
     <ProjectFrameworkModal />
+    <DevServersModal v-if="devServers.modalOpen" />
 
     <BusyOverlay :show="busy !== null" :label="busy?.label ?? ''" :detail="busy?.detail ?? ''" />
 
@@ -373,7 +436,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
             @click="store.openFrameworkModal(project.id)"
           >
             <BasePill>
-              {{ project.stack }}
+              {{ frameworkBadge(project) }}
               <span
                 v-if="project.frameworkOverridden"
                 class="ml-1.5 h-1.5 w-1.5 rounded-full bg-accent-500"
@@ -421,6 +484,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
             :path="project.path"
             :php-version="project.phpVersion"
             :node-version="project.nodeVersion"
+            :dev-server="isDevServer(project)"
           />
           <button
             v-if="project.kind === 'linked'"
@@ -450,7 +514,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
       >
         <span class="flex-1">Project</span>
         <span class="w-36 shrink-0">Domain</span>
-        <span class="w-28 shrink-0">Framework</span>
+        <span class="w-32 shrink-0">Framework</span>
         <span class="w-80 shrink-0 text-right">Actions</span>
       </div>
 
@@ -500,7 +564,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
           >
             {{ project.domain }}
           </span>
-          <span class="w-28 shrink-0">
+          <span class="w-32 shrink-0">
             <!-- The badge is the way in to correcting it: detection reads
                  marker files, and a project can always fool it. -->
             <button
@@ -511,7 +575,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
               @click="store.openFrameworkModal(project.id)"
             >
               <BasePill class="max-w-full">
-                <span class="truncate">{{ project.stack }}</span>
+                <span class="truncate">{{ frameworkBadge(project) }}</span>
                 <span
                   v-if="project.frameworkOverridden"
                   class="ml-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent-500"
@@ -532,6 +596,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
               :path="project.path"
               :php-version="project.phpVersion"
               :node-version="project.nodeVersion"
+              :dev-server="isDevServer(project)"
             />
             <!-- Unlink only exists for linked projects: a scanned one is
                removed by moving its folder out of www, not from here. The

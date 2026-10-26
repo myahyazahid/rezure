@@ -103,7 +103,7 @@ fn terminal_env(php_pin: Option<&str>, node_pin: Option<&str>) -> TerminalEnv {
 /// this process's own environment. `None` only when the current `PATH`
 /// can't be read *and* rejoined, which practically never happens on
 /// Windows; the caller falls back to leaving `PATH` untouched either way.
-fn path_with_first(dirs: &[PathBuf]) -> Option<OsString> {
+pub(crate) fn path_with_first(dirs: &[PathBuf]) -> Option<OsString> {
     let current = std::env::var_os("PATH").unwrap_or_default();
     let mut entries = dirs.to_vec();
     entries.extend(std::env::split_paths(&current));

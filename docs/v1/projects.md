@@ -70,10 +70,13 @@ notes that it found no framework markers and serves it from the folder itself.
 
 ## Frameworks
 
-Every project is served as some framework, and the framework decides one thing: **which folder
-nginx serves**. Laravel and CodeIgniter 4 keep their front controller in `public/index.php`, so
-they're served from `public/`; WordPress and plain PHP are served from the project folder. Get the
-framework wrong and the site 404s even though the code is fine.
+Every project is served as some framework, and the framework decides **how nginx serves it**:
+
+- A PHP framework decides **which folder** is served. Laravel and CodeIgniter 4 keep their front
+  controller in `public/index.php`, so they're served from `public/`; WordPress and plain PHP are
+  served from the project folder. Get it wrong and the site 404s even though the code is fine.
+- A JavaScript or Node framework (Vue, React, Svelte, Angular, Astro, Next.js, Nuxt, Node) is
+  served by its **dev server** instead — see [Dev servers](#dev-servers).
 
 ### How it's detected
 
@@ -97,8 +100,9 @@ The full list, and the format, are in [frameworks.md](frameworks.md).
 ### Correcting it
 
 Click the framework badge on a project (list or grid view). Pick another framework, or
-**Custom folder…** to serve a subfolder of your choosing. **Auto** goes back to detection. The
-change is live immediately: the vhost is rewritten and nginx reloaded.
+**Custom folder…** to serve a subfolder of your choosing — which is also how a JavaScript
+project's built `dist/` is served as plain files instead of through its dev server. **Auto** goes
+back to detection. The change is live immediately: the vhost is rewritten and nginx reloaded.
 
 This works for scanned and linked projects alike. A badge with a dot was set by hand. Choices are
 kept in `C:\rezure\etc\project-frameworks.json`, by project id:
@@ -112,6 +116,65 @@ Describe it in `C:\rezure\etc\frameworks.json` and click **Reload frameworks.jso
 framework dialog (or restart the app). No release needed — see
 [frameworks.md](frameworks.md#your-own-definitions). If something in that file can't be used, the
 Projects page lists what and why; the rest of the file still applies.
+
+---
+
+## Dev servers
+
+A Vite, Astro, Next.js or Nuxt project — or a Node app like 9router — isn't a folder of files a
+web server can hand out: it only works while its own process runs. For those, nginx passes every
+request for the project's domain to that process's port, and Rezure can run the process for you.
+
+### Opening one
+
+Click **Open**. If the dev server isn't running, Rezure starts it, waits until it answers, and
+only then opens the browser — so you land on the app, not an error page. The dot on the Open
+button is green while it runs. If it fails to start, the browser isn't opened; the message under
+the header says why, with **View log** for the rest.
+
+### The Dev servers dialog
+
+**Dev servers**, next to Sync hosts file, lists every project served this way:
+
+| Setting | What it does |
+|---|---|
+| Port | Where nginx sends the domain. Rezure picks one from 4400–4499 the first time and keeps it, so `astro-web.test` always reaches the same port. Change it for an app that listens on a port of its own (9router: 20128). |
+| Tell it the port with | How the dev server is made to use that port — see below. The default comes from the framework. |
+| Script | The `package.json` script that runs it. Default: the framework's (`dev` for Vite, Astro, Next, Nuxt; `start` for Angular and Node), else `dev`, else `start`. |
+| Open starts it | Off: Open just opens the browser, and you start the server yourself. |
+
+Port and script can only be changed while the dev server is stopped. The row also shows the
+exact command, a **Log** of its output, and what's missing when it can't start yet: `node_modules`
+(with an **Install** button that runs `npm install` — or pnpm/yarn/bun, going by the lockfile), a
+Node.js version that isn't installed, or a script `package.json` doesn't have.
+
+How the port is passed:
+
+| Option | Added to the command | For |
+|---|---|---|
+| `--port` + `--strictPort` | `-- --port 4400 --strictPort` | Vite (Vue, React, Svelte). Without `--strictPort` Vite quietly moves to another port when its own is taken. |
+| `--port` | `-- --port 4400` | Next.js, Nuxt, Astro, `ng serve` |
+| `PORT` variable only | nothing | Create React App, and Node apps that read `process.env.PORT` |
+| The app's own port | nothing | Apps with a port of their own — enter that port above |
+
+`PORT` is set in every case. If the server comes up on a different port than the one set, the
+error names the port it actually took.
+
+### What Rezure does and doesn't do
+
+- Dev servers are started one at a time, by you (Open or Start) — never by **Start all** on the
+  Services page, where they aren't listed. Each can take hundreds of MB.
+- They run on the project's own Node.js version when it pins one.
+- **Every dev server is stopped when Rezure closes.** One left over from a crash is cleaned up the
+  next time it's started.
+- A dev server that exits on its own isn't restarted — a compile error would only crash it again.
+  Its log says what happened.
+- Settings are kept in `C:\rezure\etc\dev-servers.json`, by project id. Removing a linked project
+  drops its entry.
+
+### Sharing
+
+**Share** works the same as for any project: the tunnel goes through nginx to the dev server.
 
 ---
 
@@ -202,8 +265,41 @@ any of them knowing about overrides. `ProjectInfo` carries the result: `framewor
 `detected_framework`, `framework_overridden`, the label as `stack`, and the absolute `docroot`.
 
 Definitions are data, but how nginx serves a project isn't: a definition only names a serve
-profile (today only `php`), and the template behind it lives in `services::vhosts`. All vhosts
+profile (`php` or `proxy`), and the template behind it lives in `services::vhosts`. All vhosts
 share one `nginx.conf`, so a definition able to add directives could take every site down.
+
+### Dev servers
+
+A `proxy` project's vhost passes everything to an nginx `upstream` holding `127.0.0.1:<port>` and,
+as a backup, `[::1]:<port>` — Vite listens on `localhost`, which on most Windows machines is IPv6
+only. `Upgrade`/`Connection` are passed on for hot reload, `Host` stays the project's domain, and
+buffering is off so streamed responses arrive as they're written. nginx's own 502 (nothing
+listening) is replaced by a page saying the dev server isn't running. `php` vhosts answer 404 for
+every dotfile (`.env`, `.git`) except `.well-known`; `proxy` ones don't, since Vite serves its own
+modules from `/node_modules/.vite/`.
+
+The port comes from `etc\dev-servers.json` (`config::dev_servers`). The vhost sync
+(`vhosts::sync_vhosts`) is what picks one for a project that has none, through
+`dev_servers::assign_ports`; the scan only reads it into `ProjectInfo::dev_port`.
+
+Next's dev endpoints (`/_next/`, `/__nextjs`) get their own `location`, identical but for
+`Origin`, which is dropped when it matches the project's domain — Next 16's
+`blockCrossSiteDEV` 403s every other origin than `localhost`, the hot-reload websocket included.
+
+Each `proxy` project is registered with `ServiceManager` as a service `dev-<project id>`
+(`ServiceManager::sync_dev_servers`, the same shape as the PHP pool), built from a `DevSpec`:
+port, port mode, script, package manager, Node.js pin. It runs as `cmd.exe /d /s /c "npm run dev
+-- --port 4400 --strictPort"` in the project folder — a command assembled only from a fixed
+package manager, a script name restricted to letters, digits and `:_.-`, and a number. Before
+spawning, `dev_servers::outside_servers` looks for a copy started elsewhere: a node/bun/deno
+process whose working folder is the project's, not descended from this Rezure, with something
+under it listening; the dialog offers to stop it (`dev_servers::stop_outside`, which kills from
+the topmost runtime down, never the shell). A failed start is summarised from the last 40 lines
+of output, stack frames dropped, with a fix for the familiar failures. A start
+waits until the port answers; a stop kills the whole process tree (`npm` runs the server as a
+grandchild). Dev servers are left off the Services page and out of Start all
+(`service_visibility`), carry no telemetry (their ids are project names), and are stopped with
+everything else on exit.
 
 Choices live in JSON rather than SQLite for the same structural reason as `links.json`, and one
 more: SQLite here is derived, disposable history, while a framework choice is a declaration that
@@ -226,6 +322,41 @@ right framework, or **Custom folder…** if it uses its own layout.
 An entry in `etc\frameworks.json` was skipped (the message says why), or a project is set to a
 framework that's no longer defined — it's served as detected meanwhile. Fix the file, then click
 **Reload** next to the message.
+
+**A JavaScript project shows "This project's dev server isn't running"**
+That's nginx saying nothing answers on the project's port. Click **Open**, or **Start** in Dev
+servers. If you start the server yourself, make it listen on the port Dev servers shows.
+
+**"Blocked request. This host is not allowed" from Vite**
+Rezure tells Vite to accept the project's domain through `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS`.
+A Vite version too old for that needs `server: { allowedHosts: ['.test'] }` in `vite.config`.
+
+**Hot reload doesn't update the page**
+Open the site through its `.test` domain after the dev server is up, and check the browser console
+for a failed websocket. A `server.hmr` setting in `vite.config` that names another port or host
+overrides what nginx forwards.
+
+**"it's listening on :3001 instead of :4400"**
+The dev server ignored the port it was given — typically a script that wraps it (`concurrently`,
+a custom `server.js`). Either set Dev servers' port to the one it uses (and "The app's own port"),
+or make the script pass `--port` on.
+
+**"It's already running outside Rezure"**
+You started the same dev server yourself — `npm run dev` in a terminal, or an IDE's run button.
+Astro and Next refuse to run twice in one folder, and two copies would fight over ports anyway.
+Click **Stop it and start here** in Dev servers: Rezure stops that copy's `node` (the terminal
+it was typed in stays open) and starts its own on the project's port. Rezure only treats a
+process as that copy when it runs in the project's folder *and* listens on a port, so a build
+watcher or test runner there is left alone.
+
+**A Next.js page stays on its loading screen**
+Next 16 refuses its own dev endpoints (`/_next/*`, including the hot-reload websocket) to any
+origin but `localhost` unless it's in `allowedDevOrigins`. Rezure's vhost drops the `Origin`
+header on those paths when it's the project's own domain, so nothing needs adding to
+`next.config`. A request from any other site is still refused.
+
+**A dev server won't start: "its dependencies aren't installed"**
+Click **Install** in Dev servers, or run the install from the project's terminal.
 
 **"it's already inside your www folder"**
 The folder is picked up by the scan automatically; there's nothing to add.

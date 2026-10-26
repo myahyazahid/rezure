@@ -106,49 +106,63 @@
       "label": "Next.js",
       "category": "JavaScript",
       "priority": 55,
-      "detect": { "npm": "next" }
+      "detect": { "npm": "next" },
+      "serve": "proxy",
+      "dev": { "script": "dev", "port": "flag" }
     },
     {
       "id": "nuxt",
       "label": "Nuxt",
       "category": "JavaScript",
       "priority": 55,
-      "detect": { "npm": "nuxt" }
+      "detect": { "npm": "nuxt" },
+      "serve": "proxy",
+      "dev": { "script": "dev", "port": "flag" }
     },
     {
       "id": "astro",
       "label": "Astro",
       "category": "JavaScript",
       "priority": 55,
-      "detect": { "npm": "astro" }
+      "detect": { "npm": "astro" },
+      "serve": "proxy",
+      "dev": { "script": "dev", "port": "flag" }
     },
     {
       "id": "vue",
       "label": "Vue",
       "category": "JavaScript",
       "priority": 50,
-      "detect": { "npm": "vue" }
+      "detect": { "npm": "vue" },
+      "serve": "proxy",
+      "dev": { "script": "dev", "port": "vite" }
     },
     {
       "id": "react",
       "label": "React",
       "category": "JavaScript",
       "priority": 50,
-      "detect": { "npm": "react" }
+      "detect": { "npm": "react" },
+      "serve": "proxy",
+      "dev": { "script": "dev", "port": "vite" }
     },
     {
       "id": "svelte",
       "label": "Svelte",
       "category": "JavaScript",
       "priority": 50,
-      "detect": { "any": [{ "npm": "svelte" }, { "npm": "@sveltejs/kit" }] }
+      "detect": { "any": [{ "npm": "svelte" }, { "npm": "@sveltejs/kit" }] },
+      "serve": "proxy",
+      "dev": { "script": "dev", "port": "vite" }
     },
     {
       "id": "angular",
       "label": "Angular",
       "category": "JavaScript",
       "priority": 50,
-      "detect": { "npm": "@angular/core" }
+      "detect": { "npm": "@angular/core" },
+      "serve": "proxy",
+      "dev": { "script": "start", "port": "flag" }
     },
     {
       "id": "php-public",
@@ -170,7 +184,9 @@
       "label": "Node",
       "category": "Generic",
       "priority": 15,
-      "detect": { "file": "package.json" }
+      "detect": { "file": "package.json" },
+      "serve": "proxy",
+      "dev": { "script": "start", "port": "env" }
     },
     {
       "id": "static",

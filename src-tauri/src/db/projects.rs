@@ -13,6 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 
+use crate::services::frameworks::ServeProfile;
 use crate::utils::error::AppError;
 
 /// Where a project came from, which decides what can be done to it.
@@ -48,6 +49,13 @@ pub struct ProjectInfo {
     /// The folder nginx serves, absolute — `public\` for Laravel and
     /// CodeIgniter 4, the project folder for most others.
     pub docroot: String,
+    /// How nginx serves it: files through PHP, or every request passed on to
+    /// a dev server (`services::dev_servers`).
+    pub serve: ServeProfile,
+    /// The port a `proxy` project's dev server listens on, from
+    /// `config::dev_servers` — `None` for every other project, and for a
+    /// `proxy` one until the first vhost sync has picked it a port.
+    pub dev_port: Option<u16>,
     /// Whether `domain` currently resolves to 127.0.0.1 via the OS hosts
     /// file — read-only, no admin rights needed to check.
     pub has_hosts_entry: bool,
@@ -76,9 +84,9 @@ pub struct ProjectInfo {
     pub php_version: Option<String>,
     /// This project's own pinned Node.js version, if any — `None` means
     /// "follow the global active version" (`services::node`), same as a
-    /// project that's never set one. Unlike `php_version`, this never touches
-    /// a running service or nginx: it only changes what a terminal opened
-    /// for this project resolves `node`/`npm` as. See `services::launcher`.
+    /// project that's never set one. It's what a terminal opened for this
+    /// project resolves `node`/`npm` as (`services::launcher`), and what its
+    /// dev server runs on (`services::dev_servers`); nginx never depends on it.
     pub node_version: Option<String>,
 }
 
@@ -290,6 +298,8 @@ mod tests {
             detected_framework: "php".to_string(),
             framework_overridden: false,
             docroot: format!("C:/rezure/www/{id}"),
+            serve: ServeProfile::Php,
+            dev_port: None,
             has_hosts_entry: false,
             last_opened_at: None,
             open_count: 0,

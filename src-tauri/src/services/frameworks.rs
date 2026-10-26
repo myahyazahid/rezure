@@ -74,6 +74,43 @@ pub enum ServeProfile {
     /// FastCGI — what every PHP framework's front controller expects.
     #[default]
     Php,
+    /// Every request passed on to a process listening on the project's own
+    /// port — a dev server (Vite, Next, Nuxt, ...) or a Node app. There's no
+    /// folder to serve, so a definition with this profile has no `docroot`.
+    /// See `services::dev_servers`.
+    Proxy,
+}
+
+/// How a dev server is made to listen on the port Rezure gave it. A closed
+/// set for the same reason [`ServeProfile`] is: a definition picks one, and
+/// only Rust decides what each one adds to the command line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PortMode {
+    /// `--port <p> --strictPort`, plus `PORT`. Vite otherwise moves to the
+    /// next free port without a word when its own is taken, and the proxy is
+    /// left pointing at nothing.
+    Vite,
+    /// `--port <p>`, plus `PORT` — Next, Nuxt, Astro, `ng serve`.
+    Flag,
+    /// Only the `PORT` environment variable — Create React App, and any Node
+    /// app that reads `process.env.PORT`.
+    Env,
+    /// Nothing: the app listens on a port of its own, and the user tells
+    /// Rezure which one.
+    Fixed,
+}
+
+/// A `proxy` framework's defaults for running its dev server.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DevDefaults {
+    /// The `package.json` script to run. Left out: `dev`, then `start`.
+    #[serde(default)]
+    pub script: Option<String>,
+    /// Left out: [`PortMode::Env`].
+    #[serde(default)]
+    pub port: Option<PortMode>,
 }
 
 /// One test against a project folder. In JSON, an object with one key:
@@ -113,6 +150,9 @@ pub struct FrameworkDef {
     /// Purely for display; detection never reads it.
     #[serde(default)]
     pub category: Option<String>,
+    /// How its dev server is run — only for `serve: "proxy"`.
+    #[serde(default)]
+    pub dev: Option<DevDefaults>,
 }
 
 /// Where a definition came from.
@@ -147,8 +187,10 @@ pub struct Serving {
     pub label: String,
     /// Whether the user's choice, rather than detection, decided this.
     pub overridden: bool,
-    /// The folder nginx serves, absolute.
+    /// The folder nginx serves, absolute. The project folder itself for a
+    /// `proxy` project, which nginx serves no files of.
     pub docroot: PathBuf,
+    pub serve: ServeProfile,
 }
 
 /// A framework as the pickers list it.
@@ -158,6 +200,7 @@ pub struct FrameworkSummary {
     pub id: String,
     pub label: String,
     pub docroot: Option<String>,
+    pub serve: ServeProfile,
     pub source: Source,
     /// The heading it's listed under — the definition's own `category`, or
     /// "Your frameworks" for a user definition without one.
@@ -212,6 +255,8 @@ impl Registry {
         let detected = self.detect(dir);
         let detected_id = detected.map_or(UNKNOWN, |f| f.def.id.as_str()).to_string();
 
+        // A custom folder is always files served as they are: someone who
+        // points Rezure at `dist\` wants that build, not a dev server.
         if let Some(FrameworkOverride::Docroot(sub)) = choice {
             return Serving {
                 framework: CUSTOM.to_string(),
@@ -219,6 +264,7 @@ impl Registry {
                 label: CUSTOM_LABEL.to_string(),
                 overridden: true,
                 docroot: resolve_docroot(dir, Some(sub)),
+                serve: ServeProfile::Php,
             };
         }
 
@@ -235,6 +281,7 @@ impl Registry {
                 .to_string(),
             overridden: chosen.is_some(),
             docroot: resolve_docroot(dir, effective.and_then(|f| f.def.docroot.as_deref())),
+            serve: effective.map_or(ServeProfile::Php, |f| f.def.serve),
         }
     }
 
@@ -253,6 +300,7 @@ impl Registry {
                 id: f.def.id.clone(),
                 label: f.def.label.clone(),
                 docroot: f.def.docroot.clone(),
+                serve: f.def.serve,
                 source: f.source,
                 category: f
                     .def
@@ -441,9 +489,47 @@ fn validate(def: &FrameworkDef) -> Result<(), String> {
         }
     }
     if let Some(docroot) = &def.docroot {
+        if def.serve == ServeProfile::Proxy {
+            return Err(
+                "a \"proxy\" framework has no docroot — nginx passes every request to its dev server"
+                    .to_string(),
+            );
+        }
         validate_relative_path(docroot).map_err(|reason| format!("docroot {reason}"))?;
     }
+    if let Some(dev) = &def.dev {
+        if def.serve != ServeProfile::Proxy {
+            return Err("\"dev\" only applies to \"serve\": \"proxy\"".to_string());
+        }
+        if let Some(script) = &dev.script {
+            validate_script_name(script).map_err(|reason| format!("dev script {reason}"))?;
+        }
+    }
     validate_rule(&def.detect, 1)
+}
+
+const MAX_SCRIPT_LEN: usize = 64;
+
+/// Whether `name` is safe as the `package.json` script a dev server runs.
+///
+/// Stricter than npm itself on purpose: the name ends up on a `cmd.exe`
+/// command line (`services::dev_servers`), where `&`, `|`, `%`, `^` and
+/// quotes all mean something. Real script names (`dev`, `start`,
+/// `dev:web`, `serve.local`) never need any of them.
+pub fn validate_script_name(name: &str) -> Result<(), String> {
+    if name.is_empty() || name.len() > MAX_SCRIPT_LEN {
+        return Err(format!("must be 1 to {MAX_SCRIPT_LEN} characters"));
+    }
+    if name.starts_with(['-', '.']) {
+        return Err("can't start with \"-\" or \".\"".to_string());
+    }
+    match name
+        .chars()
+        .find(|c| !(c.is_ascii_alphanumeric() || matches!(c, ':' | '_' | '-' | '.')))
+    {
+        Some(bad) => Err(format!("can't contain {bad:?}")),
+        None => Ok(()),
+    }
 }
 
 fn validate_rule(rule: &Rule, depth: usize) -> Result<(), String> {
@@ -833,7 +919,7 @@ mod tests {
                 { "id": "typo", "label": "Typo", "priority": 50,
                   "detect": { "file": "x" }, "docRoot": "public" },
                 { "id": "nginx", "label": "Nginx", "priority": 50,
-                  "detect": { "file": "x" }, "serve": "proxy" },
+                  "detect": { "file": "x" }, "serve": "fastcgi" },
                 { "id": "fine", "label": "Fine", "priority": 50,
                   "detect": { "file": "fine.txt" } }
             ] }"#,
@@ -845,6 +931,95 @@ mod tests {
         assert!(registry.get("nginx").is_none());
         assert_eq!(registry.problems().len(), 3, "{:?}", registry.problems());
         assert!(registry.problems()[0].contains("\"escape\" was skipped"));
+    }
+
+    #[test]
+    fn proxy_definitions_are_checked_for_what_cannot_apply_to_them() {
+        let registry = user_registry(
+            "proxy",
+            r#"{ "frameworks": [
+                { "id": "proxy-docroot", "label": "A", "priority": 50, "detect": { "file": "x" },
+                  "serve": "proxy", "docroot": "public" },
+                { "id": "php-dev", "label": "B", "priority": 50, "detect": { "file": "x" },
+                  "dev": { "script": "dev" } },
+                { "id": "bad-script", "label": "C", "priority": 50, "detect": { "file": "x" },
+                  "serve": "proxy", "dev": { "script": "dev & calc" } },
+                { "id": "bad-mode", "label": "D", "priority": 50, "detect": { "file": "x" },
+                  "serve": "proxy", "dev": { "port": "random" } },
+                { "id": "fine-proxy", "label": "E", "priority": 50, "detect": { "file": "x" },
+                  "serve": "proxy", "dev": { "script": "dev:web", "port": "vite" } }
+            ] }"#,
+        );
+
+        assert_eq!(registry.problems().len(), 4, "{:?}", registry.problems());
+        let fine = registry.get("fine-proxy").unwrap();
+        assert_eq!(fine.def.serve, ServeProfile::Proxy);
+        assert_eq!(
+            fine.def.dev,
+            Some(DevDefaults {
+                script: Some("dev:web".to_string()),
+                port: Some(PortMode::Vite),
+            })
+        );
+    }
+
+    #[test]
+    fn script_names_that_mean_something_to_cmd_are_refused() {
+        for bad in [
+            "", "dev&calc", "dev|x", "%PATH%", "a^b", "\"dev\"", "-x", ".hidden", "dev web",
+        ] {
+            assert!(
+                validate_script_name(bad).is_err(),
+                "{bad:?} must be refused"
+            );
+        }
+        for good in [
+            "dev",
+            "start",
+            "dev:web",
+            "serve.local",
+            "dev_api",
+            "build-watch",
+        ] {
+            assert!(validate_script_name(good).is_ok(), "{good:?} must be fine");
+        }
+    }
+
+    /// The JavaScript frameworks run a dev server; the fallbacks a PHP or
+    /// static project lands on still serve files.
+    #[test]
+    fn javascript_frameworks_are_proxied_and_php_ones_are_not() {
+        let registry = builtin_registry();
+        for id in [
+            "nextjs", "nuxt", "astro", "vue", "react", "svelte", "angular", "node",
+        ] {
+            let def = &registry.get(id).unwrap().def;
+            assert_eq!(def.serve, ServeProfile::Proxy, "{id}");
+            assert!(def.dev.is_some(), "{id} needs dev defaults");
+        }
+        for id in ["laravel", "codeigniter4", "php", "php-public", "static"] {
+            assert_eq!(
+                registry.get(id).unwrap().def.serve,
+                ServeProfile::Php,
+                "{id}"
+            );
+        }
+        assert_eq!(
+            registry.serving(&fixture("vue"), None).serve,
+            ServeProfile::Proxy
+        );
+    }
+
+    /// Serving `dist\` of a Vue app through a custom folder keeps working as
+    /// files, whatever the framework's own profile is.
+    #[test]
+    fn a_custom_docroot_is_never_proxied() {
+        let dir = fixture("vue");
+        let choice = FrameworkOverride::Docroot("src".to_string());
+        assert_eq!(
+            builtin_registry().serving(&dir, Some(&choice)).serve,
+            ServeProfile::Php
+        );
     }
 
     #[test]

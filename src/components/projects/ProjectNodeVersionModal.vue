@@ -43,8 +43,9 @@ function choose(version: string | null) {
           class="font-mono"
           >npx</span
         >
-        resolve to this version, whatever the global default on the Switch page is. A terminal
-        already open keeps whatever it started with.
+        resolve to this version, whatever the global default on the Switch page is. Its dev server,
+        if it has one, runs on it too. A terminal or dev server already running keeps whatever it
+        started with.
       </p>
 
       <div class="mt-5 space-y-1.5">

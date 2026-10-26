@@ -71,6 +71,7 @@ const current = computed(() => {
       title: 'Custom folder',
       detail: 'Serves a subfolder you name',
       docroot: folder || null,
+      devServer: false,
     }
   }
   if (key === 'auto') {
@@ -81,6 +82,7 @@ const current = computed(() => {
         ? 'Auto · no framework markers found'
         : "Auto · detected from the project's files",
       docroot: catalogEntry(props.detected)?.docroot ?? null,
+      devServer: catalogEntry(props.detected)?.serve === 'proxy',
     }
   }
   const id = key.slice(3)
@@ -89,6 +91,7 @@ const current = computed(() => {
     title: store.frameworkLabel(id),
     detail: entry?.source === 'user' ? 'Chosen by you · your own definition' : 'Chosen by you',
     docroot: entry?.docroot ?? null,
+    devServer: entry?.serve === 'proxy',
   }
 })
 
@@ -161,7 +164,14 @@ function emitCustom() {
         <span class="block truncate text-xs text-neutral-500">{{ current.detail }}</span>
       </span>
       <span
-        v-if="current.docroot"
+        v-if="current.devServer"
+        class="glass-inset shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-neutral-500 dark:text-neutral-400"
+        title="Served through its own dev server, which Rezure can start"
+      >
+        dev server
+      </span>
+      <span
+        v-else-if="current.docroot"
         class="glass-inset shrink-0 rounded-md px-1.5 py-0.5 font-mono text-[11px] text-neutral-500 dark:text-neutral-400"
         :title="`Served from ${folderPill(current.docroot)}`"
       >

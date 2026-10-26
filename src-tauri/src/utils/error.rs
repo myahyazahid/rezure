@@ -178,6 +178,27 @@ pub enum AppError {
     #[error("\"{docroot}\" can't be served — {reason}")]
     InvalidDocroot { docroot: String, reason: String },
 
+    #[error("port {port} can't be used for a dev server — {reason}")]
+    InvalidDevPort { port: u16, reason: String },
+
+    #[error("port {port} is already {by}'s dev server port — pick another")]
+    DevPortTaken { port: u16, by: String },
+
+    #[error("\"{script}\" can't be used as a dev server script — it {reason}")]
+    InvalidDevScript { script: String, reason: String },
+
+    #[error("{name}'s dev server can't start yet — {reason}")]
+    DevServerNotReady { name: String, reason: String },
+
+    #[error("{name}'s dev server didn't come up — {reason}")]
+    DevServerFailed { name: String, reason: String },
+
+    #[error("stop {name}'s dev server before changing its port or script")]
+    DevServerRunning { name: String },
+
+    #[error("{0} isn't served through a dev server — only JavaScript and Node projects are")]
+    NotADevServerProject(String),
+
     #[error("can't start {name} — {holder}")]
     PortInUseBy {
         port: u16,
@@ -310,6 +331,13 @@ impl AppError {
             Self::ProjectAlreadyLinked { .. } => "ProjectAlreadyLinked",
             Self::UnknownFramework { .. } => "UnknownFramework",
             Self::InvalidDocroot { .. } => "InvalidDocroot",
+            Self::InvalidDevPort { .. } => "InvalidDevPort",
+            Self::DevPortTaken { .. } => "DevPortTaken",
+            Self::InvalidDevScript { .. } => "InvalidDevScript",
+            Self::DevServerNotReady { .. } => "DevServerNotReady",
+            Self::DevServerFailed { .. } => "DevServerFailed",
+            Self::DevServerRunning { .. } => "DevServerRunning",
+            Self::NotADevServerProject { .. } => "NotADevServerProject",
             Self::PortInUseBy { .. } => "PortInUseBy",
             Self::AttachmentRejected { .. } => "AttachmentRejected",
             Self::ConnectionNotFound { .. } => "ConnectionNotFound",
