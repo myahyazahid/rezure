@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useProjectsStore } from '@/stores/projects'
 import { useDevServersStore } from '@/stores/devServers'
+import TechIcon from '@/components/common/TechIcon.vue'
 
 const props = defineProps<{
   projectId: string
@@ -188,8 +189,9 @@ function onShareClick() {
     </button>
 
     <!-- Pins this project to its own PHP version, distinct from the global
-         Switch — filled (not just outlined) once pinned, so a project
-         running on its own version is visible without opening the modal. -->
+         Switch. The PHP logo says which runtime at a glance: grey while it
+         follows the global version, in PHP's own colour on an accent fill
+         once pinned, so a pinned project shows without opening the modal. -->
     <button
       type="button"
       :class="[ICON_BUTTON_CLASS, props.phpVersion ? ON_CLASS : 'glass-ghost']"
@@ -200,25 +202,13 @@ function onShareClick() {
       "
       @click="store.openPhpVersionModal(props.projectId)"
     >
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        class="h-3.5 w-3.5"
-      >
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          d="M8 4 4 12l4 8M16 4l4 8-4 8M14 4l-4 16"
-        />
-      </svg>
+      <TechIcon id="php" :size="17" :mono="!props.phpVersion" />
     </button>
 
     <!-- Pins this project to its own Node.js version, same shape and
-         behavior as the PHP pin button above — filled once pinned. It's
-         what a terminal opened from this card resolves node/npm/npx as, and
-         what the project's dev server runs on (see ProjectNodeVersionModal.vue). -->
+         behaviour as the PHP pin button above. It's what a terminal opened
+         from this card resolves node/npm/npx as, and what the project's dev
+         server runs on (see ProjectNodeVersionModal.vue). -->
     <button
       type="button"
       :class="[ICON_BUTTON_CLASS, props.nodeVersion ? ON_CLASS : 'glass-ghost']"
@@ -229,20 +219,7 @@ function onShareClick() {
       "
       @click="store.openNodeVersionModal(props.projectId)"
     >
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        class="h-3.5 w-3.5"
-      >
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          d="M12 2.5 20.5 7.5V16.5L12 21.5 3.5 16.5V7.5Z"
-        />
-        <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v8M12 8 8 10.3M12 8l4 2.3" />
-      </svg>
+      <TechIcon id="node" :size="14" :mono="!props.nodeVersion" />
     </button>
 
     <button

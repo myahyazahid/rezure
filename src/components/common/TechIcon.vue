@@ -10,7 +10,16 @@
  */
 import { computed } from 'vue'
 
-const props = withDefaults(defineProps<{ id: string; size?: number }>(), { size: 18 })
+const props = withDefaults(
+  defineProps<{
+    id: string
+    size?: number
+    /** Drawn in the text colour instead of the brand's — for a toolbar
+     *  button whose "off" state shouldn't look switched on. */
+    mono?: boolean
+  }>(),
+  { size: 18, mono: false },
+)
 
 const MARKS: Record<string, { color: string; path: string }> = {
   php: {
@@ -70,7 +79,7 @@ const initial = computed(() => props.id.charAt(0).toUpperCase())
     :width="size"
     :height="size"
     viewBox="0 0 24 24"
-    :fill="mark.color"
+    :fill="mono ? 'currentColor' : mark.color"
     aria-hidden="true"
   >
     <path :d="mark.path" />
