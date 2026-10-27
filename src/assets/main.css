@@ -1083,6 +1083,14 @@ body,
   --glass-fill: rgb(90 105 180 / var(--glass-solidity));
 }
 
+/* The "Redscale" wordmark in the title bar, set in a serif so it reads as
+   the studio's name rather than more UI text. */
+.brand-wordmark {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-weight: 600;
+  font-style: italic;
+}
+
 /* The red "Redscale" wordmark in the title bar has no contrast against Sky
    Glass's blue; a thin light halo keeps it legible without recolouring it. */
 [data-theme='skyglass'] .brand-wordmark {

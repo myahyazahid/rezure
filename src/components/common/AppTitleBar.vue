@@ -3,6 +3,8 @@ import { onMounted, ref } from 'vue'
 import { getVersion } from '@tauri-apps/api/app'
 import { useAppearanceStore } from '@/stores/appearance'
 import { useWindowControls } from '@/composables/useWindowControls'
+// The R cropped from assets/logo-master.png.
+import logoR from '@/assets/logo-r.png'
 
 const appearance = useAppearanceStore()
 const { minimize, toggleMaximize, close } = useWindowControls()
@@ -19,18 +21,27 @@ onMounted(async () => {
 </script>
 
 <template>
-  <header data-tauri-drag-region class="flex h-12 shrink-0 items-center gap-3 px-4">
-    <!-- Decorative window dots, part of the app's visual identity. -->
-    <div class="flex shrink-0 items-center gap-2">
-      <span class="h-3 w-3 rounded-full bg-[#ff5f57]"></span>
-      <span class="h-3 w-3 rounded-full bg-[#febc2e]"></span>
-      <span class="h-3 w-3 rounded-full bg-[#28c840]"></span>
-    </div>
-
-    <div data-tauri-drag-region class="flex min-w-0 flex-1 items-center gap-2">
-      <span class="text-[15px] font-bold tracking-tight">Rezure</span>
-      <span class="text-xs text-neutral-500">by</span>
-      <span class="brand-wordmark text-xs font-semibold text-red-600 dark:text-red-500"
+  <header data-tauri-drag-region class="flex h-12 shrink-0 items-center gap-3 pr-4">
+    <!-- Same ml-3 w-60 as the sidebar below, so the brand sits centred over it;
+         nudged down to sit closer to the sidebar than to the window edge.
+         Baseline-aligned: the pieces mix sizes and a serif, so centring them
+         leaves "Redscale" riding high. -->
+    <div
+      data-tauri-drag-region
+      class="ml-3 flex w-60 shrink-0 translate-y-1.5 items-baseline justify-center gap-2 overflow-hidden"
+    >
+      <!-- Wordmark: the R from the logo, then the rest set in type in the
+           logo's own red. Baseline-aligned, so the R sits on the baseline. -->
+      <span class="flex items-baseline text-[#ea0619]">
+        <span class="sr-only">Rezure</span>
+        <img :src="logoR" alt="" aria-hidden="true" class="h-4.5 w-auto shrink-0" />
+        <span aria-hidden="true" class="ml-px text-[19px] leading-none font-semibold tracking-tight"
+          >ezure</span
+        >
+      </span>
+      <span class="text-sm text-neutral-500">by</span>
+      <!-- Larger than "by": Cormorant's small x-height reads a size down. -->
+      <span class="brand-wordmark text-[17px] leading-none text-red-600 dark:text-red-500"
         >Redscale</span
       >
       <span
@@ -40,6 +51,8 @@ onMounted(async () => {
         v{{ version }}
       </span>
     </div>
+
+    <div data-tauri-drag-region class="flex-1 self-stretch"></div>
 
     <button
       type="button"

@@ -3446,7 +3446,7 @@ dependencies = [
 
 [[package]]
 name = "rezureapp"
-version = "3.1.1"
+version = "3.3.0"
 dependencies = [
  "base64 0.22.1",
  "bytes",

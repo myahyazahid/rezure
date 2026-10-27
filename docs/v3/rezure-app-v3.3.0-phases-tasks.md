@@ -496,8 +496,9 @@ asersi `Origin` di `proxy_vhosts_pass_everything_to_the_dev_server`.
 Fase 1–4 sudah diimplementasikan. Semua pengecekan otomatis lulus, termasuk test `#[ignore]` dengan
 Node dan `nginx -t` sungguhan (lihat Test di Fase 1 dan 2). Yang tersisa: verifikasi manual di app
 sungguhan (daftar "Verifikasi" Fase 1–3, terutama HMR dan Vite host check per framework) dan
-changelog. v3.2.0 belum dirilis dan versi masih 3.1.1, jadi rilis ini menumpang di working tree yang
-sama.
+changelog. v3.2.0 tidak dirilis terpisah — isinya ikut rilis ini, dan versi sudah dinaikkan langsung
+dari 3.1.1 ke 3.3.0 (`package.json`, `package-lock.json`, `Cargo.toml`, `Cargo.lock`,
+`tauri.conf.json`).
 
 ---
 

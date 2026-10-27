@@ -1,4 +1,7 @@
 import './assets/main.css'
+// Bundled rather than fetched, so the title-bar "Redscale" wordmark renders
+// offline. Latin, one weight, italic: that's all the wordmark uses.
+import '@fontsource/cormorant-garamond/latin-600-italic.css'
 
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
