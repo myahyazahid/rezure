@@ -57,14 +57,14 @@ Rezure doesn't bundle a database GUI. You already have a favourite, with your ow
 queries and layout, and a half-clone of it inside Rezure would be one more thing to learn.
 So **Open** detects what's installed and lets you choose.
 
-Detected clients (see [`services/db_clients.rs`](../src-tauri/src/services/db_clients.rs)):
+Detected clients (see [`services/db_clients.rs`](../../src-tauri/src/services/db_clients.rs)):
 
 | Client | Opens straight onto the database? | How it's launched |
 |---|---|---|
-| TablePlus | yes | `mysql://` connection URL |
-| DBeaver | yes | `-con driver=mariadb\|host=…\|database=…\|save=false\|connect=true` |
-| HeidiSQL | yes — the tree shows only that database | `-h= -P= -u= -db=` |
-| MySQL Workbench | server only | `-query root@127.0.0.1:3306` |
+| TablePlus | yes | `mysql://user:password@host:port/database` connection URL |
+| DBeaver | yes | `-con driver=mariadb\|host=…\|database=…\|user=…\|save=false\|connect=true\|password=…` |
+| HeidiSQL | yes — the tree shows only that database | `--host= --port= --user= --password= --databases=` |
+| MySQL Workbench | server only | `--query user@host:port`; Workbench asks for the password itself |
 | Navicat | server only | opens the app (no documented connection flags) |
 | MariaDB console | yes | the bundled `mariadb.exe`, in a new console window |
 
@@ -76,10 +76,48 @@ The bundled console client is always offered last, so the menu is never empty on
 with no GUI installed. With exactly one client available, **Open** launches it directly
 instead of showing a one-item menu.
 
+Each entry shows the client's own logo, read out of its installed `.exe`
+([`utils/exe_icon.rs`](../../src-tauri/src/utils/exe_icon.rs)), so it's always the logo of the
+version you have. The consoles show the MariaDB or PostgreSQL mark.
+
+DBeaver and Workbench take a few seconds to show a window. While a client starts, the page shows
+**Opening <client>…** for at least three seconds, until Rezure's window loses focus to the new
+one, or for at most 20 seconds. **Open** is disabled while it's up, so a second click doesn't
+start a second copy.
+
+### Remote connections and passwords
+
+For a connection to another server, the client is pointed at the address Rezure itself uses.
+For a connection through SSH, that's the tunnel's local port on `127.0.0.1`. That port changes
+from one session to the next. The client never deals with SSH, so a connection that signs in
+to SSH with a `.pem` key needs nothing extra.
+
+The database password is a separate matter. TablePlus, DBeaver, HeidiSQL and the MariaDB console
+connect as soon as they open, without asking for one, and fail with *Access denied … (using
+password: NO)*. A password saved in the client wouldn't help either, because the tunnel port it
+was saved for is gone next time. So when the connection has a saved password, Rezure hands it
+over:
+
+| Client | How the password is passed |
+|---|---|
+| TablePlus | In the URL, percent-encoded, so `@`, `:` or `/` in it can't break it |
+| DBeaver | `password=` in the `-con` spec. Left out if it contains `\|` or `=`, which the spec can't carry |
+| HeidiSQL | `--password=`. Left out if it starts with `-` or contains a space or `"`, which HeidiSQL can't read back |
+| MariaDB console | `MYSQL_PWD`, set on the console process only, never on a command line |
+| MySQL Workbench | Not passed. Workbench has no command-line option for it, so it asks in its own dialog |
+
+A password on a command line can be read by other programs running as the same Windows user.
+That's the same group that can already read it from Credential Manager, and without it **Open**
+doesn't work for a remote server at all. Every other client, and every other place in Rezure,
+keeps passwords off command lines.
+
+When a password is left out for the reasons above, the client fails the way it did before.
+Type the password into the client's own connection dialog.
+
 ### Adding another client
 
 Detection is by install path — no registry scraping. Add an entry to `CANDIDATES` in
-[`services/db_clients.rs`](../src-tauri/src/services/db_clients.rs):
+[`services/db_clients.rs`](../../src-tauri/src/services/db_clients.rs):
 
 ```rust
 Candidate {
@@ -92,8 +130,13 @@ Candidate {
 
 `$LOCALAPPDATA`, `$PROGRAMFILES` and `$PROGRAMFILESX86` are expanded at lookup time, and a
 single `*` matches one path segment (for versioned install folders like
-`MySQL Workbench 8.0 CE`). Then add the client's connection flags to `connection_args`, and
-set `opens_database` honestly — the UI relies on it.
+`MySQL Workbench 8.0 CE`). Then add the client's connection flags to `args_for`, and
+set `opens_database` honestly — the UI relies on it. Its logo needs nothing: it's read out of
+the `.exe` that was found.
+
+Check the flags against the real client, not its `--help`. HeidiSQL reads `-db=x` as `-d`
+(session name) `b=x`, and Workbench 8.0 treats `-query x` as a file named `x` to open. Long
+`--name=` forms avoided both.
 
 ---
 
@@ -161,7 +204,7 @@ database a project actually connects to — that stays in your project's own `.e
 
 There is **no MySQL driver crate** in Rezure's dependency tree. The MariaDB zip Rezure
 already downloads ships its own client binaries next to the server, so
-[`services/database.rs`](../src-tauri/src/services/database.rs) drives those instead of
+[`services/database.rs`](../../src-tauri/src/services/database.rs) drives those instead of
 adding a second, redundant way to speak the protocol:
 
 - `mariadb.exe --batch --skip-column-names -e "<sql>"` for every read, parsed as TSV
@@ -358,8 +401,8 @@ Open in a client, for PostgreSQL:
 
 | Client | How it's opened |
 |---|---|
-| TablePlus | `postgresql://user@host:port/database` |
-| DBeaver | `-con "driver=postgres-jdbc\|…"`. The first time, DBeaver asks to download its PostgreSQL JDBC driver |
+| TablePlus | `postgresql://user:password@host:port/database`, with the saved password as for MySQL (see [Remote connections and passwords](#remote-connections-and-passwords)) |
+| DBeaver | `-con "driver=postgres-jdbc\|…"`, with the saved password as for MySQL. The first time, DBeaver asks to download its PostgreSQL JDBC driver |
 | pgAdmin 4 | Opens the app only — it has no command line to pass a connection |
 | psql console | `psql` from an installed build, in its own window. Always offered |
 
@@ -486,6 +529,14 @@ port.
 **A client opens but connects to nothing** — for Workbench and Navicat this is
 expected on first launch; they open on the server (or just open), and you pick the database
 inside. If the client wants a connection string, use the one under [Connecting](#connecting).
+
+**"Access denied … (using password: NO)" when opening a remote database** — the connection has
+no saved password, or it's one the client can't be handed (see
+[Remote connections and passwords](#remote-connections-and-passwords)). Save the password on
+the connection in Rezure, or type it into the client's connection dialog.
+
+**HeidiSQL shows a session named like `b=shop`** — a leftover from an older Rezure, which
+passed `-db=`. Delete it in HeidiSQL's session manager. Current versions don't create it.
 
 **Sizes look wrong** — the Size column is `data_length + index_length` from
 `information_schema`, which is a storage estimate for InnoDB, not an exact byte count. A

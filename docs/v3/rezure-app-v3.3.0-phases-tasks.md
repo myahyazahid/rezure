@@ -491,6 +491,65 @@ asersi `Origin` di `proxy_vhosts_pass_everything_to_the_dev_server`.
 
 ---
 
+## Perbaikan lain di rilis ini (29 Okt 2026)
+
+Di luar dev server, dari pemakaian nyata menjelang rilis.
+
+1. **Modal Dev servers: card terpotong saat log dibuka.** Tiap `<li>` adalah item flex dengan
+   `overflow-hidden`, jadi tinggi minimumnya 0 dan card ikut menyusut alih-alih list-nya yang
+   scroll.
+   - [x] `shrink-0` pada card (`DevServersModal.vue`)
+2. **"Open with" ke koneksi remote (SSH) gagal di setiap client: "Access denied … (using password:
+   NO)".** Tunnel-nya sudah jalan; yang hilang password MySQL. Handoff sengaja tidak pernah
+   mengirim password dengan asumsi client akan menanyakannya, tapi TablePlus, DBeaver, HeidiSQL,
+   dan konsol MariaDB langsung connect tanpa bertanya. Port tunnel juga berubah tiap sesi, jadi
+   password yang disimpan di client tidak membantu. Ini berlaku sama untuk koneksi SSH dengan
+   `.pem`, karena `.pem` hanya untuk lapis SSH, bukan lapis MySQL.
+   - [x] Password tersimpan ikut dikirim, sebagai pengecualian yang dijelaskan di doc comment
+         `db_clients::tableplus_url`: URL TablePlus (`mysql://`/`postgresql://`, di-percent-encode
+         lewat `url`), `|password=` di spec `-con` DBeaver (dilewati bila memuat `|`/`=`), dan
+         `--password=` HeidiSQL (dilewati bila diawali `-` atau memuat spasi/`"`)
+   - [x] Konsol MariaDB: `MYSQL_PWD` hanya di environment proses konsol itu (cara yang sama
+         dengan password SSH untuk `ssh.exe`), menggantikan prompt `-p`.
+         `database::endpoint_prompts_for_password` → `endpoint_password`
+   - [x] MySQL Workbench tetap menanyakan password: tidak punya opsi command line untuk itu
+         (daftar opsi dibaca dari `wbprivate.be.dll` 8.0.47). `--run-python` +
+         `mforms.Utilities.store_password` dipertimbangkan dan ditolak: urutannya tidak pasti,
+         meninggalkan entri vault per port tunnel, dan memakai API internal
+3. **HeidiSQL membuka session manager pada session bernama `b=tb_data`.** Parsernya mencari tiap
+   switch dengan regex `\s(-d|--description)\s*=?\s*…`, dengan `=` opsional dan `-d` (nama session)
+   dibaca sebelum `-db`. Jadi `-db=tb_data` terbaca `-d` + `b=tb_data`.
+   - [x] Semua switch HeidiSQL memakai bentuk panjang (`--host=`, `--port=`, `--user=`,
+         `--databases=`), yang tidak bisa tertangkap pola pendek (`db_clients::heidisql_args`)
+4. **MySQL Workbench hanya membuka Home.** `wb.log`: `open type:` kosong, lalu `Unknown file type
+   rezure@127.0.0.1:…`. 8.0.47 tidak mengenal `-query` (satu strip), jadi connection string dianggap
+   file.
+   - [x] `--query <user>@<host>:<port>`
+5. **Logo di menu Open with.** Diambil dari ikon `.exe` client yang terpasang
+   (`utils::exe_icon`: `SHDefExtractIconW` 48px → `.ico` 32-bit, dengan mask diubah jadi alpha untuk
+   ikon lama), dikirim sebagai `DbClientInfo.icon` (`data:` URL, di-cache per path). Tidak ada
+   artwork produk lain di repo, dan client baru otomatis dapat logonya. Konsol memakai mark
+   `mariadb`/`postgres` dari `TechIcon`. `windows-sys` mendapat fitur `Win32_Graphics_Gdi`,
+   `Win32_UI_Shell`, `Win32_UI_WindowsAndMessaging`, tanpa dependency baru.
+   - [x] Dicek visual: ikon TablePlus, DBeaver, HeidiSQL, dan Workbench terekstrak dengan alpha utuh
+6. **Klik Open terasa tidak terjadi apa-apa.** DBeaver dan Workbench butuh beberapa detik sebelum
+   jendelanya muncul.
+   - [x] `BusyOverlay` "Opening <client>…" (`databases` store: `opening`). Tampil minimal 3 detik,
+         karena splash screen DBeaver/Workbench sudah mengambil fokus dalam satu detik, lalu
+         tertutup saat jendela Rezure kehilangan fokus, maksimal 20 detik. Tombol Open nonaktif
+         selama itu
+
+Test baru: `tableplus_gets_the_saved_password_encoded_into_its_url`,
+`dbeaver_gets_the_saved_password_when_its_spec_can_carry_it`,
+`heidisql_gets_the_saved_password_only_when_it_can_read_it_back`,
+`workbench_is_told_to_query_with_two_dashes`, serta `exe_icon`: `notepad_has_an_icon` dan dua test
+format `.ico`.
+
+Diverifikasi maintainer di app sungguhan, lewat koneksi SSH remote: TablePlus, DBeaver, HeidiSQL,
+dan konsol MariaDB langsung connect. Workbench membuka dialog passwordnya sendiri.
+
+---
+
 ## Status
 
 Fase 1–4 sudah diimplementasikan. Semua pengecekan otomatis lulus, termasuk test `#[ignore]` dengan
