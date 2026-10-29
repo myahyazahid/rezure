@@ -237,7 +237,7 @@ const ROW_BUTTON_CLASS =
         <li
           v-for="row in store.rows"
           :key="row.projectId"
-          class="glass-inset overflow-hidden rounded-2xl"
+          class="glass-inset shrink-0 overflow-hidden rounded-2xl"
         >
           <div class="p-3.5">
             <div class="flex items-center gap-2">
