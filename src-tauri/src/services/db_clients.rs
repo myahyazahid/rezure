@@ -38,7 +38,8 @@
 //!
 //! # PostgreSQL
 //!
-//! * **TablePlus** — a `postgresql://user@host:port/database` URL.
+//! * **TablePlus** — a `postgresql://user@host:port/database` URL, with the
+//!   saved password in it as for MySQL (see `tableplus_url`).
 //! * **DBeaver** — `-con` with `driver=postgres-jdbc`, read out of its
 //!   PostgreSQL plugin's `plugin.xml` (`postgresql` there is the "(Old)"
 //!   driver it keeps for saved connections).
@@ -55,7 +56,7 @@ use std::process::Command;
 
 use serde::Serialize;
 
-use super::{connections, database, mssql, postgres, postgres_client};
+use super::{connections, database, mssql, postgres, postgres_client, secrets};
 use crate::config::connections::ServerKind;
 use crate::utils::error::AppError;
 
@@ -245,10 +246,13 @@ fn locate(candidate: &Candidate) -> Option<PathBuf> {
 /// reading whichever one this machine happens to have selected.
 #[derive(Debug, Clone)]
 enum Target {
+    /// `password` is the saved connection's, for TablePlus only — see
+    /// [`tableplus_url`]. `None` for Rezure's own passwordless server.
     Mysql {
         host: String,
         port: u16,
         user: String,
+        password: Option<String>,
     },
     /// The SQL Server connection, with its TCP endpoint when it has one.
     Sqlserver {
@@ -259,6 +263,7 @@ enum Target {
         host: String,
         port: u16,
         user: String,
+        password: Option<String>,
     },
 }
 
@@ -270,11 +275,23 @@ fn current_target() -> Target {
         },
         Some(connection) if connection.kind == ServerKind::Postgres => {
             let (host, port, user) = postgres_client::endpoint(&connection);
-            Target::Postgres { host, port, user }
+            let password = secrets::resolve(&connection.id);
+            Target::Postgres {
+                host,
+                port,
+                user,
+                password,
+            }
         }
-        _ => {
+        active => {
             let (host, port, user) = database::endpoint();
-            Target::Mysql { host, port, user }
+            let password = active.and_then(|connection| secrets::resolve(&connection.id));
+            Target::Mysql {
+                host,
+                port,
+                user,
+                password,
+            }
         }
     }
 }
@@ -386,22 +403,104 @@ fn dbeaver_sqlserver_spec(target: &mssql::TcpTarget, database: &str) -> Option<S
     Some(spec)
 }
 
-/// TablePlus's connection URL for PostgreSQL.
-fn tableplus_postgres_url(host: &str, port: u16, user: &str, database: &str) -> Option<String> {
-    let mut url = url::Url::parse(&format!("postgresql://{host}:{port}/{database}")).ok()?;
+/// TablePlus's connection URL for MySQL (`scheme` `mysql`) or PostgreSQL
+/// (`postgresql`), password included when the connection has one saved.
+///
+/// The one place a password goes on a command line, which every other
+/// handoff avoids. TablePlus doesn't prompt for a password a URL leaves
+/// out — it connects without one and fails with "access denied" — and the
+/// port it's given is often a tunnel's, which changes from one session to
+/// the next, so a password saved in TablePlus wouldn't help either. Without
+/// it, Open simply doesn't work for a remote server. The exposure is the
+/// argument list of a process running as this user, visible to that same
+/// user; `url` percent-encodes the password so no character in it can
+/// break the URL.
+fn tableplus_url(
+    scheme: &str,
+    host: &str,
+    port: u16,
+    user: &str,
+    password: Option<&str>,
+    database: &str,
+) -> Option<String> {
+    let mut url = url::Url::parse(&format!("{scheme}://{host}:{port}/{database}")).ok()?;
     url.set_username(user).ok()?;
+    url.set_password(password).ok()?;
     Some(url.to_string())
 }
 
 /// DBeaver's `-con` spec for PostgreSQL — `None` for a value that would split
 /// it, as for SQL Server.
-fn dbeaver_postgres_spec(host: &str, port: u16, user: &str, database: &str) -> Option<String> {
+fn dbeaver_postgres_spec(
+    host: &str,
+    port: u16,
+    user: &str,
+    password: Option<&str>,
+    database: &str,
+) -> Option<String> {
     if [host, user].iter().any(|value| value.contains(['|', '='])) {
         return None;
     }
-    Some(format!(
-        "driver=postgres-jdbc|host={host}|port={port}|database={database}|user={user}|save=false|connect=true"
+    Some(with_dbeaver_password(
+        format!(
+            "driver=postgres-jdbc|host={host}|port={port}|database={database}|user={user}|save=false|connect=true"
+        ),
+        password,
     ))
+}
+
+/// `spec` with DBeaver's `password=` field added, when there's a saved one.
+///
+/// DBeaver is the other exception to keeping passwords off a command line,
+/// for the same reason as TablePlus (see [`tableplus_url`]): with
+/// `connect=true` it connects straight away without asking, and fails with
+/// "access denied". The spec has no escaping, so a password holding `|` or
+/// `=` is left out rather than split into a wrong one — DBeaver then fails
+/// the way it did before, and the user types it in "Edit connection".
+fn with_dbeaver_password(mut spec: String, password: Option<&str>) -> String {
+    if let Some(password) = password.filter(|password| !password.contains(['|', '='])) {
+        spec.push_str(&format!("|password={password}"));
+    }
+    spec
+}
+
+/// HeidiSQL's switches, always in their long `--name=` form.
+///
+/// HeidiSQL finds each switch in the raw command line with a regex along the
+/// lines of `\s(-d|--description)\s*=?\s*(\S+)` — the `=` is optional, and
+/// `-d` (the session name) is looked up before `-db`. So the short
+/// `-db=shop` read as a session named `b=shop`, and 12.8 opened its session
+/// manager on that instead of the server. A long form can't be mistaken for
+/// a short one: the short pattern needs whitespace right before its `-`.
+///
+/// `--databases` is the session's "Databases" field, which limits the tree
+/// to the schemas named. The password goes along for the same reason as for
+/// TablePlus (see [`tableplus_url`]) — HeidiSQL connects without asking —
+/// unless HeidiSQL couldn't read it back: a value it parses must not start
+/// with `-` or contain whitespace or `"`. Such a password is left out, and
+/// the user types it in the session manager.
+fn heidisql_args(
+    host: &str,
+    port: u16,
+    user: &str,
+    password: Option<&str>,
+    database: &str,
+) -> Vec<String> {
+    let mut args = vec![
+        format!("--host={host}"),
+        format!("--port={port}"),
+        format!("--user={user}"),
+    ];
+    let readable = |password: &&str| {
+        !password.is_empty()
+            && !password.starts_with('-')
+            && !password.contains(|c: char| c.is_whitespace() || c == '"')
+    };
+    if let Some(password) = password.filter(readable) {
+        args.push(format!("--password={password}"));
+    }
+    args.push(format!("--databases={database}"));
+    args
 }
 
 /// SSMS's documented flags: `-S` server, `-d` database, then `-E` for
@@ -434,18 +533,38 @@ fn ssms_args(connection: &crate::config::connections::Connection, database: &str
 /// not from localhost: handing off while looking at a remote connection has
 /// to open that server, or the menu quietly lies about what it opens. The
 /// password is deliberately never passed — these clients prompt for it and
-/// store it in their own vault, which is where it belongs.
+/// store it in their own vault, which is where it belongs. TablePlus,
+/// DBeaver and HeidiSQL are the exceptions; [`tableplus_url`] says why.
 fn args_for(target: &Target, id: &str, database: &str) -> Vec<String> {
-    let (host, port, user) = match target {
-        Target::Mysql { host, port, user } => (host, port, user),
-        Target::Postgres { host, port, user } => {
+    let (host, port, user, password) = match target {
+        Target::Mysql {
+            host,
+            port,
+            user,
+            password,
+        } => (host, port, user, password),
+        Target::Postgres {
+            host,
+            port,
+            user,
+            password,
+        } => {
             return match id {
-                "tableplus" => tableplus_postgres_url(host, *port, user, database)
-                    .into_iter()
-                    .collect(),
-                "dbeaver" => dbeaver_postgres_spec(host, *port, user, database)
-                    .map(|spec| vec!["-con".to_string(), spec])
-                    .unwrap_or_default(),
+                "tableplus" => tableplus_url(
+                    "postgresql",
+                    host,
+                    *port,
+                    user,
+                    password.as_deref(),
+                    database,
+                )
+                .into_iter()
+                .collect(),
+                "dbeaver" => {
+                    dbeaver_postgres_spec(host, *port, user, password.as_deref(), database)
+                        .map(|spec| vec!["-con".to_string(), spec])
+                        .unwrap_or_default()
+                }
                 // pgAdmin takes no connection on its command line.
                 _ => Vec::new(),
             };
@@ -465,29 +584,25 @@ fn args_for(target: &Target, id: &str, database: &str) -> Vec<String> {
     };
     match id {
         // TablePlus takes a connection URL directly.
-        "tableplus" => vec![format!("mysql://{user}@{host}:{port}/{database}")],
+        "tableplus" => tableplus_url("mysql", host, *port, user, password.as_deref(), database)
+            .into_iter()
+            .collect(),
         // DBeaver's `-con` takes one pipe-separated spec. `save=false`
         // keeps Rezure from littering the user's DBeaver workspace with a
         // new saved connection on every click.
         "dbeaver" => vec![
             "-con".to_string(),
-            format!(
-                "driver=mariadb|host={host}|port={port}|database={database}|user={user}|save=false|connect=true"
+            with_dbeaver_password(
+                format!(
+                    "driver=mariadb|host={host}|port={port}|database={database}|user={user}|save=false|connect=true"
+                ),
+                password.as_deref(),
             ),
         ],
         // Workbench's `-query` opens a connection to a server, with no way
         // to preselect a schema.
         "workbench" => vec!["-query".to_string(), format!("{user}@{host}:{port}")],
-        // `-db` (long form `--databases`) is HeidiSQL's session "Databases"
-        // field — it limits the tree to the schemas named, `;`-separated.
-        // Undocumented in `--help`; read out of the option table in
-        // heidisql.exe itself (`db | databases`, beside `h | host`).
-        "heidisql" => vec![
-            format!("-h={host}"),
-            format!("-P={port}"),
-            format!("-u={user}"),
-            format!("-db={database}"),
-        ],
+        "heidisql" => heidisql_args(host, *port, user, password.as_deref(), database),
         // Navicat has no documented connection flags — it just opens.
         _ => Vec::new(),
     }
@@ -585,7 +700,10 @@ fn open_console(database: &str) -> Result<(), AppError> {
 /// The database goes in `PGDATABASE` rather than as an argument, which
 /// `psql` would read as a whole connection string if it held an `=`.
 fn open_psql_console(target: &Target, database: &str) -> Result<(), AppError> {
-    let Target::Postgres { host, port, user } = target else {
+    let Target::Postgres {
+        host, port, user, ..
+    } = target
+    else {
         return Err(AppError::UnknownDbClient(PSQL_ID.to_string()));
     };
     let exe = postgres::client_bin_dir()?.join(postgres::CLIENT_EXE);
@@ -617,6 +735,7 @@ mod tests {
             host: "127.0.0.1".to_string(),
             port: 5432,
             user: "postgres".to_string(),
+            password: None,
         }
     }
 
@@ -649,7 +768,7 @@ mod tests {
             ]
         );
         assert!(args_for(&local_postgres(), "pgadmin", "shop").is_empty());
-        assert_eq!(dbeaver_postgres_spec("h|x", 5432, "u", "d"), None);
+        assert_eq!(dbeaver_postgres_spec("h|x", 5432, "u", None, "d"), None);
     }
 
     #[test]
@@ -666,6 +785,7 @@ mod tests {
             host: "127.0.0.1".to_string(),
             port: 3306,
             user: "root".to_string(),
+            password: None,
         }
     }
 
@@ -751,6 +871,37 @@ mod tests {
         assert_eq!(args, vec!["mysql://root@127.0.0.1:3306/blog"]);
     }
 
+    /// TablePlus never prompts, so a saved password has to be in the URL —
+    /// percent-encoded, so `@`, `:` or `/` in it can't break the URL.
+    #[test]
+    fn tableplus_gets_the_saved_password_encoded_into_its_url() {
+        let tunnelled = Target::Mysql {
+            host: "127.0.0.1".to_string(),
+            port: 52011,
+            user: "rezure".to_string(),
+            password: Some("p@ss:w/rd".to_string()),
+        };
+        assert_eq!(
+            args_for(&tunnelled, "tableplus", "rezure_dashboard"),
+            ["mysql://rezure:p%40ss%3Aw%2Frd@127.0.0.1:52011/rezure_dashboard"]
+        );
+        // Workbench still asks for it itself.
+        assert!(args_for(&tunnelled, "workbench", "rezure_dashboard")
+            .iter()
+            .all(|arg| !arg.contains("p@ss")));
+
+        let remote_postgres = Target::Postgres {
+            host: "127.0.0.1".to_string(),
+            port: 5432,
+            user: "postgres".to_string(),
+            password: Some("secret".to_string()),
+        };
+        assert_eq!(
+            args_for(&remote_postgres, "tableplus", "shop"),
+            ["postgresql://postgres:secret@127.0.0.1:5432/shop"]
+        );
+    }
+
     #[test]
     fn dbeaver_gets_one_spec_argument_not_a_shell_string() {
         let args = args_for(&local_mysql(), "dbeaver", "shop_api");
@@ -758,6 +909,33 @@ mod tests {
         assert_eq!(args[0], "-con");
         assert!(args[1].contains("database=shop_api"), "{}", args[1]);
         assert!(args[1].contains("save=false"), "{}", args[1]);
+        assert!(!args[1].contains("password="), "{}", args[1]);
+    }
+
+    /// DBeaver connects without asking, so a saved password goes in its
+    /// spec — unless it holds `|` or `=`, which the spec can't carry.
+    #[test]
+    fn dbeaver_gets_the_saved_password_when_its_spec_can_carry_it() {
+        let with = |password: &str| Target::Mysql {
+            host: "127.0.0.1".to_string(),
+            port: 52011,
+            user: "rezure".to_string(),
+            password: Some(password.to_string()),
+        };
+        let args = args_for(&with("p@ss:w/rd"), "dbeaver", "rezure_dashboard");
+        assert_eq!(args.len(), 2);
+        assert!(args[1].ends_with("|password=p@ss:w/rd"), "{}", args[1]);
+        for unsafe_password in ["a|b", "a=b"] {
+            let args = args_for(&with(unsafe_password), "dbeaver", "rezure_dashboard");
+            assert!(!args[1].contains("password="), "{}", args[1]);
+            assert!(args[1].contains("connect=true"), "{}", args[1]);
+        }
+        assert_eq!(
+            dbeaver_postgres_spec("127.0.0.1", 5432, "postgres", Some("secret"), "shop").as_deref(),
+            Some(
+                "driver=postgres-jdbc|host=127.0.0.1|port=5432|database=shop|user=postgres|save=false|connect=true|password=secret"
+            )
+        );
     }
 
     /// Only the clients checked against a real SQL Server are offered for
@@ -838,7 +1016,40 @@ mod tests {
     #[test]
     fn heidisql_is_handed_the_database_as_its_own_argument() {
         let args = args_for(&local_mysql(), "heidisql", "shop_api");
-        assert_eq!(args.last().map(String::as_str), Some("-db=shop_api"));
+        assert_eq!(
+            args,
+            [
+                "--host=127.0.0.1",
+                "--port=3306",
+                "--user=root",
+                "--databases=shop_api"
+            ]
+        );
+        // Never the short `-db=`, which HeidiSQL reads as `-d` (session
+        // name) `b=shop_api`.
+        assert!(args.iter().all(|arg| arg.starts_with("--")));
+    }
+
+    #[test]
+    fn heidisql_gets_the_saved_password_only_when_it_can_read_it_back() {
+        let with = |password: &str| Target::Mysql {
+            host: "127.0.0.1".to_string(),
+            port: 52011,
+            user: "rezure".to_string(),
+            password: Some(password.to_string()),
+        };
+        let args = args_for(&with("p@ss:w/rd"), "heidisql", "tb_data");
+        assert!(
+            args.contains(&"--password=p@ss:w/rd".to_string()),
+            "{args:?}"
+        );
+        for unreadable in ["has space", "-leading", "quo\"te"] {
+            let args = args_for(&with(unreadable), "heidisql", "tb_data");
+            assert!(
+                args.iter().all(|arg| !arg.starts_with("--password")),
+                "{args:?}"
+            );
+        }
     }
 
     /// Workbench and Navicat can't be pointed at a schema, and say so —
