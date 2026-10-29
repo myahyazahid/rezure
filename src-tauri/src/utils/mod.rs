@@ -4,6 +4,7 @@ pub mod bounded_get;
 pub mod command;
 pub mod elevation;
 pub mod error;
+pub mod exe_icon;
 pub mod migrate;
 pub mod paths;
 pub mod powershell;

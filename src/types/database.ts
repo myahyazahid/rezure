@@ -54,4 +54,7 @@ export interface DbClientInfo {
   /** Whether this client can be opened straight onto one database, or only
    *  onto the server. */
   opensDatabase: boolean
+  /** The client's own icon as a `data:` URL, read out of its `.exe`. `null`
+   *  for the consoles, which show the server's mark instead. */
+  icon: string | null
 }

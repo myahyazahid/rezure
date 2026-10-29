@@ -27,6 +27,30 @@ function errorMessage(e: unknown): string {
  *  message the Rust side produces for a failed connect. */
 const CONNECTION_REFUSED = /\(2002\)|\(2003\)|Can't connect|can't reach/i
 
+/** How long "Opening …" waits for the client's window before giving up on
+ *  seeing it — a cold DBeaver start is around ten seconds. */
+const OPENING_TIMEOUT_MS = 20_000
+
+/** How long "Opening …" stays up at the least. DBeaver's and Workbench's
+ *  splash screens take the focus within a second, long before their real
+ *  window — without this the notice flashed and was gone before it could
+ *  be read. */
+const OPENING_MIN_MS = 3_000
+
+/** Resolves once this window loses the focus, or after `timeoutMs`. */
+function untilWindowBlurs(timeoutMs: number): Promise<void> {
+  if (!document.hasFocus()) return Promise.resolve()
+  return new Promise((resolve) => {
+    const done = () => {
+      window.removeEventListener('blur', done)
+      clearTimeout(timer)
+      resolve()
+    }
+    const timer = setTimeout(done, timeoutMs)
+    window.addEventListener('blur', done)
+  })
+}
+
 export const useDatabasesStore = defineStore('databases', () => {
   const databases = ref<DatabaseInfo[]>([])
   const server = ref<DatabaseServerInfo | null>(null)
@@ -191,12 +215,33 @@ ezure\dumps` and reports back where the file landed. */
     }
   }
 
+  /** The name of the SQL client being started, while it's starting. */
+  const opening = ref<string | null>(null)
+
+  /**
+   * Starts a SQL client on `database`, and keeps `opening` set until its
+   * window is up.
+   *
+   * The Rust side returns the moment the process is spawned, but DBeaver
+   * (a JVM) or Workbench take seconds more to show anything — long enough
+   * that the click looks like it did nothing. There's no portable way to
+   * ask when another app's window appears, but it takes the focus when it
+   * does, and Rezure's window losing it is something the webview reports.
+   * A client that never takes the focus — already open, say — still lets
+   * go after `OPENING_TIMEOUT_MS`. Either way it stays up for at least
+   * `OPENING_MIN_MS`.
+   */
   async function openInClient(client: string, database: string) {
     error.value = null
+    opening.value = clients.value.find((c) => c.id === client)?.name ?? 'the SQL client'
     try {
       await invoke('open_in_db_client', { client, database })
+      await new Promise((resolve) => setTimeout(resolve, OPENING_MIN_MS))
+      await untilWindowBlurs(OPENING_TIMEOUT_MS - OPENING_MIN_MS)
     } catch (e) {
       error.value = errorMessage(e)
+    } finally {
+      opening.value = null
     }
   }
 
@@ -235,6 +280,7 @@ ezure\dumps` and reports back where the file landed. */
     exportDatabase,
     cancelExport,
     importSql,
+    opening,
     openInClient,
     openDumpsFolder,
   }

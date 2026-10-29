@@ -102,15 +102,12 @@ pub fn endpoint() -> (String, u16, String) {
     }
 }
 
-/// Whether a console opened on the active target has to ask for a password.
+/// The saved password of the active target, for a console opened on it.
 ///
-/// Rezure's own server has none, so prompting there would be a step with no
-/// answer. A remote one almost always does, and a console that connects
-/// without offering to supply it just fails with "access denied".
-pub fn endpoint_prompts_for_password() -> bool {
-    connections::active()
-        .map(|connection| secrets::resolve(&connection.id).is_some())
-        .unwrap_or(false)
+/// `None` for Rezure's own server, which has none, and for a connection
+/// whose password isn't known.
+pub fn endpoint_password() -> Option<String> {
+    connections::active().and_then(|connection| secrets::resolve(&connection.id))
 }
 
 /// Schemas MariaDB itself owns — never listed, never droppable.

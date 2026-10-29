@@ -98,23 +98,29 @@ const switchingProfile = computed(() => {
 })
 
 /**
- * The three slow paths on this page, most disruptive first.
+ * The four slow paths on this page, most disruptive first.
  *
  * Switching a profile wins because it stops and restarts the server itself,
  * so it invalidates everything else on screen. Import beats export because
- * it's the one the user just confirmed in a dialog. Creating a database is a
- * single fast statement and keeps the modal button as its only feedback.
+ * it's the one the user just confirmed in a dialog. Opening a SQL client
+ * comes last: it changes nothing here, it only waits for another app.
+ * Creating a database is a single fast statement and keeps the modal button
+ * as its only feedback.
  */
 const busyLabel = computed(() => {
   if (switchingProfile.value) return `Switching to ${switchingProfile.value}…`
   if (store.importingInto) return `Importing into ${store.importingInto}…`
   if (store.busy) return `Exporting ${store.busy}…`
+  if (store.opening) return `Opening ${store.opening}…`
   return ''
 })
 
 const busyDetail = computed(() => {
   if (switchingProfile.value) return 'Pointing the server at a different data directory.'
   if (store.importingInto) return `Reading the dump into ${store.server?.label ?? 'the server'}.`
+  if (store.opening && !store.busy) {
+    return 'Some apps take a few seconds to start. This closes once its window is up.'
+  }
   // Worth saying for a remote dump: it crosses the network and can take
   // minutes, where a local one is effectively instant.
   if (isSqlServer.value) return 'Writing a .bak backup to C:\\rezure\\dumps.'

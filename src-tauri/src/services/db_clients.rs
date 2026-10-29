@@ -59,6 +59,7 @@ use serde::Serialize;
 use super::{connections, database, mssql, postgres, postgres_client, secrets};
 use crate::config::connections::ServerKind;
 use crate::utils::error::AppError;
+use crate::utils::exe_icon;
 
 /// Opens the process in its own console window instead of inheriting
 /// Rezure's (which, as a GUI app, doesn't have one).
@@ -74,6 +75,9 @@ pub struct DbClientInfo {
     /// ones that can't still open on the right server — the UI says so
     /// rather than silently opening something else than asked for.
     pub opens_database: bool,
+    /// The client's own icon, read out of its `.exe`, as a `data:` URL —
+    /// `None` for the consoles, which the frontend gives the server's mark.
+    pub icon: Option<String>,
 }
 
 /// Where a client might be installed, and what it's called.
@@ -342,6 +346,7 @@ fn menu_for(target: &Target, installed: impl Fn(&Candidate) -> bool) -> Vec<DbCl
             id: candidate.id.to_string(),
             name: candidate.name.to_string(),
             opens_database: candidate.opens_database,
+            icon: None,
         })
         .collect();
 
@@ -350,11 +355,13 @@ fn menu_for(target: &Target, installed: impl Fn(&Candidate) -> bool) -> Vec<DbCl
             id: CLI_ID.to_string(),
             name: "MariaDB console (bundled)".to_string(),
             opens_database: true,
+            icon: None,
         }),
         ServerKind::Postgres => found.push(DbClientInfo {
             id: PSQL_ID.to_string(),
             name: "psql console".to_string(),
             opens_database: true,
+            icon: None,
         }),
         ServerKind::Sqlserver => {}
     }
@@ -364,7 +371,15 @@ fn menu_for(target: &Target, installed: impl Fn(&Candidate) -> bool) -> Vec<DbCl
 /// Every SQL client Rezure can find for the kind of server the Databases
 /// page is reading, plus — for MySQL and PostgreSQL — a console one.
 pub fn detect() -> Vec<DbClientInfo> {
-    menu_for(&current_target(), |candidate| locate(candidate).is_some())
+    let mut menu = menu_for(&current_target(), |candidate| locate(candidate).is_some());
+    for client in &mut menu {
+        client.icon = CANDIDATES
+            .iter()
+            .find(|candidate| candidate.id == client.id)
+            .and_then(locate)
+            .and_then(|exe| exe_icon::data_url(&exe));
+    }
+    menu
 }
 
 /// TablePlus's connection URL for a SQL Server login.
@@ -599,9 +614,12 @@ fn args_for(target: &Target, id: &str, database: &str) -> Vec<String> {
                 password.as_deref(),
             ),
         ],
-        // Workbench's `-query` opens a connection to a server, with no way
-        // to preselect a schema.
-        "workbench" => vec!["-query".to_string(), format!("{user}@{host}:{port}")],
+        // Workbench's `--query <user>@<host>:<port>` opens a connection to a
+        // server, with no way to preselect a schema; Workbench asks for the
+        // password itself. Two dashes: 8.0.47 doesn't know `-query`, takes
+        // the connection string for a file to open ("Unknown file type" in
+        // its wb.log) and stays on its home screen.
+        "workbench" => vec!["--query".to_string(), format!("{user}@{host}:{port}")],
         "heidisql" => heidisql_args(host, *port, user, password.as_deref(), database),
         // Navicat has no documented connection flags — it just opens.
         _ => Vec::new(),
@@ -675,10 +693,14 @@ fn open_console(database: &str) -> Result<(), AppError> {
         .args(["-u", &user])
         .arg(database);
 
-    // `-p` with no value makes the client prompt in its own console, so the
-    // password reaches it without passing through an argument list.
-    if database::endpoint_prompts_for_password() {
-        cmd.arg("-p");
+    // The saved password goes in `MYSQL_PWD`, set on this one child only —
+    // the way `tunnel` hands `ssh` its password — so the console connects
+    // straight away, like the GUI clients, and the password never shows in
+    // an argument list. The client reads it at startup; the TempDefaults
+    // file `database` uses elsewhere would have to outlive a console of
+    // unknown lifetime.
+    if let Some(password) = database::endpoint_password() {
+        cmd.env("MYSQL_PWD", password);
     }
 
     #[cfg(windows)]
@@ -1028,6 +1050,14 @@ mod tests {
         // Never the short `-db=`, which HeidiSQL reads as `-d` (session
         // name) `b=shop_api`.
         assert!(args.iter().all(|arg| arg.starts_with("--")));
+    }
+
+    #[test]
+    fn workbench_is_told_to_query_with_two_dashes() {
+        assert_eq!(
+            args_for(&local_mysql(), "workbench", "blog"),
+            ["--query", "root@127.0.0.1:3306"]
+        );
     }
 
     #[test]

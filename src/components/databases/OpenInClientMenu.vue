@@ -1,6 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useDatabasesStore } from '@/stores/databases'
+import TechIcon from '@/components/common/TechIcon.vue'
+
+/** The server's mark for a console entry, which has no `.exe` icon of its
+ *  own worth showing (`services::db_clients` ids on the Rust side). */
+const CONSOLE_MARKS: Record<string, string> = {
+  'mariadb-cli': 'mariadb',
+  'psql-cli': 'postgres',
+}
 
 const props = defineProps<{ database: string }>()
 
@@ -104,7 +112,8 @@ onUnmounted(() => {
     <button
       ref="button"
       type="button"
-      class="glass-accent flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-sm font-semibold transition select-none"
+      class="glass-accent flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-sm font-semibold transition select-none disabled:opacity-50"
+      :disabled="Boolean(store.opening)"
       :title="
         single
           ? `Open ${props.database} in ${single.name}`
@@ -151,8 +160,14 @@ onUnmounted(() => {
           class="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left text-sm transition hover:bg-white/50 dark:hover:bg-white/5"
           @click="activate(client.id)"
         >
-          <span class="truncate font-medium text-neutral-800 dark:text-neutral-100">
-            {{ client.name }}
+          <span class="flex min-w-0 items-center gap-2.5">
+            <img v-if="client.icon" :src="client.icon" alt="" class="h-5 w-5 shrink-0" />
+            <span v-else class="flex h-5 w-5 shrink-0 items-center justify-center">
+              <TechIcon :id="CONSOLE_MARKS[client.id] ?? client.id" :size="18" />
+            </span>
+            <span class="truncate font-medium text-neutral-800 dark:text-neutral-100">
+              {{ client.name }}
+            </span>
           </span>
           <!-- Workbench and Navicat can only be pointed at a server, so the
                menu says so rather than letting the click look like it failed. -->
