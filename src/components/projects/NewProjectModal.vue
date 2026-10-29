@@ -22,7 +22,7 @@ const nameError = computed(() => {
   if (!value) return null
   if (value.length > 64) return 'Keep it under 64 characters.'
   if (!NAME_PATTERN.test(value)) {
-    return 'Lowercase letters, digits, and hyphens only — no spaces.'
+    return 'Lowercase letters, digits, and hyphens only - no spaces.'
   }
   if (store.projects.some((p) => p.id === value)) {
     return `A project named "${value}" already exists.`
@@ -84,7 +84,7 @@ watch(name, () => {
           <h2 class="text-xl font-bold tracking-tight">New project</h2>
           <p class="mt-0.5 text-sm text-neutral-500">
             {{
-              step === 1 ? 'Step 1 of 2 — pick a starting point' : 'Step 2 of 2 — name it and go'
+              step === 1 ? 'Step 1 of 2 - pick a starting point' : 'Step 2 of 2 - name it and go'
             }}
           </p>
         </div>
@@ -138,7 +138,7 @@ watch(name, () => {
         </label>
 
         <p class="mt-1 text-xs text-neutral-400">
-          Node-based starters (Vue, React, ...) aren't available yet — Rezure doesn't bundle
+          Node-based starters (Vue, React, ...) aren't available yet - Rezure doesn't bundle
           Node.js/npm. Let me know if that's worth adding next.
         </p>
 
@@ -202,11 +202,11 @@ watch(name, () => {
         <p v-if="store.creating" class="mt-3 text-xs text-neutral-500">
           Creating project…
           <template v-if="selectedTemplateId === 'laravel'">
-            Composer is resolving and downloading dependencies — this typically takes 3-6 minutes,
+            Composer is resolving and downloading dependencies - this typically takes 3-6 minutes,
             longer on a slow connection. Keep this open.
           </template>
           <template v-else-if="selectedTemplateId === 'wordpress'">
-            downloading WordPress core — usually around a minute.
+            downloading WordPress core - usually around a minute.
           </template>
         </p>
         <p v-if="store.createError" class="mt-3 text-sm text-red-600 dark:text-red-400">

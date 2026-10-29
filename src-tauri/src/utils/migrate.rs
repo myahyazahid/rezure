@@ -304,7 +304,7 @@ pub fn run() -> usize {
                 moved += 1;
             }
             Err(err) => log::warn!(
-                "migration: could not move {} from {}: {err} — it stays where it is",
+                "migration: could not move {} from {}: {err} - it stays where it is",
                 step.what,
                 step.from.display()
             ),

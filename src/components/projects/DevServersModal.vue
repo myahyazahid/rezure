@@ -135,7 +135,7 @@ function toggleLog(row: DevServerRow) {
 function issueText(issue: DevServerIssue): string {
   switch (issue.kind) {
     case 'noPackageJson':
-      return 'No package.json in this folder — there is nothing to run.'
+      return 'No package.json in this folder - there is nothing to run.'
     case 'nodeMissing':
       return issue.version
         ? `Set to Node.js ${issue.version}, which isn't installed.`
@@ -144,15 +144,15 @@ function issueText(issue: DevServerIssue): string {
       return `This project uses ${issue.tool}, which isn't installed. Run "corepack enable" in a terminal, or install ${issue.tool}.`
     case 'scriptMissing':
       return issue.script
-        ? `package.json has no "${issue.script}" script — pick another below.`
-        : 'package.json has no dev or start script — pick the one that runs the server.'
+        ? `package.json has no "${issue.script}" script - pick another below.`
+        : 'package.json has no dev or start script - pick the one that runs the server.'
     case 'needsInstall':
       return "Its dependencies aren't installed yet."
     case 'alreadyRunning': {
       const where = issue.servers
         .map((s) => `${s.name}, pid ${s.pid}, on ${s.ports.map((p) => `:${p}`).join(' ')}`)
         .join('; ')
-      return `It's already running outside Rezure (${where}) — probably an "npm run dev" in a terminal. A second copy can't start beside it.`
+      return `It's already running outside Rezure (${where}) - probably an "npm run dev" in a terminal. A second copy can't start beside it.`
     }
   }
 }
@@ -229,7 +229,7 @@ const ROW_BUTTON_CLASS =
 
       <p v-else-if="store.rows.length === 0" class="my-8 text-center text-sm text-neutral-500">
         No project here runs a dev server. Projects detected as Vue, React, Svelte, Angular, Astro,
-        Next.js, Nuxt or Node show up here — or pick one of those frameworks from a project's
+        Next.js, Nuxt or Node show up here - or pick one of those frameworks from a project's
         framework badge.
       </p>
 

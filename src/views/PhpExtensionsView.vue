@@ -134,7 +134,7 @@ async function toggle(ext: BundledExtension) {
         <h1 class="text-[28px] leading-tight font-bold tracking-tight">PHP Extensions</h1>
         <p class="mt-1 text-sm text-neutral-500">
           Turn on extensions this PHP zip already ships in <code class="font-mono">ext/</code>, or
-          install the few it doesn't (Redis, SQL Server) — no hand-edited
+          install the few it doesn't (Redis, SQL Server) - no hand-edited
           <code class="font-mono">.ini</code> fragment.
         </p>
       </div>
@@ -187,7 +187,7 @@ async function toggle(ext: BundledExtension) {
       v-if="store.versions.length === 0"
       class="glass mt-6 rounded-2xl p-6 text-center text-sm text-neutral-500"
     >
-      No PHP version installed yet — install one from
+      No PHP version installed yet - install one from
       <RouterLink to="/switch" class="font-semibold text-accent-600 hover:underline"
         >Switch</RouterLink
       >
@@ -199,7 +199,7 @@ async function toggle(ext: BundledExtension) {
         v-if="runningThisVersion"
         class="mt-4 rounded-xl bg-amber-100/50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
       >
-        PHP {{ selectedVersion }} is running right now — restart it (Dashboard → PHP) for a toggle
+        PHP {{ selectedVersion }} is running right now - restart it (Dashboard → PHP) for a toggle
         here to reach requests it's already serving.
       </p>
 
@@ -252,7 +252,7 @@ async function toggle(ext: BundledExtension) {
                   <span
                     v-if="ext.debugOnly"
                     class="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
-                    title="Environment-dependent or debug-only — not an ordinary extension."
+                    title="Environment-dependent or debug-only - not an ordinary extension."
                   >
                     special
                   </span>

@@ -491,7 +491,7 @@ fn validate(def: &FrameworkDef) -> Result<(), String> {
     if let Some(docroot) = &def.docroot {
         if def.serve == ServeProfile::Proxy {
             return Err(
-                "a \"proxy\" framework has no docroot — nginx passes every request to its dev server"
+                "a \"proxy\" framework has no docroot - nginx passes every request to its dev server"
                     .to_string(),
             );
         }
@@ -583,17 +583,17 @@ fn parse_definitions(content: &str, origin: &str, problems: &mut Vec<String>) ->
         let def = match serde_json::from_value::<FrameworkDef>(raw) {
             Ok(def) => def,
             Err(err) => {
-                problems.push(format!("{origin}: {name} was skipped — {err}"));
+                problems.push(format!("{origin}: {name} was skipped - {err}"));
                 continue;
             }
         };
         if let Err(reason) = validate(&def) {
-            problems.push(format!("{origin}: {name} was skipped — {reason}"));
+            problems.push(format!("{origin}: {name} was skipped - {reason}"));
             continue;
         }
         if !seen.insert(def.id.clone()) {
             problems.push(format!(
-                "{origin}: {name} was skipped — that id is already used above it"
+                "{origin}: {name} was skipped - that id is already used above it"
             ));
             continue;
         }

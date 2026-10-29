@@ -76,6 +76,7 @@ pub fn run() {
                 commands::projects::preview_project_link,
                 commands::projects::link_project,
                 commands::projects::unlink_project,
+                commands::projects::delete_project,
                 commands::projects::set_project_php_version,
                 commands::projects::set_project_node_version,
                 commands::projects::list_frameworks,

@@ -194,7 +194,7 @@ const PATH_ROWS = [
         Where things live
       </h2>
       <p class="mt-0.5 text-xs text-neutral-500">
-        Read-only — Rezure scans these folders directly, so there's nothing to redirect.
+        Read-only - Rezure scans these folders directly, so there's nothing to redirect.
       </p>
 
       <div class="glass mt-3 divide-y divide-neutral-900/8 rounded-2xl dark:divide-white/8">
@@ -211,7 +211,7 @@ const PATH_ROWS = [
           >
             {{ settingsStore.storagePaths[row.key] }}
           </span>
-          <span v-else class="text-xs text-neutral-400">—</span>
+          <span v-else class="text-xs text-neutral-400">-</span>
         </div>
       </div>
     </div>

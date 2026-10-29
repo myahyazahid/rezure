@@ -302,12 +302,12 @@ const hasPhpConfig = computed(
     </div>
     <p v-if="customPhpCount > 0" class="mt-2 text-xs text-neutral-400">
       {{ customPhpCount }} PHP {{ customPhpCount === 1 ? 'version was' : 'versions were' }} added by
-      hand — Rezure didn't checksum those.
+      hand - Rezure didn't checksum those.
     </p>
     <p class="mt-2 text-xs text-neutral-400">
       The PHP and Node.js versions picked here are what a project's terminal uses unless that
       project pins its own (see the PHP and Node icons on a project's card). Python isn't available
-      yet — it publishes no checksum Rezure can verify a download against.
+      yet - it publishes no checksum Rezure can verify a download against.
     </p>
     <p v-if="postgresStore.versions.length > 1" class="mt-2 text-xs text-neutral-400">
       Each PostgreSQL major keeps its own databases: switching from one to another starts on that

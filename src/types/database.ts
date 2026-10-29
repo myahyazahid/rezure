@@ -31,6 +31,9 @@ export interface DatabaseServerInfo {
   /** False where Export can't work — a SQL Server Rezure doesn't run, whose
    *  BACKUP would land on that server's own disk. */
   exportSupported: boolean
+  /** True only for the local MySQL-family server: the one place Delete is
+   *  offered. Every connection — remote, PostgreSQL, SQL Server — is false. */
+  dropSupported: boolean
   /** What Import accepts, without the dot: `sql`, plus `bak` on LocalDB. */
   importExtensions: string[]
 }

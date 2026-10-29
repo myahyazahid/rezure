@@ -58,10 +58,10 @@ async function setShown(service: ManagedService, shown: boolean) {
 /** What adding or removing this row means, beyond the obvious. */
 function notes(service: ManagedService): string[] {
   const list: string[] = []
-  if (service.shown && service.running) list.push('Running — removing it stops it first')
+  if (service.shown && service.running) list.push('Running - removing it stops it first')
   if (service.shown && service.servesSites) list.push('Your project sites need it')
   if (!service.installed) {
-    list.push(service.shown ? 'Not installed' : 'Not installed — its card offers Install')
+    list.push(service.shown ? 'Not installed' : 'Not installed - its card offers Install')
   }
   return list
 }
@@ -99,7 +99,7 @@ const ROW_BUTTON_CLASS =
       <h2 class="text-xl font-bold tracking-tight">Manage services</h2>
       <p class="mt-1 text-sm text-neutral-500">
         Choose what the Services page shows. Removing a service doesn't uninstall it or touch its
-        data — add it back any time.
+        data - add it back any time.
       </p>
 
       <div v-if="loading" class="my-10 flex justify-center">
@@ -121,7 +121,7 @@ const ROW_BUTTON_CLASS =
               {{ group.title }}
             </h3>
             <p v-if="group.items.length === 0" class="text-sm text-neutral-500">
-              Nothing yet — add a service below.
+              Nothing yet - add a service below.
             </p>
             <ul class="flex flex-col gap-2">
               <li

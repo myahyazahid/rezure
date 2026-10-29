@@ -36,7 +36,7 @@ pub(crate) async fn start_and_wait(service: ServiceHandle) -> Result<ServiceInfo
             ServiceStatus::Running => Ok(info),
             _ => Err(AppError::DevServerFailed {
                 name: info.name,
-                reason: "it stopped while starting — see its log in Dev servers".to_string(),
+                reason: "it stopped while starting - see its log in Dev servers".to_string(),
             }),
         }
     })

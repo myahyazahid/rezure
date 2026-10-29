@@ -391,25 +391,25 @@ impl DevServerIssue {
         match self {
             Self::NoPackageJson => "the project has no package.json".to_string(),
             Self::NodeMissing { version: Some(version) } => {
-                format!("it's set to Node.js {version}, which isn't installed — install it on the Switch page")
+                format!("it's set to Node.js {version}, which isn't installed - install it on the Switch page")
             }
             Self::NodeMissing { version: None } => {
-                "Node.js isn't installed — install it on the Switch page".to_string()
+                "Node.js isn't installed - install it on the Switch page".to_string()
             }
             Self::PackageManagerMissing { tool } => format!(
-                "the project uses {tool}, which isn't installed — run `corepack enable` (or install {tool}) in a terminal"
+                "the project uses {tool}, which isn't installed - run `corepack enable` (or install {tool}) in a terminal"
             ),
             Self::ScriptMissing { script: Some(script) } => {
-                format!("package.json has no \"{script}\" script — pick another in Dev servers")
+                format!("package.json has no \"{script}\" script - pick another in Dev servers")
             }
             Self::ScriptMissing { script: None } => {
-                "package.json has no dev or start script — pick one in Dev servers".to_string()
+                "package.json has no dev or start script - pick one in Dev servers".to_string()
             }
             Self::NeedsInstall => {
-                "its dependencies aren't installed — click Install in Dev servers".to_string()
+                "its dependencies aren't installed - click Install in Dev servers".to_string()
             }
             Self::AlreadyRunning { servers } => format!(
-                "a dev server for this project is already running outside Rezure ({}) — stop it from Dev servers (\"Stop it and start here\"), or close the terminal it runs in",
+                "a dev server for this project is already running outside Rezure ({}) - stop it from Dev servers (\"Stop it and start here\"), or close the terminal it runs in",
                 servers
                     .iter()
                     .map(OutsideServer::describe)
@@ -584,7 +584,7 @@ pub fn stop_outside(spec: &DevSpec) -> Result<(), AppError> {
     }
     Err(AppError::DevServerFailed {
         name: spec.name.clone(),
-        reason: "the dev server running outside Rezure didn't let go of its port — close the terminal it runs in".to_string(),
+        reason: "the dev server running outside Rezure didn't let go of its port - close the terminal it runs in".to_string(),
     })
 }
 
@@ -642,14 +642,14 @@ pub fn summarize_failure(lines: &[String]) -> String {
         || all.contains("another instance")
     {
         Some(
-            "Another copy of this dev server is still running — stop it (Dev servers offers to) and start again",
+            "Another copy of this dev server is still running - stop it (Dev servers offers to) and start again",
         )
     } else if all.contains("cannot find module")
         || all.contains("err_module_not_found")
         || all.contains("is not recognized as an internal or external command")
         || all.contains("command not found")
     {
-        Some("Its dependencies look incomplete — run Install in Dev servers, then start again")
+        Some("Its dependencies look incomplete - run Install in Dev servers, then start again")
     } else {
         None
     };
@@ -854,7 +854,7 @@ pub fn install(spec: &DevSpec, sink: &LogSink) -> Result<(), AppError> {
     if status.success() {
         Ok(())
     } else {
-        Err(failed(format!("{line} failed ({status}) — see its log")))
+        Err(failed(format!("{line} failed ({status}) - see its log")))
     }
 }
 

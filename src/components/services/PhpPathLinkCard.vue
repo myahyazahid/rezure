@@ -38,7 +38,7 @@ onMounted(() => {
         </p>
         <p class="mt-0.5 text-xs text-neutral-500">
           Puts the active version on your PATH, so <code class="font-mono">php</code> works in every
-          terminal — not only the ones Rezure opens.
+          terminal - not only the ones Rezure opens.
         </p>
       </div>
 
@@ -79,11 +79,11 @@ onMounted(() => {
            can't reach a shell that already started, but re-pointing the
            link later can, because the entry is in its PATH by then. -->
       <p class="text-xs text-neutral-500">
-        Open a <strong>new</strong> terminal to pick this up — ones already open keep the PATH they
+        Open a <strong>new</strong> terminal to pick this up - ones already open keep the PATH they
         started with. After that, switching versions reaches them too.
       </p>
       <p v-if="!status.inSync" class="text-xs text-amber-700 dark:text-amber-300">
-        The link is out of sync — switch a version to re-point it.
+        The link is out of sync - switch a version to re-point it.
       </p>
     </div>
 

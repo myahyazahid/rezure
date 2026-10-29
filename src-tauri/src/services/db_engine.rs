@@ -320,7 +320,7 @@ mod tests {
         fs::write(dir.join("ibdata1"), b"").unwrap();
         assert!(
             !needs_bootstrap(&dir),
-            "a folder with contents is somebody's data — never touch it"
+            "a folder with contents is somebody's data - never touch it"
         );
         fs::remove_dir_all(&dir).unwrap();
     }

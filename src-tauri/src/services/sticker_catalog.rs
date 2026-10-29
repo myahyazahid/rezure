@@ -225,7 +225,7 @@ pub fn cached_sticker(id: &str) -> Result<CatalogSticker, AppError> {
         .and_then(|cache| cache.stickers.into_iter().find(|s| s.id == id))
         .ok_or_else(|| {
             AppError::StickerFailed(
-                "That sticker isn't in the catalog any more — refresh Browse and try again."
+                "That sticker isn't in the catalog any more - refresh Browse and try again."
                     .to_string(),
             )
         })

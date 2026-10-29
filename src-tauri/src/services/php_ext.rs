@@ -134,7 +134,7 @@ pub const CATALOG: &[PeclExtension] = &[
         id: "pdo_sqlsrv",
         name: "PDO SQL Server",
         version: "5.13.3",
-        summary: "Microsoft's SQL Server driver for PDO — what Laravel's sqlsrv connection uses.",
+        summary: "Microsoft's SQL Server driver for PDO - what Laravel's sqlsrv connection uses.",
         requires_odbc: true,
         builds: &[
             PeclBuild {

@@ -109,7 +109,7 @@ fn linked_projects(
     for link in store.links {
         if taken.iter().any(|d| d.eq_ignore_ascii_case(&link.domain)) {
             log::warn!(
-                "linked project {} wants {}, which is already served — skipping it",
+                "linked project {} wants {}, which is already served - skipping it",
                 link.path,
                 link.domain
             );
@@ -575,7 +575,7 @@ pub fn link(
                 return Err(AppError::UnusableProjectPath {
                     path: path.to_string(),
                     reason: format!(
-                        "{requested} isn't a usable domain — use letters, digits and hyphens only"
+                        "{requested} isn't a usable domain - use letters, digits and hyphens only"
                     ),
                 });
             }
@@ -623,24 +623,68 @@ pub fn unlink(id: &str) -> Result<(), AppError> {
     let mut store = links::load();
     links::remove(&mut store, id)?;
     links::save(&store)?;
+    forget_settings(id, "unlinked");
+    Ok(())
+}
 
-    // Best-effort: a leftover override only matters if the same folder is
-    // linked again under the same name, and `link` resets it then anyway.
+/// Deletes a project that lives in `www`: its folder goes to the Recycle
+/// Bin, and the framework and dev server settings chosen for it are
+/// forgotten.
+///
+/// Only a scanned project — a linked one is a folder somewhere else that
+/// the user pointed Rezure at, which is unlinked, never deleted. The folder
+/// must also sit directly inside `www_root()`, checked on the real paths,
+/// so nothing that resolves anywhere else (a junction, a hand-edited id) can
+/// be sent to the bin. Stopping its dev server and dropping its vhost are
+/// the command's job, around this.
+pub fn delete(id: &str) -> Result<(), AppError> {
+    let project = find(id)?;
+    if project.kind != ProjectKind::Scanned {
+        return Err(AppError::ProjectDeleteFailed(format!(
+            "{} is linked from a folder outside www - remove it from Rezure instead, which \
+             leaves the folder alone",
+            project.name
+        )));
+    }
+    let folder = PathBuf::from(&project.path);
+    if !is_directly_inside(&www_root()?, &folder) {
+        return Err(AppError::ProjectDeleteFailed(format!(
+            "{} isn't a folder directly inside the www folder",
+            folder.display()
+        )));
+    }
+    crate::utils::recycle_bin::move_to_recycle_bin(&folder)
+        .map_err(|e| AppError::ProjectDeleteFailed(e.to_string()))?;
+    forget_settings(id, "deleted");
+    Ok(())
+}
+
+/// Whether `folder` is an immediate child of `root`, compared on the
+/// canonical paths so `..`, symlinks and junctions can't pass for one.
+fn is_directly_inside(root: &Path, folder: &Path) -> bool {
+    match (fs::canonicalize(root), fs::canonicalize(folder)) {
+        (Ok(root), Ok(folder)) => folder.parent() == Some(root.as_path()),
+        _ => false,
+    }
+}
+
+/// Forgets the framework and dev server settings chosen for a project that
+/// is gone. Best-effort: a leftover override only matters if a project of
+/// the same name appears again, and a port still held by a project that's
+/// gone is one no other project can be given.
+fn forget_settings(id: &str, what: &str) {
     let mut overrides = project_frameworks::load();
     if overrides.set(id, None) {
         if let Err(err) = project_frameworks::save(&overrides) {
-            log::warn!("unlinked {id} but couldn't forget its framework choice: {err}");
+            log::warn!("{what} {id} but couldn't forget its framework choice: {err}");
         }
     }
-    // Same for its dev server — and a port still held by a project that's
-    // gone is one no other project can be given.
     let mut dev = dev_servers::load();
     if dev.set(id, None) {
         if let Err(err) = dev_servers::save(&dev) {
-            log::warn!("unlinked {id} but couldn't forget its dev server settings: {err}");
+            log::warn!("{what} {id} but couldn't forget its dev server settings: {err}");
         }
     }
-    Ok(())
 }
 
 /// Sets, or with `None` clears back to detection, the framework a project is
@@ -676,7 +720,7 @@ pub fn framework_catalog() -> Result<FrameworkCatalog, AppError> {
         if let Some(FrameworkOverride::Framework(id)) = overrides.get(&project.id) {
             if registry.get(id).is_none() {
                 catalog.problems.push(format!(
-                    "{} is set to the framework \"{id}\", which isn't defined any more — it's served as detected until you pick another.",
+                    "{} is set to the framework \"{id}\", which isn't defined any more - it's served as detected until you pick another.",
                     project.name
                 ));
             }
@@ -688,6 +732,25 @@ pub fn framework_catalog() -> Result<FrameworkCatalog, AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Delete only ever reaches a folder directly inside `www` — not the
+    /// root itself, not a grandchild, not a sibling reached through `..`.
+    #[test]
+    fn only_a_direct_child_of_www_counts_as_inside_it() {
+        let base = std::env::temp_dir().join(format!("rezure-inside-test-{}", std::process::id()));
+        let www = base.join("www");
+        let project = www.join("shop");
+        fs::create_dir_all(project.join("public")).unwrap();
+        fs::create_dir_all(base.join("elsewhere")).unwrap();
+
+        assert!(is_directly_inside(&www, &project));
+        assert!(!is_directly_inside(&www, &www));
+        assert!(!is_directly_inside(&www, &project.join("public")));
+        assert!(!is_directly_inside(&www, &www.join("..").join("elsewhere")));
+        assert!(!is_directly_inside(&www, &www.join("does-not-exist")));
+
+        fs::remove_dir_all(&base).unwrap();
+    }
 
     #[test]
     fn ordinary_folder_names_are_servable() {
@@ -1058,7 +1121,7 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(&dir);
-        println!("linked, listed, unlinked — folder left intact");
+        println!("linked, listed, unlinked - folder left intact");
     }
 
     /// Manual, real-filesystem check against whatever's actually in

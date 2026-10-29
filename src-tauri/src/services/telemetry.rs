@@ -394,7 +394,7 @@ pub async fn send_pending(app: &tauri::AppHandle) {
                 }
             }
             Ok(response) if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS => {
-                log::warn!("telemetry rate-limited — resuming next cycle");
+                log::warn!("telemetry rate-limited - resuming next cycle");
                 break;
             }
             Ok(response) if is_permanent_rejection(response.status()) => {

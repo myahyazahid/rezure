@@ -49,7 +49,7 @@ const nameError = computed(() => {
   if (!value) return null
   if (value.length > 64) return 'Keep it under 64 characters.'
   if (!NAME_PATTERN.test(value)) {
-    return 'Letters, digits, underscores and hyphens only — no spaces.'
+    return 'Letters, digits, underscores and hyphens only - no spaces.'
   }
   if (store.databases.some((db) => db.name.toLowerCase() === value.toLowerCase())) {
     return `A database named "${value}" already exists.`
@@ -97,7 +97,7 @@ watch(name, () => {
     <div class="glass-strong w-full max-w-md rounded-3xl p-6">
       <h2 class="text-xl font-bold tracking-tight">New database</h2>
       <p class="mt-0.5 text-sm text-neutral-500">
-        Created on {{ store.server?.label || 'the database server' }} — empty, with no tables.
+        Created on {{ store.server?.label || 'the database server' }} - empty, with no tables.
       </p>
 
       <label class="mt-5 block text-xs font-medium text-neutral-500">Database name</label>

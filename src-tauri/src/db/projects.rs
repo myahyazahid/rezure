@@ -143,6 +143,15 @@ pub fn record_opened(conn: &Connection, id: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Drops a deleted project's row — its open history and its PHP and Node.js
+/// pins — so a new project created under the same name starts clean rather
+/// than inheriting them.
+pub fn forget(conn: &Connection, id: &str) -> Result<(), AppError> {
+    conn.execute("DELETE FROM projects WHERE id = ?1", [id])
+        .map_err(db_err)?;
+    Ok(())
+}
+
 /// Every project's history, keyed by id, for merging into a freshly scanned
 /// list.
 pub fn fetch_history(conn: &Connection) -> Result<HashMap<String, (Option<i64>, i64)>, AppError> {
@@ -318,6 +327,20 @@ mod tests {
 
         let history = fetch_history(&conn).unwrap();
         assert_eq!(history.get("blog"), Some(&(None, 0)));
+    }
+
+    /// A project created again under a deleted one's name starts clean.
+    #[test]
+    fn a_forgotten_project_loses_its_history_and_pins() {
+        let conn = init_migrations_for_test();
+        upsert_seen(&conn, &sample("blog")).unwrap();
+        record_opened(&conn, "blog").unwrap();
+        set_php_version(&conn, "blog", Some("8.3.0")).unwrap();
+
+        forget(&conn, "blog").unwrap();
+
+        assert_eq!(history_for(&conn, "blog").unwrap(), (None, 0));
+        assert_eq!(php_version_for(&conn, "blog").unwrap(), None);
     }
 
     #[test]

@@ -1398,7 +1398,7 @@ impl ProcessService {
         if !stopped_cleanly {
             if graceful && self.is_stateful() {
                 log::warn!(
-                    "{} did not shut down cleanly in {}s — force-killing it",
+                    "{} did not shut down cleanly in {}s - force-killing it",
                     self.id,
                     GRACEFUL_SHUTDOWN_TIMEOUT.as_secs()
                 );
@@ -1441,7 +1441,7 @@ impl ProcessService {
                 if !held.is_empty() && !held.contains(&spec.port) {
                     let held: Vec<String> = held.iter().map(|port| format!(":{port}")).collect();
                     return Err(format!(
-                        "it's listening on {} instead of :{} — set that port in Dev servers, or make the app use :{}",
+                        "it's listening on {} instead of :{} - set that port in Dev servers, or make the app use :{}",
                         held.join(", "),
                         spec.port,
                         spec.port
@@ -2183,7 +2183,7 @@ mod tests {
 
         assert!(
             !pid_path.exists(),
-            "a resolved record — match or not — must not be left pointing at a stale pid"
+            "a resolved record - match or not - must not be left pointing at a stale pid"
         );
         assert!(
             sysinfo::System::new_all()
@@ -2305,7 +2305,7 @@ mod tests {
             );
             assert!(
                 exe.starts_with(&runtime.dir),
-                "after switching to {}, the spawn should resolve inside {} — got {}",
+                "after switching to {}, the spawn should resolve inside {} - got {}",
                 runtime.version,
                 runtime.dir.display(),
                 exe.display()
@@ -2342,7 +2342,7 @@ mod tests {
         for port in php_pool::worker_ports(php_pool::DEFAULT_BASE_PORT) {
             assert!(
                 std::net::TcpListener::bind(("127.0.0.1", port)).is_ok(),
-                "port {port} is busy — stop PHP in Rezure before running this test"
+                "port {port} is busy - stop PHP in Rezure before running this test"
             );
         }
 

@@ -19,13 +19,13 @@ const lines = computed(() =>
 <template>
   <div class="glass-divider rounded-b-2xl border-t bg-white/30 px-4 py-3 dark:bg-black/20">
     <p class="mb-2 text-xs font-medium tracking-wide text-neutral-400 uppercase">
-      Log — {{ serviceId }}
+      Log - {{ serviceId }}
     </p>
     <div
       class="glass-inset rounded-xl p-3 font-mono text-xs text-neutral-700 dark:text-neutral-300"
     >
       <p v-if="lines.length === 0" class="text-neutral-400">
-        No log output yet — start the service to see it here.
+        No log output yet - start the service to see it here.
       </p>
       <p v-for="(line, i) in lines" :key="i">{{ line }}</p>
     </div>

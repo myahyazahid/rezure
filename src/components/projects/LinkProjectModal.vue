@@ -88,7 +88,7 @@ async function confirm() {
     <div class="glass-strong w-full max-w-lg rounded-2xl p-6">
       <h2 class="text-lg font-bold text-neutral-900 dark:text-neutral-100">Add existing folder</h2>
       <p class="mt-1 text-sm text-neutral-500">
-        Serve a project from wherever it already lives. Rezure records the path and nothing else —
+        Serve a project from wherever it already lives. Rezure records the path and nothing else -
         the folder isn't copied, moved, or written to.
       </p>
 
@@ -155,7 +155,7 @@ async function confirm() {
                preview, not the picker: a docroot that isn't there falls back
                to the folder itself, and only Rust knows that. -->
           <p v-if="preview.serve === 'proxy'" class="mt-1.5 text-xs text-neutral-500">
-            Served through its dev server — Rezure gives it a port and starts it when you click
+            Served through its dev server - Rezure gives it a port and starts it when you click
             Open.
           </p>
           <p v-else class="mt-1.5 text-xs text-neutral-500">
@@ -168,7 +168,7 @@ async function confirm() {
             v-if="preview.framework === 'unknown'"
             class="mt-1.5 text-xs text-amber-600 dark:text-amber-400"
           >
-            No framework markers found here — it'll be served from the folder itself. Pick the
+            No framework markers found here - it'll be served from the folder itself. Pick the
             framework below if you know it.
           </p>
         </div>

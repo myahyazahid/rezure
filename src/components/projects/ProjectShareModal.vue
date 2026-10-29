@@ -67,7 +67,7 @@ onUnmounted(() => {
         <span v-if="project" class="font-normal text-neutral-400">· {{ project.name }}</span>
       </h2>
       <p class="mt-1 text-sm text-neutral-500">
-        Anyone with this link can reach it while sharing stays on — nobody needs to be on your
+        Anyone with this link can reach it while sharing stays on - nobody needs to be on your
         network.
       </p>
 
@@ -77,7 +77,7 @@ onUnmounted(() => {
           {{ LOADING_MESSAGES[loadingMessageIndex] }}
         </p>
         <p class="text-xs text-neutral-400">
-          First-time setup also downloads the tunnel binary — this can take a few seconds.
+          First-time setup also downloads the tunnel binary - this can take a few seconds.
         </p>
       </div>
 

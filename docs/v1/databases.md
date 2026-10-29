@@ -180,17 +180,19 @@ there.
 
 ## Dropping a database
 
-**There is no drop button in the UI, by design.** Dropping a schema is irreversible with no
-undo, and it isn't an action worth putting one stray click away from a row you were only
-trying to export. Drop a database from a SQL client, or from the bundled console:
+On the **local server**, each row has a trash-can button at the end of its actions. It opens a
+dialog that names the database, its table count and size, warns when a project's site uses
+it, and keeps **Delete database** disabled until you type `CONFIRM`. Dropping a schema can't
+be undone, so it is deliberately more than one stray click away from the Export button next
+to it — export first if you might want it back.
 
-```
-DROP DATABASE `my_app`;
-```
+There is no Delete on a **connection** — a remote MySQL/MariaDB server, PostgreSQL, or SQL
+Server. The page doesn't show the button (`ServerInfo::drop_supported` is only true for the
+local server), and the `drop_database` command itself refuses whenever a connection is
+active, so nothing else can reach it either. Drop those from a SQL client.
 
-The `drop_database` command still exists in the Rust backend (guarded so MariaDB's own
-`mysql`, `information_schema`, `performance_schema` and `sys` schemas can never be dropped),
-so re-exposing it is a UI change only.
+MariaDB's and MySQL's own `mysql`, `information_schema`, `performance_schema` and `sys`
+schemas are never listed and can never be dropped.
 
 ---
 

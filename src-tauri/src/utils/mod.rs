@@ -9,5 +9,6 @@ pub mod migrate;
 pub mod paths;
 pub mod powershell;
 pub mod private_file;
+pub mod recycle_bin;
 #[cfg(test)]
 pub mod test_http;

@@ -153,6 +153,9 @@ pub struct ServerInfo {
     /// Whether Export works here. Always on MySQL; on SQL Server only for
     /// Rezure's own LocalDB — see `mssql::Client::export_database`.
     pub export_supported: bool,
+    /// Whether the Databases page offers Delete. Only for the local
+    /// MySQL-family server — see [`drop_database`].
+    pub drop_supported: bool,
     /// The file extensions Import accepts, without the dot.
     pub import_extensions: Vec<String>,
 }
@@ -188,6 +191,7 @@ pub fn server_info() -> ServerInfo {
                 read_only: connection.read_only,
                 kind: ServerKind::Mysql,
                 export_supported: true,
+                drop_supported: false,
                 import_extensions: vec!["sql".to_string()],
             }
         }
@@ -204,6 +208,7 @@ pub fn server_info() -> ServerInfo {
             read_only: false,
             kind: ServerKind::Mysql,
             export_supported: true,
+            drop_supported: true,
             import_extensions: vec!["sql".to_string()],
         },
     }
@@ -592,7 +597,7 @@ fn client_error(conn: &Conn, stderr: &[u8], fallback: &str) -> AppError {
     // part — with a hint appended where that wording is known to send
     // people the wrong way.
     match hint_for(detail) {
-        Some(hint) => AppError::DatabaseQueryFailed(format!("{detail} — {hint}")),
+        Some(hint) => AppError::DatabaseQueryFailed(format!("{detail} - {hint}")),
         None => AppError::DatabaseQueryFailed(detail.to_string()),
     }
 }
@@ -681,7 +686,7 @@ fn connect_failure(conn: &Conn, detail: &str) -> Option<AppError> {
     let reason = if timed_out {
         "the connection timed out. Nothing answered, which usually means a firewall is dropping          the port, or the server is bound to 127.0.0.1 and only accepts local connections"
     } else if refused {
-        "the connection was refused. The host is reachable but nothing is listening on that port          — check the server is running, and that this is the right port"
+        "the connection was refused. The host is reachable but nothing is listening on that port - check the server is running, and that this is the right port"
     } else {
         "the server couldn't be reached"
     };
@@ -830,8 +835,20 @@ pub fn create_database(name: &str, collation: &str) -> Result<(), AppError> {
     active_client()?.create_database(name, collation)
 }
 
+/// Drops `name` from the local server.
+///
+/// Refused whenever a connection is active — a remote server, and the
+/// PostgreSQL and SQL Server ones too. The Databases page only offers
+/// Delete for the local MySQL-family server ([`ServerInfo::drop_supported`]),
+/// behind a typed confirmation; this keeps that true for any other caller.
 pub fn drop_database(name: &str) -> Result<(), AppError> {
     validate_identifier(name, "database")?;
+    if let Some(connection) = connections::active() {
+        return Err(AppError::DatabaseQueryFailed(format!(
+            "Deleting a database is only available on the local server, not on {}",
+            connection.name
+        )));
+    }
     active_client()?.drop_database(name)
 }
 

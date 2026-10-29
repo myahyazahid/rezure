@@ -89,7 +89,7 @@ pub fn inspect_attachment(path: &str) -> Result<AttachmentInfo, AppError> {
         return Err(AppError::AttachmentRejected {
             path: path.to_string(),
             reason: format!(
-                "unsupported file type \"{ext}\" — allowed: {}",
+                "unsupported file type \"{ext}\" - allowed: {}",
                 ALLOWED_EXTENSIONS.join(", ")
             ),
         });
@@ -238,7 +238,7 @@ pub async fn submit_ticket(
 
     if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
         let suffix = retry_after
-            .map(|s| format!(" — try again in {s}s"))
+            .map(|s| format!(" - try again in {s}s"))
             .unwrap_or_default();
         return Err(AppError::TicketSubmitFailed(format!(
             "too many attempts{suffix}"

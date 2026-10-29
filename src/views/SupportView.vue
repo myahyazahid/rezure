@@ -73,7 +73,7 @@ function formatSize(bytes: number): string {
     >
       <p class="font-semibold text-green-800 dark:text-green-300">Ticket sent</p>
       <p class="mt-1 text-sm text-green-700 dark:text-green-400">
-        Thanks — we've received your report.
+        Thanks - we've received your report.
       </p>
       <button
         type="button"
@@ -200,7 +200,7 @@ function formatSize(bytes: number): string {
           </li>
         </ul>
         <p v-else class="mt-3 text-xs text-neutral-500">
-          Up to 5 files — screenshots, .txt/.log, or a .zip. Max 10MB each.
+          Up to 5 files - screenshots, .txt/.log, or a .zip. Max 10MB each.
         </p>
 
         <p v-if="store.attachmentError" class="mt-2 text-xs text-red-600 dark:text-red-400">

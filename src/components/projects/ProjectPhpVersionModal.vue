@@ -41,7 +41,7 @@ function choose(version: string | null) {
         global default on the Switch page. Pinning a version other projects aren't on gives this
         project its own PHP process, so different projects can run on different versions at the same
         time. A terminal opened from this project's card uses the same version for
-        <span class="font-mono">php</span>/<span class="font-mono">composer</span> — a terminal
+        <span class="font-mono">php</span>/<span class="font-mono">composer</span> - a terminal
         already open keeps whatever it started with.
       </p>
 
@@ -97,7 +97,7 @@ function choose(version: string | null) {
         </button>
 
         <p v-if="phpStore.versions.length === 0" class="px-1 py-2 text-sm text-neutral-400">
-          No PHP versions installed yet — install one from the Switch page first.
+          No PHP versions installed yet - install one from the Switch page first.
         </p>
       </div>
 

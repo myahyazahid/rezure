@@ -750,7 +750,7 @@ mod tests {
     #[ignore]
     fn adopt_a_real_install() {
         let Some(found) = detect().into_iter().next() else {
-            println!("nothing detected on this machine — nothing to adopt");
+            println!("nothing detected on this machine - nothing to adopt");
             return;
         };
         println!(
@@ -850,7 +850,7 @@ mod tests {
         }
 
         if checked == 0 {
-            println!("no database server running — nothing to check");
+            println!("no database server running - nothing to check");
             return;
         }
 

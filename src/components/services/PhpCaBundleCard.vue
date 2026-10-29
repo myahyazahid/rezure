@@ -49,7 +49,7 @@ onMounted(() => {
             <strong class="font-semibold">{{ store.caBundle.mozillaDate }}</strong
             >, from curl.se.
           </template>
-          <template v-else>A bundle Rezure didn't put there — kept as it is.</template>
+          <template v-else>A bundle Rezure didn't put there - kept as it is.</template>
         </p>
         <p
           class="glass-inset truncate rounded-lg px-2.5 py-1.5 font-mono text-xs text-neutral-500"
@@ -62,7 +62,7 @@ onMounted(() => {
         v-else
         class="rounded-xl bg-amber-100/50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
       >
-        Not installed — HTTPS calls from PHP can't be verified.
+        Not installed - HTTPS calls from PHP can't be verified.
       </p>
 
       <p

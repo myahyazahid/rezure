@@ -142,8 +142,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
               !selected
                 ? 'Pick a runtime to see what can be installed.'
                 : pinnedPackage?.licenseUrl
-                  ? 'Rezure downloads Microsoft’s installer, verifies it, and runs it — a Windows install, listed in Settings → Apps.'
-                  : 'Rezure downloads the build and verifies its checksum — nothing else on your machine changes.'
+                  ? 'Rezure downloads Microsoft’s installer, verifies it, and runs it - a Windows install, listed in Settings → Apps.'
+                  : 'Rezure downloads the build and verifies its checksum - nothing else on your machine changes.'
             }}
           </p>
         </div>
@@ -203,8 +203,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
               Already downloaded one?
             </h3>
             <p class="mt-0.5 text-xs text-neutral-500">
-              php.net only publishes the newest release of each branch. For anything older — or a
-              build you already have — point Rezure at the folder, or unpack it into the folder
+              php.net only publishes the newest release of each branch. For anything older - or a
+              build you already have - point Rezure at the folder, or unpack it into the folder
               below and it'll be picked up on the next refresh.
             </p>
 
@@ -267,7 +267,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
                   {{
                     pinnedPackage.licenseUrl
                       ? 'A local SQL Server for projects that use one, reached as (localdb)\\Rezure. Windows asks for administrator permission once.'
-                      : "Only one build is offered for now — there's nothing to pick between yet."
+                      : "Only one build is offered for now - there's nothing to pick between yet."
                   }}
                 </p>
               </div>
@@ -320,7 +320,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
             @retry="postgresStore.fetchCatalog()"
           />
           <p class="mt-4 text-xs text-neutral-500">
-            EDB's Windows builds — the server and its tools, about 150 MB each (pgAdmin isn't
+            EDB's Windows builds - the server and its tools, about 150 MB each (pgAdmin isn't
             included). Each major keeps its own databases. Pick the active version on the Switch
             page.
           </p>

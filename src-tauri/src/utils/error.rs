@@ -43,10 +43,10 @@ pub enum AppError {
     #[error("io error: {0}")]
     Io(String),
 
-    #[error("{0} isn't installed yet — download it from the Binaries panel first")]
+    #[error("{0} isn't installed yet - download it from the Binaries panel first")]
     BinaryNotInstalled(String),
 
-    #[error("{0} isn't running — start it first")]
+    #[error("{0} isn't running - start it first")]
     ServiceNotRunning(String),
 
     #[error("{0} has no web interface to open")]
@@ -58,11 +58,11 @@ pub enum AppError {
     #[error("failed to prepare {name}'s data directory: {reason}")]
     ProcessBootstrapFailed { name: String, reason: String },
 
-    #[error("port {port} is already in use — stop whatever's using it before starting {name}")]
+    #[error("port {port} is already in use - stop whatever's using it before starting {name}")]
     PortInUse { port: u16, name: String },
 
     #[error(
-        "hosts file update was cancelled — click Yes on the admin prompt to let project domains resolve in your browser"
+        "hosts file update was cancelled - click Yes on the admin prompt to let project domains resolve in your browser"
     )]
     HostsUpdateCancelled,
 
@@ -73,7 +73,7 @@ pub enum AppError {
     UnknownTemplate(String),
 
     #[error(
-        "\"{0}\" isn't a valid project name — use lowercase letters, digits, and hyphens only"
+        "\"{0}\" isn't a valid project name - use lowercase letters, digits, and hyphens only"
     )]
     InvalidProjectName(String),
 
@@ -86,11 +86,14 @@ pub enum AppError {
     #[error("project not found: {0}")]
     ProjectNotFound(String),
 
+    #[error("couldn't delete the project: {0}")]
+    ProjectDeleteFailed(String),
+
     #[error("couldn't open {target}: {reason}")]
     OpenFailed { target: String, reason: String },
 
     #[error(
-        "\"{name}\" isn't a valid {kind} name — use letters, digits, underscores and hyphens only"
+        "\"{name}\" isn't a valid {kind} name - use letters, digits, underscores and hyphens only"
     )]
     InvalidDatabaseName { name: String, kind: String },
 
@@ -115,7 +118,7 @@ pub enum AppError {
     #[error("{0}")]
     StickerFailed(String),
 
-    #[error("can't reach {host}:{port} — {reason}")]
+    #[error("can't reach {host}:{port} - {reason}")]
     ServerUnreachable {
         host: String,
         port: u16,
@@ -134,79 +137,79 @@ pub enum AppError {
     #[error("database profile not found: {0}")]
     ProfileNotFound(String),
 
-    #[error("that profile can't be removed — {0}")]
+    #[error("that profile can't be removed - {0}")]
     ProfileUndeletable(String),
 
     #[error("{path} is already registered as the \"{name}\" profile")]
     DatadirAlreadyRegistered { path: String, name: String },
 
     #[error(
-        "{path} doesn't look like a {engine} data directory — pick the folder that holds ibdata1"
+        "{path} doesn't look like a {engine} data directory - pick the folder that holds ibdata1"
     )]
     NotADatadir { path: String, engine: String },
 
     #[error(
-        "no {engine} {version} binary is installed — add one before switching to this profile"
+        "no {engine} {version} binary is installed - add one before switching to this profile"
     )]
     EngineBinaryMissing { engine: String, version: String },
 
     #[error(
-        "this datadir was written by {found}, but the profile says {expected} — opening it with the wrong engine can corrupt it"
+        "this datadir was written by {found}, but the profile says {expected} - opening it with the wrong engine can corrupt it"
     )]
     EngineMismatch { found: String, expected: String },
 
     #[error(
-        "{name}'s database server looks like it's still running against this data directory — stop it there first"
+        "{name}'s database server looks like it's still running against this data directory - stop it there first"
     )]
     DatadirInUse { name: String },
 
-    #[error("switched back to \"{restored}\" — {reason}")]
+    #[error("switched back to \"{restored}\" - {reason}")]
     SwitchRolledBack { restored: String, reason: String },
 
     #[error("{reason}")]
     PortHolderProtected { port: u16, reason: String },
 
-    #[error("{path} can't be added as a project — {reason}")]
+    #[error("{path} can't be added as a project - {reason}")]
     UnusableProjectPath { path: String, reason: String },
 
     #[error("{path} is already a project here (\"{name}\")")]
     ProjectAlreadyLinked { path: String, name: String },
 
-    #[error("there's no framework called \"{0}\" — reload the list and pick again")]
+    #[error("there's no framework called \"{0}\" - reload the list and pick again")]
     UnknownFramework(String),
 
-    #[error("\"{docroot}\" can't be served — {reason}")]
+    #[error("\"{docroot}\" can't be served - {reason}")]
     InvalidDocroot { docroot: String, reason: String },
 
-    #[error("port {port} can't be used for a dev server — {reason}")]
+    #[error("port {port} can't be used for a dev server - {reason}")]
     InvalidDevPort { port: u16, reason: String },
 
-    #[error("port {port} is already {by}'s dev server port — pick another")]
+    #[error("port {port} is already {by}'s dev server port - pick another")]
     DevPortTaken { port: u16, by: String },
 
-    #[error("\"{script}\" can't be used as a dev server script — it {reason}")]
+    #[error("\"{script}\" can't be used as a dev server script - it {reason}")]
     InvalidDevScript { script: String, reason: String },
 
-    #[error("{name}'s dev server can't start yet — {reason}")]
+    #[error("{name}'s dev server can't start yet - {reason}")]
     DevServerNotReady { name: String, reason: String },
 
-    #[error("{name}'s dev server didn't come up — {reason}")]
+    #[error("{name}'s dev server didn't come up - {reason}")]
     DevServerFailed { name: String, reason: String },
 
     #[error("stop {name}'s dev server before changing its port or script")]
     DevServerRunning { name: String },
 
-    #[error("{0} isn't served through a dev server — only JavaScript and Node projects are")]
+    #[error("{0} isn't served through a dev server - only JavaScript and Node projects are")]
     NotADevServerProject(String),
 
-    #[error("can't start {name} — {holder}")]
+    #[error("can't start {name} - {holder}")]
     PortInUseBy {
         port: u16,
         name: String,
         holder: String,
     },
 
-    #[error("{path} can't be attached — {reason}")]
+    #[error("{path} can't be attached - {reason}")]
     AttachmentRejected { path: String, reason: String },
 
     #[error("connection not found: {0}")]
@@ -216,7 +219,7 @@ pub enum AppError {
     ConnectionAlreadyExists { endpoint: String, name: String },
 
     #[error(
-        "\"{name}\" is read-only — turn that off in the connection's settings if you really mean to write to it"
+        "\"{name}\" is read-only - turn that off in the connection's settings if you really mean to write to it"
     )]
     ConnectionReadOnly { name: String },
 
@@ -233,12 +236,12 @@ pub enum AppError {
     TicketHistoryFailed(String),
 
     #[error(
-        "{0} is installed under Microsoft's license — accept it first to let Rezure install it"
+        "{0} is installed under Microsoft's license - accept it first to let Rezure install it"
     )]
     LicenseNotAccepted(String),
 
     #[error(
-        "installing {0} was cancelled — click Yes on the admin prompt to let Windows install it"
+        "installing {0} was cancelled - click Yes on the admin prompt to let Windows install it"
     )]
     InstallerCancelled(String),
 
@@ -246,7 +249,7 @@ pub enum AppError {
     InstallerFailed { name: String, reason: String },
 
     #[error(
-        "the Microsoft ODBC Driver for SQL Server isn't installed — install it from PHP Extensions (or the Databases page) first"
+        "the Microsoft ODBC Driver for SQL Server isn't installed - install it from PHP Extensions (or the Databases page) first"
     )]
     OdbcDriverMissing,
 
@@ -257,7 +260,7 @@ pub enum AppError {
     PostgresVersionNotFound(String),
 
     #[error(
-        "PostgreSQL refuses to run with administrator rights, and Rezure was started as administrator — close it and open it normally, then start PostgreSQL again"
+        "PostgreSQL refuses to run with administrator rights, and Rezure was started as administrator - close it and open it normally, then start PostgreSQL again"
     )]
     PostgresElevated,
 }
@@ -307,6 +310,7 @@ impl AppError {
             Self::ProjectAlreadyExists { .. } => "ProjectAlreadyExists",
             Self::ScaffoldFailed { .. } => "ScaffoldFailed",
             Self::ProjectNotFound { .. } => "ProjectNotFound",
+            Self::ProjectDeleteFailed { .. } => "ProjectDeleteFailed",
             Self::OpenFailed { .. } => "OpenFailed",
             Self::InvalidDatabaseName { .. } => "InvalidDatabaseName",
             Self::DatabaseQueryFailed { .. } => "DatabaseQueryFailed",

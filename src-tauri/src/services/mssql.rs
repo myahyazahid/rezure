@@ -179,14 +179,14 @@ fn hint_for(message: &str) -> Option<&'static str> {
         return Some(
             "ODBC Driver 18 encrypts by default and refuses a certificate it can't verify, which \
              is what most development and in-house servers have. Turn on \"Trust server \
-             certificate\" for this connection if you trust the server — or, in a Laravel \
+             certificate\" for this connection if you trust the server - or, in a Laravel \
              project, uncomment 'trust_server_certificate' in config/database.php and set \
              DB_TRUST_SERVER_CERTIFICATE=true",
         );
     }
     if lower.contains("login failed") && lower.contains("untrusted domain") {
         return Some(
-            "Windows Authentication only works for accounts the server's domain knows — sign \
+            "Windows Authentication only works for accounts the server's domain knows - sign \
              in with a SQL Server login and password instead",
         );
     }
@@ -322,12 +322,12 @@ impl Client {
                 format!("{}:{}", self.host, self.port)
             };
             return AppError::DatabaseQueryFailed(format!(
-                "can't reach {location} — {}",
+                "can't reach {location} - {}",
                 unreachable_reason(&state)
             ));
         }
         match hint_for(&message) {
-            Some(hint) => AppError::DatabaseQueryFailed(format!("{message} — {hint}")),
+            Some(hint) => AppError::DatabaseQueryFailed(format!("{message} - {hint}")),
             None => AppError::DatabaseQueryFailed(message),
         }
     }
@@ -615,6 +615,7 @@ pub fn server_info(connection: &Connection) -> ServerInfo {
         // BACKUP and RESTORE read and write the *server's* disk; only
         // Rezure's own LocalDB shares this machine's.
         export_supported: connection.managed,
+        drop_supported: false,
         import_extensions: if connection.managed {
             vec!["sql".to_string(), "bak".to_string()]
         } else {
@@ -740,7 +741,7 @@ impl DbClient for Client {
     fn export_database(&self, app: Option<&AppHandle>, name: &str) -> Result<PathBuf, AppError> {
         if !self.is_managed() {
             return Err(AppError::UnsupportedOnSqlServer(
-                "exporting from a SQL Server Rezure doesn't run isn't supported — BACKUP writes \
+                "exporting from a SQL Server Rezure doesn't run isn't supported - BACKUP writes \
                  the .bak onto that server's own disk, not this machine's"
                     .to_string(),
             ));
@@ -882,7 +883,7 @@ impl Client {
     fn restore(&self, name: &str, file: &Path) -> Result<(), AppError> {
         if !self.is_managed() {
             return Err(AppError::UnsupportedOnSqlServer(
-                "restoring a .bak onto a SQL Server Rezure doesn't run isn't supported — the \
+                "restoring a .bak onto a SQL Server Rezure doesn't run isn't supported - the \
                  server reads the file from its own disk, where this one isn't"
                     .to_string(),
             ));

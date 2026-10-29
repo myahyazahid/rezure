@@ -75,6 +75,8 @@ export const useDatabasesStore = defineStore('databases', () => {
 
   const creating = ref(false)
   const createError = ref<string | null>(null)
+  const dropping = ref(false)
+  const dropError = ref<string | null>(null)
   const importing = ref(false)
   const importError = ref<string | null>(null)
   /** Which database an import is loading into, for the busy label. `importing`
@@ -161,6 +163,24 @@ export const useDatabasesStore = defineStore('databases', () => {
       return false
     } finally {
       creating.value = false
+    }
+  }
+
+  /** Drops `name` for good. Only reached through the Delete dialog's typed
+   *  confirmation; the Rust side refuses it anywhere but the local server. */
+  async function dropDatabase(name: string) {
+    dropping.value = true
+    dropError.value = null
+    try {
+      await invoke('drop_database', { name })
+      await fetchAll()
+      notice.value = `Deleted ${name}`
+      return true
+    } catch (e) {
+      dropError.value = errorMessage(e)
+      return false
+    } finally {
+      dropping.value = false
     }
   }
 
@@ -268,6 +288,8 @@ ezure\dumps` and reports back where the file landed. */
     exportPercent,
     creating,
     createError,
+    dropping,
+    dropError,
     importing,
     importError,
     importingInto,
@@ -277,6 +299,7 @@ ezure\dumps` and reports back where the file landed. */
     fetchAll,
     fetchCollations,
     createDatabase,
+    dropDatabase,
     exportDatabase,
     cancelExport,
     importSql,

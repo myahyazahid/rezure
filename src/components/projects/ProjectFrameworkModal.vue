@@ -56,7 +56,7 @@ function save() {
       </h2>
       <p class="mt-1 text-sm text-neutral-500">
         Rezure recognises the framework from the project's files, and the framework decides which
-        folder the site is served from — <span class="font-mono">public/</span> for Laravel and
+        folder the site is served from - <span class="font-mono">public/</span> for Laravel and
         CodeIgniter 4, the project folder for WordPress. If it guessed wrong, pick the right one
         here. The change is live as soon as you save.
       </p>

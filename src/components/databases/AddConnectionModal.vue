@@ -211,7 +211,7 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
     <div class="glass-strong max-h-[88vh] w-full max-w-lg overflow-y-auto rounded-2xl p-6">
       <h2 class="text-lg font-bold text-neutral-900 dark:text-neutral-100">Add connection</h2>
       <p class="mt-1 text-sm text-neutral-500">
-        A server Rezure talks to but doesn't run — staging, a VPS, a shared instance. Rezure never
+        A server Rezure talks to but doesn't run - staging, a VPS, a shared instance. Rezure never
         starts or stops it; it only lists, exports and imports.
       </p>
 
@@ -290,7 +290,7 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
           </button>
         </div>
         <p class="mt-1.5 text-xs text-neutral-500">
-          Fills in the form below — you still test the connection before saving it.
+          Fills in the form below - you still test the connection before saving it.
         </p>
       </div>
 
@@ -334,7 +334,7 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
       </div>
       <p v-if="isSqlServer" class="mt-1.5 text-xs text-neutral-500">
         For a named instance (<span class="font-mono">host\SQLEXPRESS</span>), leave the port empty
-        — SQL Server Browser hands it out.
+        - SQL Server Browser hands it out.
       </p>
 
       <div v-if="isSqlServer" class="mt-4">
@@ -366,7 +366,7 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
           </button>
         </div>
         <p v-if="draft.windowsAuth" class="mt-1.5 text-xs text-neutral-500">
-          Signs in as the Windows user Rezure runs as — no password is stored anywhere. Works for
+          Signs in as the Windows user Rezure runs as - no password is stored anywhere. Works for
           servers on this machine and on your office domain.
         </p>
       </div>
@@ -490,13 +490,13 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
           v-if="keyLooksLikeAPassword"
           class="mt-2 rounded-xl bg-amber-100/50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
         >
-          That doesn't look like a file path. This box wants the private <em>key file</em> — if your
+          That doesn't look like a file path. This box wants the private <em>key file</em> - if your
           server logs in with a password, switch to
           <strong class="font-semibold">Password</strong> above.
         </p>
 
         <p v-if="draft.sshAuth === 'key'" class="mt-2.5 text-xs text-neutral-500">
-          The key must have no passphrase — Rezure has no console to ask for one on.
+          The key must have no passphrase - Rezure has no console to ask for one on.
         </p>
 
         <p class="mt-2.5 text-xs text-neutral-500">
@@ -562,7 +562,7 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
         <span class="text-sm text-neutral-600 dark:text-neutral-300">
           Trust server certificate
           <span class="block text-xs text-neutral-500">
-            For a server with a self-signed certificate. Only turn this on for a server you trust —
+            For a server with a self-signed certificate. Only turn this on for a server you trust -
             it skips checking who you're connected to.
           </span>
         </span>
@@ -595,7 +595,7 @@ const LABEL_CLASS = 'block text-xs font-medium text-neutral-500'
         v-if="store.testResult"
         class="mt-5 rounded-xl bg-emerald-100/50 px-3.5 py-2.5 text-sm text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300"
       >
-        Connected — server reports
+        Connected - server reports
         <span class="font-mono">{{ store.testResult }}</span>
       </div>
       <p v-if="store.testError" class="mt-5 text-sm text-red-600 dark:text-red-400">

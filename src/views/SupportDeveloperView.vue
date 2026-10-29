@@ -72,7 +72,7 @@ watch(
         role="status"
         class="mt-4 rounded-xl bg-amber-100/50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
       >
-        Can't reach the server right now — showing what was saved last time.
+        Can't reach the server right now - showing what was saved last time.
       </p>
 
       <div
@@ -97,7 +97,7 @@ watch(
           role="status"
           class="mt-3 rounded-xl bg-amber-100/50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
         >
-          A newer QRIS exists but couldn't be loaded — this one may be out of date. Reopen this page
+          A newer QRIS exists but couldn't be loaded - this one may be out of date. Reopen this page
           when you're online.
         </p>
         <p

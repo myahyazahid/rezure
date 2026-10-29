@@ -160,7 +160,7 @@ fn elevate_copy(staged: &Path, dest: &Path) -> Result<(), AppError> {
         .ok()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| {
-            "the hosts file wasn't updated — was the admin prompt approved?".to_string()
+            "the hosts file wasn't updated - was the admin prompt approved?".to_string()
         });
     Err(AppError::HostsUpdateFailed(detail.trim().to_string()))
 }
@@ -364,7 +364,7 @@ mod tests {
             .unwrap_or(false);
         assert!(
             !has_projects,
-            "this check assumes an empty www_root() — found existing projects"
+            "this check assumes an empty www_root() - found existing projects"
         );
 
         let existing = fs::read_to_string(hosts_file_path()).unwrap_or_default();

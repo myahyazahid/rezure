@@ -26,11 +26,11 @@ const openTitle = computed(() => {
     case null:
       return `Open ${url}`
     case 'running':
-      return `Open ${url} — its dev server is running`
+      return `Open ${url} - its dev server is running`
     case 'starting':
-      return 'Starting its dev server — the browser opens once it answers'
+      return 'Starting its dev server - the browser opens once it answers'
     default:
-      return `Open ${url} — starts its dev server first`
+      return `Open ${url} - starts its dev server first`
   }
 })
 
@@ -117,7 +117,7 @@ function onShareClick() {
         isStarting
           ? 'Starting share…'
           : isActive
-            ? 'This project is shared publicly — click for the link'
+            ? 'This project is shared publicly - click for the link'
             : 'Share this project publicly (Cloudflare Quick Tunnel)'
       "
       @click="onShareClick"
@@ -197,7 +197,7 @@ function onShareClick() {
       :class="[ICON_BUTTON_CLASS, props.phpVersion ? ON_CLASS : 'glass-ghost']"
       :title="
         props.phpVersion
-          ? `Pinned to PHP ${props.phpVersion} — click to change`
+          ? `Pinned to PHP ${props.phpVersion} - click to change`
           : 'Pin this project to its own PHP version'
       "
       @click="store.openPhpVersionModal(props.projectId)"
@@ -214,7 +214,7 @@ function onShareClick() {
       :class="[ICON_BUTTON_CLASS, props.nodeVersion ? ON_CLASS : 'glass-ghost']"
       :title="
         props.nodeVersion
-          ? `Pinned to Node.js ${props.nodeVersion} — click to change`
+          ? `Pinned to Node.js ${props.nodeVersion} - click to change`
           : 'Pin this project to its own Node.js version'
       "
       @click="store.openNodeVersionModal(props.projectId)"

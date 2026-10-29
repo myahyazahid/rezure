@@ -114,9 +114,9 @@ export const usePhpStore = defineStore('php', () => {
         // come back up, so it can't be reported as a failed switch.
         error.value = `Switched to PHP ${id}, but the service didn't restart: ${result.restartError}`
       } else if (result.restarted) {
-        notice.value = `PHP ${id} is active — the service was reloaded.`
+        notice.value = `PHP ${id} is active - the service was reloaded.`
       } else {
-        notice.value = `PHP ${id} is active — it'll be used the next time PHP starts.`
+        notice.value = `PHP ${id} is active - it'll be used the next time PHP starts.`
       }
       return result
     } catch (e) {
@@ -155,7 +155,7 @@ export const usePhpStore = defineStore('php', () => {
       // on a later switch that open terminals follow, since the entry is
       // already in their PATH by then.
       notice.value = enabled
-        ? "Rezure's PHP is on your PATH. Open a new terminal to pick it up — ones already open keep the PATH they started with."
+        ? "Rezure's PHP is on your PATH. Open a new terminal to pick it up - ones already open keep the PATH they started with."
         : 'Removed from your PATH. Whatever was there before takes over again in new terminals.'
     } catch (e) {
       error.value = errorMessage(e)

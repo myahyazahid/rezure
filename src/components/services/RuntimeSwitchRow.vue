@@ -132,12 +132,12 @@ function pick(entry: RuntimeVersionEntry) {
           :disabled="busy || installedVersions.length === 0"
           :title="
             installedVersions.length === 0
-              ? 'Nothing installed — use “Install version” above'
+              ? 'Nothing installed - use “Install version” above'
               : undefined
           "
           @click="open = !open"
         >
-          {{ activeVersion ?? '—' }}
+          {{ activeVersion ?? '-' }}
           <svg
             viewBox="0 0 24 24"
             fill="none"

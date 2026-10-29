@@ -318,7 +318,7 @@ pub fn remove(id: &str) -> Result<(), AppError> {
             _ => "LocalDB instance",
         };
         return Err(AppError::InvalidConnection(format!(
-            "\"{}\" is Rezure's own {owner} — it's listed for as long as that's installed",
+            "\"{}\" is Rezure's own {owner} - it's listed for as long as that's installed",
             store.connections[index].name
         )));
     }

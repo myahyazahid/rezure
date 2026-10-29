@@ -49,7 +49,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
           Rezure downloads Microsoft's installer, checks its checksum and signature, then runs it.
         </li>
         <li>
-          Windows asks for administrator permission <strong class="font-semibold">once</strong> —
+          Windows asks for administrator permission <strong class="font-semibold">once</strong> -
           click Yes on that prompt.
         </li>
         <li>

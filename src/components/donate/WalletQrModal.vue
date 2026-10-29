@@ -82,7 +82,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         v-if="wallet.network"
         class="mt-3 text-xs font-medium text-neutral-600 dark:text-neutral-300"
       >
-        Send only on the {{ wallet.network }} network — funds sent on another usually can't be
+        Send only on the {{ wallet.network }} network - funds sent on another usually can't be
         recovered.
       </p>
 

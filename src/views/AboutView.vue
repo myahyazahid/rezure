@@ -8,7 +8,7 @@ const donateStore = useDonateStore()
   <section>
     <h1 class="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">About Rezure</h1>
     <p class="mt-1 text-sm text-neutral-500">
-      A modern, lightweight local development environment manager for Windows — inspired by Laragon,
+      A modern, lightweight local development environment manager for Windows - inspired by Laragon,
       built with Tauri + Rust + Vue 3.
     </p>
 
@@ -16,7 +16,7 @@ const donateStore = useDonateStore()
       <!-- TODO: replace with the project's real story — this is a placeholder
            paragraph, not maintainer-authored content. -->
       <p>
-        Rezure is free and open-source, built to make local PHP development on Windows painless —
+        Rezure is free and open-source, built to make local PHP development on Windows painless -
         start Apache/Nginx, PHP, and MySQL with one click, manage local projects, and switch runtime
         versions without hunting through config files by hand.
       </p>

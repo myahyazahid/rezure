@@ -31,7 +31,7 @@ export const THEMES: readonly ThemeInfo[] = [
   {
     id: 'clearglass',
     name: 'Clear Glass',
-    description: 'Colourless glass on white — pure light and edges.',
+    description: 'Colourless glass on white - pure light and edges.',
   },
   {
     id: 'skyglass',

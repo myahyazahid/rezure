@@ -38,7 +38,7 @@ function choose(version: string | null) {
       </h2>
       <p class="mt-1 text-sm text-neutral-500">
         Pin this project to a specific Node.js version. It takes effect the next time you open a
-        terminal from this project's card — that terminal's
+        terminal from this project's card - that terminal's
         <span class="font-mono">node</span>/<span class="font-mono">npm</span>/<span
           class="font-mono"
           >npx</span
@@ -103,7 +103,7 @@ function choose(version: string | null) {
         </button>
 
         <p v-if="nodeStore.versions.length === 0" class="px-1 py-2 text-sm text-neutral-400">
-          No Node.js versions installed yet — install one from the Switch page first.
+          No Node.js versions installed yet - install one from the Switch page first.
         </p>
       </div>
 

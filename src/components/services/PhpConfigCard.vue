@@ -23,7 +23,7 @@ onMounted(() => {
              an edit to it. -->
         <p class="mt-0.5 text-xs text-neutral-500">
           Rezure rewrites its own <code class="font-mono">php.ini</code> on every start. Put your
-          own settings here instead — any <code class="font-mono">.ini</code> file in this folder
+          own settings here instead - any <code class="font-mono">.ini</code> file in this folder
           loads after it and wins.
         </p>
       </div>

@@ -35,7 +35,7 @@ const nameError = computed(() => {
   if (!value) return null
   if (value.length > 64) return 'Keep it under 64 characters.'
   if (!NAME_PATTERN.test(value)) {
-    return 'Letters, digits, underscores and hyphens only — no spaces.'
+    return 'Letters, digits, underscores and hyphens only - no spaces.'
   }
   return null
 })
@@ -116,7 +116,7 @@ watch(name, () => {
         v-else-if="existing && isBackup"
         class="mt-2 rounded-xl bg-amber-100/50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
       >
-        <strong>{{ name.trim() }}</strong> already exists. Restoring replaces it entirely — every
+        <strong>{{ name.trim() }}</strong> already exists. Restoring replaces it entirely - every
         table and row in it now is gone afterwards.
       </p>
       <p
@@ -125,7 +125,7 @@ watch(name, () => {
       >
         <strong>{{ name.trim() }}</strong> already exists. A PostgreSQL dump usually creates its
         tables without dropping them first, so the import stops at the first one that's already
-        there — import into a new name to be safe.
+        there - import into a new name to be safe.
       </p>
       <p
         v-else-if="existing"
@@ -135,7 +135,7 @@ watch(name, () => {
         <code>DROP TABLE</code> statements, so tables it defines will be replaced.
       </p>
       <p v-else class="mt-2 text-xs text-neutral-500">
-        <strong>{{ name.trim() || '…' }}</strong> doesn't exist yet — it will be created.
+        <strong>{{ name.trim() || '…' }}</strong> doesn't exist yet - it will be created.
       </p>
 
       <!-- The second gate, and the only one that names the server. The first
@@ -147,7 +147,7 @@ watch(name, () => {
       >
         <p class="text-xs text-amber-900 dark:text-amber-200">
           This writes to <strong>{{ store.server?.label }}</strong> at
-          <span class="font-mono">{{ store.server?.host }}</span> — a server Rezure doesn't run.
+          <span class="font-mono">{{ store.server?.host }}</span> - a server Rezure doesn't run.
           Type <strong class="font-mono">{{ name.trim() || '…' }}</strong> to confirm.
         </p>
         <input

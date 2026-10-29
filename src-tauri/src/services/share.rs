@@ -254,7 +254,7 @@ pub async fn start(exe: &Path, project_id: &str) -> Result<String, AppError> {
                 if detail.is_empty() {
                     String::new()
                 } else {
-                    format!(" — {detail}")
+                    format!(" - {detail}")
                 }
             )));
         }

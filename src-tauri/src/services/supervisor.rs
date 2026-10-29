@@ -202,7 +202,7 @@ pub fn spawn(app: AppHandle) {
 fn report(app: &AppHandle, event: &Event) {
     match event {
         Event::Scheduled { id, after } => {
-            log::warn!("{id} exited unexpectedly — restarting in {after:?}")
+            log::warn!("{id} exited unexpectedly - restarting in {after:?}")
         }
         Event::Restarted { id } => log::info!("{id} restarted after a crash"),
         Event::RestartFailed { id, reason } => {
@@ -210,7 +210,7 @@ fn report(app: &AppHandle, event: &Event) {
         }
         Event::GaveUp { id } => {
             log::error!(
-                "{id} keeps crashing — automatic restart paused until it is started by hand"
+                "{id} keeps crashing - automatic restart paused until it is started by hand"
             );
             notify_gave_up(app, id);
         }
@@ -236,7 +236,7 @@ fn notify_gave_up(app: &AppHandle, id: &str) {
         .builder()
         .title("Rezure")
         .body(format!(
-            "{name} keeps crashing — automatic restart paused. Check its log, then start it again."
+            "{name} keeps crashing - automatic restart paused. Check its log, then start it again."
         ))
         .show()
     {

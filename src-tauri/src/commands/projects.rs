@@ -382,6 +382,42 @@ pub fn unlink_project(
     Ok(())
 }
 
+/// Deletes a project from `www`: its dev server is stopped first (a running
+/// one holds files open, and the move to the Recycle Bin would fail on
+/// them), the folder goes to the Recycle Bin, its history and version pins
+/// are forgotten, and its vhost is dropped. Linked projects are refused —
+/// those are only ever unlinked.
+#[tauri::command]
+pub async fn delete_project(
+    id: String,
+    manager: State<'_, ServiceManager>,
+    db_state: State<'_, DbState>,
+) -> Result<(), AppError> {
+    if let Ok(dev) = manager.find(&dev_servers::service_id(&id)) {
+        if dev.info().status != ServiceStatus::Stopped {
+            tokio::task::spawn_blocking(move || dev.stop())
+                .await
+                .map_err(|e| {
+                    AppError::ProjectDeleteFailed(format!("background task panicked: {e}"))
+                })??;
+        }
+    }
+
+    let target = id.clone();
+    tokio::task::spawn_blocking(move || projects::delete(&target))
+        .await
+        .map_err(|e| AppError::ProjectDeleteFailed(format!("background task panicked: {e}")))??;
+
+    {
+        let conn = db_state.0.lock().unwrap();
+        if let Err(err) = db::projects::forget(&conn, &id) {
+            log::warn!("deleted {id} but couldn't forget its history: {err}");
+        }
+    }
+    sync_vhosts_and_reload(&manager, &db_state, "after deleting a project");
+    Ok(())
+}
+
 /// Every framework the pickers can offer, plus anything wrong with the
 /// definitions or with a project's saved choice.
 #[tauri::command]

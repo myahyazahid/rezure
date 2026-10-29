@@ -117,7 +117,7 @@ http {{
     fastcgi_temp_path "{fastcgi_temp}";
     sendfile on;
     # nginx's default hash bucket is too small for most real project names
-    # (e.g. "my-awesome-app.test" already overflows it) — nginx refuses to
+    # (e.g. "my-awesome-app.test" already overflows it) - nginx refuses to
     # start at all rather than truncate, so this has to be raised up front.
     server_names_hash_bucket_size 64;
     # Kept in step with the generated php.ini (`services::php_ini`): nginx's

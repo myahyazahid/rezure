@@ -254,12 +254,12 @@ impl Client {
             // Services" instead of a raw message.
             if self.is_managed() {
                 return self.unreachable(
-                    "Rezure's PostgreSQL isn't running — start it from the Services page",
+                    "Rezure's PostgreSQL isn't running - start it from the Services page",
                 );
             }
             return self.unreachable(
                 "the connection was refused. The host is reachable but nothing is listening on \
-                 that port — check the server is running, and that this is the right port",
+                 that port - check the server is running, and that this is the right port",
             );
         }
         if lower.contains("timeout expired") || lower.contains("timed out") {
@@ -272,7 +272,7 @@ impl Client {
             return self.unreachable("that host name doesn't resolve");
         }
         match hint_for(&lower) {
-            Some(hint) => AppError::DatabaseQueryFailed(format!("{message} — {hint}")),
+            Some(hint) => AppError::DatabaseQueryFailed(format!("{message} - {hint}")),
             None => AppError::DatabaseQueryFailed(message),
         }
     }
@@ -370,7 +370,7 @@ fn clean_message(text: &str) -> Option<String> {
 fn hint_for(lower: &str) -> Option<&'static str> {
     if lower.contains("no password supplied") {
         return Some(
-            "this server wants a password and none is saved for the connection — unlock it \
+            "this server wants a password and none is saved for the connection - unlock it \
              from the connection switcher",
         );
     }
@@ -382,7 +382,7 @@ fn hint_for(lower: &str) -> Option<&'static str> {
     }
     if lower.contains("server version mismatch") {
         return Some(
-            "pg_dump can't dump a server newer than itself — install that PostgreSQL version \
+            "pg_dump can't dump a server newer than itself - install that PostgreSQL version \
              (or a newer one) from the Switch page",
         );
     }
@@ -481,6 +481,7 @@ pub fn server_info(connection: &Connection) -> ServerInfo {
         // `pg_dump` runs here and connects out, so unlike SQL Server's
         // BACKUP it works against any server.
         export_supported: true,
+        drop_supported: false,
         import_extensions: vec!["sql".to_string()],
     }
 }
@@ -657,7 +658,7 @@ impl DbClient for Client {
             .is_some_and(|e| e.eq_ignore_ascii_case("sql"))
         {
             return Err(AppError::DatabaseQueryFailed(format!(
-                "{} isn't a .sql file — PostgreSQL imports here are plain SQL scripts",
+                "{} isn't a .sql file - PostgreSQL imports here are plain SQL scripts",
                 file.display()
             )));
         }

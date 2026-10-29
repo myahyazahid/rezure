@@ -7,10 +7,12 @@ import { useDbConnectionsStore } from '@/stores/dbConnections'
 import OpenInClientMenu from '@/components/databases/OpenInClientMenu.vue'
 import NewDatabaseModal from '@/components/databases/NewDatabaseModal.vue'
 import ImportSqlModal from '@/components/databases/ImportSqlModal.vue'
+import DeleteDatabaseModal from '@/components/databases/DeleteDatabaseModal.vue'
 import DbTargetSwitcher from '@/components/databases/DbTargetSwitcher.vue'
 import SearchInput from '@/components/common/SearchInput.vue'
 import BusyOverlay from '@/components/common/BusyOverlay.vue'
 import LeafLoader from '@/components/common/LeafLoader.vue'
+import type { DatabaseInfo } from '@/types/database'
 
 const store = useDatabasesStore()
 const profilesStore = useDbProfilesStore()
@@ -29,6 +31,9 @@ const isSqlServer = computed(() => store.server?.kind === 'sqlserver')
  *  half-way, as there is a MySQL dump. */
 const isPostgres = computed(() => store.server?.kind === 'postgres')
 const exportSupported = computed(() => store.server?.exportSupported !== false)
+/** Delete is offered on the local server only — never on a connection — and
+ *  sits behind a dialog that wants CONFIRM typed out. */
+const canDrop = computed(() => store.server?.dropSupported === true && !readOnly.value)
 const importExtensions = computed(() => store.server?.importExtensions ?? ['sql'])
 const importLabel = computed(() =>
   importExtensions.value.map((extension) => `.${extension}`).join(' / '),
@@ -36,6 +41,8 @@ const importLabel = computed(() =>
 
 const showNewDatabaseModal = ref(false)
 const importFile = ref<string | null>(null)
+/** The database the Delete dialog is open for. */
+const deleting = ref<DatabaseInfo | null>(null)
 const search = ref('')
 
 /** Matched on name alone — collation and size are things you read once you've
@@ -53,14 +60,14 @@ const subtitle = computed(() => {
   // can make about somebody else's server, so it isn't made.
   if (remote.value) {
     const actions = exportSupported.value ? `list, export and ${handoff}` : `list and ${handoff}`
-    return `Reading ${store.server?.label ?? 'a remote server'} — ${actions}.`
+    return `Reading ${store.server?.label ?? 'a remote server'} - ${actions}.`
   }
   return `Import or Export your database with one click`
 })
 
 /** Binary units, matching what a database client would report. */
 function formatSize(bytes: number) {
-  if (bytes === 0) return '—'
+  if (bytes === 0) return '-'
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
   const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
   const value = bytes / 1024 ** exponent
@@ -264,6 +271,12 @@ const exporting = computed(
 
     <NewDatabaseModal v-if="showNewDatabaseModal" @close="showNewDatabaseModal = false" />
     <ImportSqlModal v-if="importFile" :file="importFile" @close="importFile = null" />
+    <DeleteDatabaseModal
+      v-if="deleting"
+      :database="deleting"
+      :size="formatSize(deleting.sizeBytes)"
+      @close="deleting = null"
+    />
 
     <BusyOverlay
       :show="busyLabel !== ''"
@@ -322,10 +335,10 @@ const exporting = computed(
       class="mt-8 shrink-0 text-center text-sm text-neutral-500"
     >
       <template v-if="readOnly">
-        No databases on {{ store.server?.label }} — or none this user can see.
+        No databases on {{ store.server?.label }} - or none this user can see.
       </template>
       <template v-else>
-        No databases yet — create one, or
+        No databases yet - create one, or
         <button type="button" class="font-semibold text-accent-600 underline" @click="pickSqlFile">
           import a .sql dump</button
         >.
@@ -351,7 +364,7 @@ const exporting = computed(
         <span class="w-20 shrink-0 text-right">Tables</span>
         <span class="w-24 shrink-0 text-right">Size</span>
         <span v-if="!remote" class="w-40 shrink-0 pl-6">Used by</span>
-        <span class="w-52 shrink-0 text-right">Actions</span>
+        <span class="shrink-0 text-right" :class="canDrop ? 'w-63' : 'w-52'">Actions</span>
       </div>
 
       <div class="min-h-0 flex-1 overflow-y-auto">
@@ -384,10 +397,13 @@ const exporting = computed(
             <span v-if="db.usedBy" class="text-neutral-600 dark:text-neutral-300">{{
               db.usedBy
             }}</span>
-            <span v-else class="text-neutral-300 dark:text-neutral-600">—</span>
+            <span v-else class="text-neutral-300 dark:text-neutral-600">-</span>
           </span>
 
-          <div class="flex w-52 shrink-0 items-center justify-end gap-1.5">
+          <div
+            class="flex shrink-0 items-center justify-end gap-1.5"
+            :class="canDrop ? 'w-63' : 'w-52'"
+          >
             <OpenInClientMenu :database="db.name" />
             <!-- Disabled rather than hidden where it can't work, with the
                  reason in reach: a remote SQL Server's BACKUP lands on its own
@@ -398,7 +414,7 @@ const exporting = computed(
               :disabled="store.busy === db.name || !exportSupported"
               :title="
                 !exportSupported
-                  ? `Export isn't available here — SQL Server writes a backup onto its own disk, and ${store.server?.label} isn't this machine`
+                  ? `Export isn't available here - SQL Server writes a backup onto its own disk, and ${store.server?.label} isn't this machine`
                   : `Export ${db.name} to a timestamped ${isSqlServer ? '.bak' : '.sql'} file`
               "
               @click="store.exportDatabase(db.name)"
@@ -439,6 +455,30 @@ const exporting = computed(
                 />
               </svg>
               {{ store.busy === db.name ? 'Exporting…' : 'Export' }}
+            </button>
+            <button
+              v-if="canDrop"
+              type="button"
+              class="glass-btn flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:text-red-600 disabled:opacity-40 dark:text-neutral-400 dark:hover:text-red-400"
+              :disabled="store.busy === db.name"
+              :title="`Delete ${db.name}`"
+              :aria-label="`Delete ${db.name}`"
+              @click="deleting = db"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                class="h-4 w-4"
+                aria-hidden="true"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4h6v3"
+                />
+              </svg>
             </button>
           </div>
         </div>

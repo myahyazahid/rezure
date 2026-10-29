@@ -293,7 +293,7 @@ pub fn remove(store: &mut ProfileStore, id: &str) -> Result<(), AppError> {
     }
     if store.active_profile_id.as_deref() == Some(id) {
         return Err(AppError::ProfileUndeletable(
-            "it's the profile that's currently active — switch away from it first".to_string(),
+            "it's the profile that's currently active - switch away from it first".to_string(),
         ));
     }
     store.profiles.retain(|p| p.id != id);

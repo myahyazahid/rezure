@@ -444,7 +444,7 @@ mod tests {
     #[ignore]
     fn reads_the_version_from_a_real_binary() {
         let Some(runtime) = installed().into_iter().next() else {
-            println!("no PHP installed — nothing to check");
+            println!("no PHP installed - nothing to check");
             return;
         };
         let reported = read_php_version(&runtime.exe).unwrap();

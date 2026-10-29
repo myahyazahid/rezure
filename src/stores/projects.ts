@@ -53,6 +53,8 @@ export const useProjectsStore = defineStore('projects', () => {
   const createError = ref<string | null>(null)
   const linking = ref(false)
   const linkError = ref<string | null>(null)
+  const deleting = ref(false)
+  const deleteError = ref<string | null>(null)
 
   /** Project id -> public `https://*.trycloudflare.com` URL, for whichever
    *  projects currently have an active Share tunnel. */
@@ -229,6 +231,23 @@ export const useProjectsStore = defineStore('projects', () => {
   }
 
   /** Forgets a linked project. The folder itself is left alone. */
+  /** Sends a www project's folder to the Recycle Bin. Only reached through
+   *  the Delete dialog's typed confirmation; Rust refuses linked projects. */
+  async function deleteProject(id: string) {
+    deleting.value = true
+    deleteError.value = null
+    try {
+      await invoke('delete_project', { id })
+      await fetchAll()
+      return true
+    } catch (e) {
+      deleteError.value = errorMessage(e)
+      return false
+    } finally {
+      deleting.value = false
+    }
+  }
+
   async function unlinkProject(id: string) {
     linkError.value = null
     try {
@@ -462,6 +481,9 @@ export const useProjectsStore = defineStore('projects', () => {
     previewLink,
     linkProject,
     unlinkProject,
+    deleting,
+    deleteError,
+    deleteProject,
     phpVersionError,
     phpVersionModalFor,
     settingPhpVersion,

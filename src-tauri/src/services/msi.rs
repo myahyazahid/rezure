@@ -178,11 +178,11 @@ fn explain_exit_code(code: i32, log: &Path) -> Option<String> {
         // Success, and success-but-reboot-later.
         0 | 3010 | 1641 => return None,
         1602 => "the installer was cancelled".to_string(),
-        1618 => "another installation is already running — wait for it to finish (Windows Update often holds this), then try again".to_string(),
-        1638 => "another version of it is already installed — remove that one from Settings → Apps first".to_string(),
+        1618 => "another installation is already running - wait for it to finish (Windows Update often holds this), then try again".to_string(),
+        1638 => "another version of it is already installed - remove that one from Settings → Apps first".to_string(),
         1925 | 1303 => "Windows refused the install for lack of administrator rights".to_string(),
         other => format!(
-            "Windows Installer exited with code {other} — the full log is at {}",
+            "Windows Installer exited with code {other} - the full log is at {}",
             log.display()
         ),
     };
@@ -265,7 +265,7 @@ fn run_installer(pkg: &MsiPackage, bytes: &[u8]) -> Result<(), AppError> {
         return Err(AppError::InstallerFailed {
             name: pkg.name.to_string(),
             reason: format!(
-                "the installer finished but Windows doesn't list it — see {}",
+                "the installer finished but Windows doesn't list it - see {}",
                 log.display()
             ),
         });
@@ -346,7 +346,7 @@ mod tests {
         let id = std::env::var("REZURE_TEST_MSI").expect("set REZURE_TEST_MSI to a package id");
         let pkg = find(&id).expect("no such package");
         if (pkg.is_installed)() {
-            println!("{} is already installed — nothing to do", pkg.name);
+            println!("{} is already installed - nothing to do", pkg.name);
             return;
         }
         let bytes = reqwest::get(pkg.download_url)

@@ -14,6 +14,7 @@ import ProjectPhpVersionModal from '@/components/projects/ProjectPhpVersionModal
 import ProjectNodeVersionModal from '@/components/projects/ProjectNodeVersionModal.vue'
 import ProjectFrameworkModal from '@/components/projects/ProjectFrameworkModal.vue'
 import DevServersModal from '@/components/projects/DevServersModal.vue'
+import DeleteProjectModal from '@/components/projects/DeleteProjectModal.vue'
 import BusyOverlay from '@/components/common/BusyOverlay.vue'
 import type { ProjectInfo } from '@/types/project'
 
@@ -50,8 +51,8 @@ function frameworkTitle(project: ProjectInfo) {
       ? `served through its dev server${project.devPort ? ` on port ${project.devPort}` : ''}`
       : `served from ${servedFolderLabel(project.path, project.docroot)}`
   return project.frameworkOverridden
-    ? `Set manually (detected: ${store.frameworkLabel(project.detectedFramework)}), ${served} — click to change`
-    : `Detected from the project's files, ${served} — click to change`
+    ? `Set manually (detected: ${store.frameworkLabel(project.detectedFramework)}), ${served} - click to change`
+    : `Detected from the project's files, ${served} - click to change`
 }
 
 /**
@@ -66,7 +67,7 @@ const busy = computed(() => {
   if (store.creating) {
     return {
       label: 'Creating project…',
-      detail: 'Composer is downloading dependencies — this can take a few minutes.',
+      detail: 'Composer is downloading dependencies - this can take a few minutes.',
     }
   }
   if (store.linking) {
@@ -91,6 +92,28 @@ const showLinkProjectModal = ref(false)
 /** Unlink asks first — it's a list the user curated, and an accidental
  *  click would otherwise silently drop an entry. */
 const confirmingUnlink = ref<string | null>(null)
+/** The www project the Delete dialog is open for. */
+const deletingProject = ref<ProjectInfo | null>(null)
+
+/** The "not in your hosts file" nudge. Dismissing it hides it for exactly
+ *  the projects it named: another one turning up brings it back. */
+const unresolvedCount = computed(() => store.unresolvedProjects.length)
+const unresolvedKey = computed(() =>
+  store.unresolvedProjects
+    .map((p) => p.id)
+    .sort()
+    .join('|'),
+)
+const dismissedHostsKey = ref<string | null>(null)
+const showHostsNudge = computed(
+  () => unresolvedCount.value > 0 && unresolvedKey.value !== dismissedHostsKey.value,
+)
+/** Up to three domains, then a count — enough to recognise the project. */
+const unresolvedPreview = computed(() => {
+  const domains = store.unresolvedProjects.map((p) => p.domain)
+  const shown = domains.slice(0, 3).join(', ')
+  return domains.length > 3 ? `${shown} +${domains.length - 3} more` : shown
+})
 
 async function unlink(id: string) {
   confirmingUnlink.value = null
@@ -127,7 +150,7 @@ function domainClass(hasHostsEntry: boolean) {
 function domainTitle(hasHostsEntry: boolean) {
   return hasHostsEntry
     ? 'Resolves in the browser'
-    : "Not in the hosts file yet — it won't resolve until you sync"
+    : "Not in the hosts file yet - it won't resolve until you sync"
 }
 
 /** `lastOpenedAt` is unix seconds from the backend; `null` until a project
@@ -183,32 +206,150 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
           >
         </button>
 
-        <button
-          type="button"
-          class="glass-btn flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-neutral-700 transition disabled:opacity-50 dark:text-neutral-200"
-          :disabled="store.syncingHosts || store.unresolvedProjects.length === 0"
-          :title="
-            store.unresolvedProjects.length === 0
-              ? 'Every domain already resolves'
-              : 'Add project domains to the hosts file (needs admin approval)'
-          "
-          @click="store.syncHosts"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            class="h-4 w-4"
+        <!-- The button and, while some domain is missing from the hosts
+             file, a speech bubble pointing at it. A muted domain in a row is
+             easy to miss, and "why won't my site open" is then the question,
+             so the fix is pointed at rather than described somewhere else. -->
+        <div class="relative">
+          <span
+            v-if="showHostsNudge"
+            class="hosts-ring pointer-events-none absolute -inset-1 rounded-full border-2 border-accent-400"
+            aria-hidden="true"
+          ></span>
+          <button
+            type="button"
+            class="glass-btn relative flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition disabled:opacity-50"
+            :class="
+              showHostsNudge
+                ? 'text-accent-700 dark:text-accent-300'
+                : 'text-neutral-700 dark:text-neutral-200'
+            "
+            :disabled="store.syncingHosts || store.unresolvedProjects.length === 0"
+            :title="
+              store.unresolvedProjects.length === 0
+                ? 'Every domain already resolves'
+                : 'Add project domains to the hosts file (needs admin approval)'
+            "
+            @click="store.syncHosts"
           >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-            />
-          </svg>
-          {{ store.syncingHosts ? 'Waiting for admin approval…' : 'Sync hosts file' }}
-        </button>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              class="h-4 w-4"
+              :class="store.syncingHosts ? 'animate-spin' : ''"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              />
+            </svg>
+            {{ store.syncingHosts ? 'Waiting for admin approval…' : 'Sync hosts file' }}
+          </button>
+
+          <Transition name="hosts-bubble">
+            <div
+              v-if="showHostsNudge"
+              role="status"
+              class="absolute top-full left-1/2 z-30 mt-4 w-80 -translate-x-1/2"
+            >
+              <div class="hosts-float relative">
+                <!-- The tail: a square turned 45°, bordered on the two sides
+                     that face the button. Solid like the bubble, so where it
+                     overlaps the bubble's edge it reads as one shape. -->
+                <span
+                  class="absolute -top-2 left-1/2 h-4 w-4 -translate-x-1/2 rotate-45 rounded-tl-[5px] border-t-2 border-l-2 border-accent-300 bg-white dark:border-accent-500/50 dark:bg-neutral-900"
+                  aria-hidden="true"
+                ></span>
+                <div
+                  class="rounded-3xl border-2 border-accent-300 bg-white px-4 pt-3.5 pb-3 shadow-[0_18px_40px_-14px] shadow-accent-900/30 dark:border-accent-500/50 dark:bg-neutral-900 dark:shadow-black/60"
+                >
+                  <div class="flex items-start gap-3">
+                    <span
+                      class="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-accent-500/15 text-accent-600 dark:text-accent-400"
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2.2"
+                        class="h-5 w-5"
+                        aria-hidden="true"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          d="M12 19V5m0 0-6 6m6-6 6 6"
+                        />
+                      </svg>
+                    </span>
+                    <div class="min-w-0 flex-1">
+                      <p class="text-sm font-bold text-neutral-900 dark:text-neutral-50">
+                        Psst!
+                        {{
+                          unresolvedCount === 1
+                            ? 'One site won’t open yet'
+                            : `${unresolvedCount} sites won’t open yet`
+                        }}
+                      </p>
+                      <p
+                        class="mt-0.5 truncate font-mono text-xs text-accent-600 dark:text-accent-400"
+                      >
+                        {{ unresolvedPreview }}
+                      </p>
+                      <p
+                        class="mt-1.5 text-xs leading-relaxed text-neutral-600 dark:text-neutral-300"
+                      >
+                        {{ unresolvedCount === 1 ? 'Its domain isn’t' : 'Their domains aren’t' }}
+                        in your hosts file. Hit
+                        <strong class="text-neutral-900 dark:text-neutral-50"
+                          >Sync hosts file</strong
+                        >
+                        - Windows asks for admin approval once.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      class="glass-ghost -mt-1 -mr-1.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition"
+                      title="Hide until another project needs syncing"
+                      aria-label="Dismiss"
+                      @click="dismissedHostsKey = unresolvedKey"
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        class="h-3.5 w-3.5"
+                      >
+                        <path stroke-linecap="round" d="M18 6 6 18M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                  <div class="mt-3 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      class="glass-ghost rounded-full px-3 py-1.5 text-xs font-semibold transition"
+                      @click="dismissedHostsKey = unresolvedKey"
+                    >
+                      Later
+                    </button>
+                    <button
+                      type="button"
+                      class="flex items-center gap-1.5 rounded-full bg-accent-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-accent-700 disabled:opacity-60"
+                      :disabled="store.syncingHosts"
+                      @click="store.syncHosts"
+                    >
+                      {{ store.syncingHosts ? 'Waiting for approval…' : 'Sync now' }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Transition>
+        </div>
 
         <button
           type="button"
@@ -304,6 +445,11 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
     <ProjectNodeVersionModal />
     <ProjectFrameworkModal />
     <DevServersModal v-if="devServers.modalOpen" />
+    <DeleteProjectModal
+      v-if="deletingProject"
+      :project="deletingProject"
+      @close="deletingProject = null"
+    />
 
     <BusyOverlay :show="busy !== null" :label="busy?.label ?? ''" :detail="busy?.detail ?? ''" />
 
@@ -323,7 +469,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
           <strong class="text-neutral-700 dark:text-neutral-200">
             The folder and everything in it stays exactly where it is
           </strong>
-          — you can add it again any time.
+          - you can add it again any time.
         </p>
         <div class="mt-6 flex justify-end gap-2">
           <button
@@ -401,7 +547,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
       class="mt-8 shrink-0 text-center text-sm text-neutral-500"
     >
       <template v-if="store.projects.length === 0">
-        No projects yet — create one, or drop a folder into your www directory.
+        No projects yet - create one, or drop a folder into your www directory.
       </template>
       <template v-else>No projects match "{{ search }}".</template>
     </div>
@@ -450,14 +596,14 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
           v-if="project.missing"
           class="mt-0.5 truncate text-xs text-amber-600 dark:text-amber-400"
         >
-          Folder not found — it may have moved, or be on a drive that isn't connected.
+          Folder not found - it may have moved, or be on a drive that isn't connected.
         </p>
         <p
           v-else-if="project.domainInvalid"
           class="mt-0.5 truncate text-xs text-amber-600 dark:text-amber-400"
           title="Rename the folder using letters, digits and hyphens only"
         >
-          Not served — rename the folder using letters, digits and hyphens only.
+          Not served - rename the folder using letters, digits and hyphens only.
         </p>
         <p v-else-if="lastOpenedLabel(project)" class="mt-0.5 truncate text-xs text-neutral-400">
           {{ lastOpenedLabel(project) }}
@@ -503,6 +649,29 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
               <path stroke-linecap="round" d="M18.4 5.6 5.6 18.4M5.6 5.6l12.8 12.8" />
             </svg>
           </button>
+          <button
+            v-else
+            type="button"
+            :title="`Delete ${project.name} (the folder goes to the Recycle Bin)`"
+            :aria-label="`Delete ${project.name}`"
+            class="glass-ghost flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition hover:text-red-600 dark:hover:text-red-400"
+            @click="deletingProject = project"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              class="h-4 w-4"
+              aria-hidden="true"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4h6v3"
+              />
+            </svg>
+          </button>
         </div>
       </div>
     </div>
@@ -544,14 +713,14 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
                  this one out for never-opened projects made the list ragged,
                  and rows changed height the first time you opened one. -->
             <p v-if="project.missing" class="truncate text-xs text-amber-600 dark:text-amber-400">
-              Folder not found — it may have moved, or be on a drive that isn't connected.
+              Folder not found - it may have moved, or be on a drive that isn't connected.
             </p>
             <p
               v-else-if="project.domainInvalid"
               class="truncate text-xs text-amber-600 dark:text-amber-400"
               title="Rename the folder using letters, digits and hyphens only"
             >
-              Not served — rename the folder using letters, digits and hyphens only.
+              Not served - rename the folder using letters, digits and hyphens only.
             </p>
             <p v-else class="truncate text-xs text-neutral-400">
               {{ lastOpenedLabel(project) }}
@@ -598,9 +767,9 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
               :node-version="project.nodeVersion"
               :dev-server="isDevServer(project)"
             />
-            <!-- Unlink only exists for linked projects: a scanned one is
-               removed by moving its folder out of www, not from here. The
-               empty slot keeps the button column aligned on the other rows.
+            <!-- One slot, two meanings: a linked project is unlinked (X, the
+               folder is left alone); a project in www is deleted (trash, the
+               folder goes to the Recycle Bin, behind a typed confirmation).
                `h-9 w-9` matches the height of the actions toolbar beside it. -->
             <button
               v-if="project.kind === 'linked'"
@@ -619,10 +788,93 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
                 <path stroke-linecap="round" d="M18.4 5.6 5.6 18.4M5.6 5.6l12.8 12.8" />
               </svg>
             </button>
-            <span v-else class="h-9 w-9 shrink-0" aria-hidden="true"></span>
+            <button
+              v-else
+              type="button"
+              :title="`Delete ${project.name} (the folder goes to the Recycle Bin)`"
+              :aria-label="`Delete ${project.name}`"
+              class="glass-ghost flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition hover:text-red-600 dark:hover:text-red-400"
+              @click="deletingProject = project"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                class="h-4 w-4"
+                aria-hidden="true"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4h6v3"
+                />
+              </svg>
+            </button>
           </div>
         </div>
       </div>
     </div>
   </section>
 </template>
+
+<style scoped>
+/* The ring around Sync hosts file while the bubble points at it: grows and
+   fades, like a ripple, to pull the eye to the button. */
+.hosts-ring {
+  animation: hosts-ring 1.8s ease-out infinite;
+}
+
+@keyframes hosts-ring {
+  from {
+    opacity: 0.8;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.18, 1.45);
+  }
+}
+
+/* The bubble bobs gently, so it reads as something saying hello rather than
+   a fixed panel. On an inner element: the outer one carries the entry
+   transition, and both would otherwise fight over `transform`. */
+.hosts-float {
+  animation: hosts-float 2.6s ease-in-out infinite;
+}
+
+@keyframes hosts-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+/* Pops out of the button. `transform`, not `translate`: Tailwind's
+   -translate-x-1/2 centres the bubble through the `translate` property. */
+.hosts-bubble-enter-active {
+  transition:
+    opacity 0.25s ease,
+    transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.hosts-bubble-leave-active {
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
+}
+
+.hosts-bubble-enter-from,
+.hosts-bubble-leave-to {
+  opacity: 0;
+  transform: translateY(-6px) scale(0.92);
+}
+
+.hosts-bubble-enter-active,
+.hosts-bubble-leave-active {
+  transform-origin: top center;
+}
+</style>

@@ -354,7 +354,7 @@ function addSticker(kind: StickerArt, at?: { x: number; y: number }) {
   poppedId.value = id
   if (at) previewEl.value?.focus({ preventScroll: true })
   showNotice(
-    at ? `${stickerLabel(kind)} added` : `${stickerLabel(kind)} added — drag it into place`,
+    at ? `${stickerLabel(kind)} added` : `${stickerLabel(kind)} added - drag it into place`,
     kind,
   )
 }
@@ -408,7 +408,7 @@ function onClear() {
       <div>
         <h1 class="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Decorations</h1>
         <p class="mt-1 text-sm text-neutral-500">
-          Stick cute stickers anywhere on Rezure. Place them in the preview — they appear on the
+          Stick cute stickers anywhere on Rezure. Place them in the preview - they appear on the
           real window everywhere except this page.
         </p>
       </div>

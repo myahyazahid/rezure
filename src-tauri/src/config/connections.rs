@@ -242,7 +242,7 @@ pub fn load() -> Result<ConnectionStore, AppError> {
         .map_err(|e| AppError::Io(format!("could not read {}: {e}", path.display())))?;
     serde_json::from_str(&raw).map_err(|e| {
         AppError::Settings(format!(
-            "{} is not valid JSON ({e}) — fix or delete it to continue",
+            "{} is not valid JSON ({e}) - fix or delete it to continue",
             path.display()
         ))
     })

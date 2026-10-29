@@ -95,7 +95,7 @@ async function addManual() {
                 <!-- Worth stating: without its own build, this datadir
                      can't be opened at all. -->
                 <p v-if="!found.binaryDir" class="mt-1 text-xs text-amber-600 dark:text-amber-400">
-                  No server binary found beside it — you'll need a matching
+                  No server binary found beside it - you'll need a matching
                   {{ ENGINE_LABEL[found.engine] }} {{ found.version }} build.
                 </p>
               </div>

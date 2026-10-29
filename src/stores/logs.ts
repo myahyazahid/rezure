@@ -15,13 +15,57 @@ function timestamp() {
   return new Date().toLocaleTimeString('en-GB', { hour12: false })
 }
 
+/** Level words the services write, to the level shown here. */
+const LEVEL_WORDS: Record<string, LogLevel> = {
+  emerg: 'error',
+  alert: 'error',
+  crit: 'error',
+  critical: 'error',
+  error: 'error',
+  err: 'error',
+  fatal: 'error',
+  panic: 'error',
+  'fatal error': 'error',
+  'parse error': 'error',
+  warning: 'warn',
+  warn: 'warn',
+  deprecated: 'warn',
+  note: 'info',
+  notice: 'info',
+  info: 'info',
+  debug: 'info',
+  system: 'info',
+  log: 'info',
+}
+
+/** The level a line declares about itself, first match wins:
+ *  `[Warning]`/`[ERROR]` (MariaDB, MySQL), `[warn]`/`[error]` (nginx),
+ *  `PHP Warning:`/`PHP Fatal error:` (php), `WARNING:`/`ERROR:` (PostgreSQL),
+ *  `level=warn` (Mailpit). */
+const DECLARED_LEVEL = [
+  /\[(emerg|alert|crit|critical|error|err|fatal|warning|warn|note|notice|info|debug|system)\]/i,
+  /\bPHP (fatal error|parse error|warning|notice|deprecated)\b/i,
+  /\b(PANIC|FATAL|ERROR|WARNING|NOTICE|INFO|LOG|DEBUG)\d?:\s/,
+  /\blevel=(error|fatal|panic|warning|warn|info|debug)\b/i,
+]
+
 /**
  * The Rust side doesn't tag lines as info/warn/error — nginx, php, and
  * mysqld all just write plain text to stdout/stderr — so this classifies
- * by content instead. Matches the `[Warning]`/`[ERROR]` tags MariaDB
- * prefixes its own lines with, and nginx's `[warn]`/`[error]` log format.
+ * by content instead.
+ *
+ * The level a line declares wins over the words in its message. MariaDB
+ * writes "[Warning] Aborted connection … (Got an error reading
+ * communication packets)": a warning, which a plain search for "error"
+ * counted as an error and put in the sidebar's red badge. Lines that
+ * declare nothing fall back to that search.
  */
 function classify(line: string): LogLevel {
+  for (const pattern of DECLARED_LEVEL) {
+    const word = pattern.exec(line)?.[1]?.toLowerCase()
+    const level = word ? LEVEL_WORDS[word] : undefined
+    if (level) return level
+  }
   const lower = line.toLowerCase()
   if (lower.includes('error') || lower.includes('fatal')) return 'error'
   if (lower.includes('warn')) return 'warn'

@@ -147,7 +147,7 @@ impl Library {
     fn ensure_room_for(&self, id: &str) -> Result<(), AppError> {
         if self.get(id).is_none() && self.entries.len() >= MAX_SAVED {
             return Err(fail(format!(
-                "You've saved the maximum of {MAX_SAVED} stickers — remove one first."
+                "You've saved the maximum of {MAX_SAVED} stickers - remove one first."
             )));
         }
         Ok(())

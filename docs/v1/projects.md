@@ -196,7 +196,15 @@ mean going through an admin prompt again to get it back.
 host; the folder and everything in it stays exactly where it is, and you can add it again any
 time.
 
-Scanned projects have no Remove button — move the folder out of `www` instead.
+**Delete** (the trash can) on a project in `www` sends its folder to the **Recycle Bin**. It
+asks first, and the button stays disabled until you type `CONFIRM`. Its dev server is stopped
+beforehand, its virtual host is dropped, and the framework, dev server, PHP and Node.js choices
+made for it are forgotten, so a new project under the same name starts clean. Restore the
+folder from the Recycle Bin to bring it back. Its database is not touched — delete that from
+**Databases** if you want it gone too.
+
+Delete only ever reaches a folder directly inside `www`, checked on the real path; a linked
+project is only ever removed, never deleted.
 
 ---
 
@@ -309,9 +317,11 @@ must survive the database being reset.
 
 ## Troubleshooting
 
-**A linked project's domain doesn't resolve in the browser**
+**A project's domain doesn't resolve in the browser**
 It needs a hosts-file entry. Use **Sync hosts file** — it prompts for admin rights once and
-writes every project's domain at the same time.
+writes every project's domain at the same time. While any project is missing one, the
+Projects page says so in a banner under the heading, with a **Sync now** button. Dismissing it
+hides it until another project needs syncing.
 
 **The site 404s (or lists a directory) although the project works elsewhere**
 Check where it's served from: hover the framework badge. A front-controller framework served from

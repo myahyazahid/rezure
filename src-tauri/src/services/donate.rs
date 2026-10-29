@@ -103,7 +103,7 @@ pub struct DonateConfig {
 impl Default for DonateConfig {
     fn default() -> Self {
         Self {
-            message: "Rezure is free & open-source — support keeps it going.".to_string(),
+            message: "Rezure is free & open-source - support keeps it going.".to_string(),
             local: Vec::new(),
             global: Vec::new(),
             crypto: Vec::new(),

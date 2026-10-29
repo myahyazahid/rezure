@@ -131,7 +131,7 @@ const CHIP_BASE = 'rounded-full px-2.5 py-0.5 text-[11px] font-semibold capitali
             Browse stickers
           </h2>
           <p class="mt-1 text-sm text-neutral-500">
-            More stickers from Rezure's catalog. Download one and it joins your palette — it keeps
+            More stickers from Rezure's catalog. Download one and it joins your palette - it keeps
             working offline.
           </p>
         </div>
@@ -212,7 +212,7 @@ const CHIP_BASE = 'rounded-full px-2.5 py-0.5 text-[11px] font-semibold capitali
           {{
             library.offline
               ? 'Connect to the internet to see the catalog.'
-              : 'No stickers published yet — check back soon.'
+              : 'No stickers published yet - check back soon.'
           }}
         </p>
         <p v-else-if="cards.length === 0" class="py-10 text-center text-sm text-neutral-500">
@@ -300,7 +300,7 @@ const CHIP_BASE = 'rounded-full px-2.5 py-0.5 text-[11px] font-semibold capitali
               >
                 {{
                   confirmingId === card.id
-                    ? `Click again — also removes ${decorations.placedCount(card.id)} on the window`
+                    ? `Click again - also removes ${decorations.placedCount(card.id)} on the window`
                     : 'Remove'
                 }}
               </button>
@@ -310,7 +310,7 @@ const CHIP_BASE = 'rounded-full px-2.5 py-0.5 text-[11px] font-semibold capitali
       </div>
 
       <p class="mt-4 text-xs text-neutral-500">
-        {{ library.saved.length }} downloaded — find them under the
+        {{ library.saved.length }} downloaded - find them under the
         <span class="font-semibold">Downloaded</span> tab of the sticker palette.
       </p>
     </div>

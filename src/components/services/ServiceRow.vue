@@ -459,7 +459,7 @@ function requestForceStop() {
                 <span class="block text-xs text-neutral-500">
                   {{
                     losesStateOnKill
-                      ? 'Kills it immediately — needs crash recovery'
+                      ? 'Kills it immediately - needs crash recovery'
                       : 'Kills the process immediately'
                   }}
                 </span>
@@ -510,7 +510,7 @@ function requestForceStop() {
             .map((b) => b.port)
             .join(', ')
         }}
-        {{ moreBlocked > 1 ? 'are' : 'is' }} held too — all of them are freed together.
+        {{ moreBlocked > 1 ? 'are' : 'is' }} held too - all of them are freed together.
       </p>
       <p
         v-if="blocker.path"
@@ -548,7 +548,7 @@ function requestForceStop() {
         <!-- Killing someone else's server is a different decision from
              reclaiming our own leftover, so it's labelled as one. -->
         <span v-if="blocker.kind === 'foreign'" class="text-xs text-amber-700 dark:text-amber-300">
-          This isn't Rezure's — make sure you don't need it running.
+          This isn't Rezure's - make sure you don't need it running.
         </span>
       </div>
     </div>

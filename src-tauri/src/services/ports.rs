@@ -164,7 +164,7 @@ pub fn holder(port: u16) -> Option<PortHolder> {
             path: None,
             kind: HolderKind::System,
             description: format!(
-                "port {port} is reserved by Windows itself — usually IIS or the World Wide Web \
+                "port {port} is reserved by Windows itself - usually IIS or the World Wide Web \
                  Publishing service. Stop that service to free it."
             ),
         });
@@ -480,7 +480,7 @@ Active Connections
                 continue;
             };
             if found.kind != HolderKind::Rezure {
-                println!("{port}: held by {:?} — leaving it alone", found.kind);
+                println!("{port}: held by {:?} - leaving it alone", found.kind);
                 continue;
             }
 

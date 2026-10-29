@@ -112,7 +112,7 @@ async function chooseConnection(connection: DbConnectionStatus) {
 /** Why a connection can't be selected, said where it can be fixed. */
 function unavailableReason(connection: DbConnectionStatus) {
   if (connection.kind === 'postgres') {
-    return 'Needs a PostgreSQL build for psql — install one from the Switch page'
+    return 'Needs a PostgreSQL build for psql - install one from the Switch page'
   }
   if (connection.kind !== 'sqlserver') {
     return `No ${ENGINE_LABEL[connection.engine]} client installed to reach it`
@@ -121,7 +121,7 @@ function unavailableReason(connection: DbConnectionStatus) {
   // one, and only possible for Rezure's own connection.
   const odbc = binariesStore.binaries.find((b) => b.id === 'msodbcsql')
   if (!connection.managed || !odbc?.installed) {
-    return 'Needs the Microsoft ODBC Driver — install it from PHP Extensions'
+    return 'Needs the Microsoft ODBC Driver - install it from PHP Extensions'
   }
   return 'LocalDB is no longer installed'
 }
@@ -298,7 +298,7 @@ onMounted(() => {
         <p :class="SECTION_CLASS">Connections</p>
 
         <p v-if="orderedConnections.length === 0" class="px-4 pb-2 text-xs text-neutral-500">
-          Servers Rezure doesn't run — staging, a VPS. Rezure lists, exports and imports; it never
+          Servers Rezure doesn't run - staging, a VPS. Rezure lists, exports and imports; it never
           starts or stops them.
         </p>
 

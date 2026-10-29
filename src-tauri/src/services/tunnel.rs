@@ -275,7 +275,7 @@ pub fn open(
     if let SshAuth::Key { path } = &ssh.auth {
         if !Path::new(path).is_file() {
             return Err(AppError::TunnelFailed(format!(
-                "no SSH key at {path} — pick the private key file itself, not a password or a \
+                "no SSH key at {path} - pick the private key file itself, not a password or a \
                  folder"
             )));
         }
@@ -401,7 +401,7 @@ pub fn open(
                 if detail.is_empty() {
                     String::new()
                 } else {
-                    format!(" — {detail}")
+                    format!(" - {detail}")
                 }
             )));
         }
