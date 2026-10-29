@@ -34,8 +34,11 @@ export interface AppearanceSettings {
   reduceMotion: boolean
 }
 
-/** Mirrors `config::stickers::StickerKind`; art in `src/assets/stickers/<kind>.svg`. */
-export type StickerKind =
+/** Mirrors `config::stickers::StickerKind`; art in `src/assets/stickers/<kind>.svg`
+ *  (Classic) and `src/assets/stickers/live/<kind>.svg` (Live, animated). */
+export type StickerKind = ClassicStickerKind | LiveStickerKind
+
+export type ClassicStickerKind =
   | 'bow'
   | 'heart'
   | 'sparkle'
@@ -61,6 +64,30 @@ export type StickerKind =
   | 'planet'
   | 'sunglasses'
 
+export type LiveStickerKind =
+  | 'baby-chick'
+  | 'baby-panda'
+  | 'baby-frog'
+  | 'baby-kitten'
+  | 'baby-hedgehog'
+  | 'baby-hamster'
+  | 'baby-penguin'
+  | 'baby-bunny'
+  | 'baby-lion'
+  | 'baby-trex'
+  | 'baby-duck'
+  | 'baby-capybara'
+  | 'baby-bear'
+  | 'baby-piglet'
+  | 'baby-puppy'
+  | 'baby-seal'
+  | 'baby-axolotl'
+  | 'baby-koala'
+  | 'baby-otter'
+  | 'baby-sloth'
+  | 'baby-whale'
+  | 'baby-kitsune'
+
 /** A sticker downloaded from Decorations → Browse: `saved:` plus its catalog id.
  *  Mirrors `config::stickers::StickerArt::Saved`. */
 export type SavedStickerKind = `saved:${string}`
@@ -85,6 +112,8 @@ export interface Sticker {
 
 export interface Decorations {
   visible: boolean
+  /** Whether Live stickers move (they are also still while Reduce motion is on). */
+  animate: boolean
   /** Paint order: later entries are drawn on top. */
   stickers: Sticker[]
 }

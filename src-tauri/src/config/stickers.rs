@@ -20,13 +20,17 @@ pub const MIN_SIZE: f32 = 2.0;
 pub const MAX_SIZE: f32 = 25.0;
 pub const DEFAULT_SIZE: f32 = 7.0;
 
-/// The sticker art shipped with the app, `src/assets/stickers/<kind>.svg`.
-/// Grouped by the palette's categories; the grouping itself lives in the
-/// frontend (`stores/decorations.ts`).
+/// The sticker art shipped with the app: still art in
+/// `src/assets/stickers/<kind>.svg` (the palette's Classic tab) and animated
+/// art in `src/assets/stickers/live/<kind>.svg` (Live). The grouping itself
+/// lives in the frontend (`stores/decorations.ts`).
+///
+/// Kebab-case, so `BabyPanda` is `"baby-panda"` in `settings.json`; the
+/// one-word kinds read exactly as they did when this was `lowercase`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
 pub enum StickerKind {
-    // Girls
+    // Classic
     Bow,
     Heart,
     Sparkle,
@@ -39,7 +43,6 @@ pub enum StickerKind {
     Rainbow,
     Crown,
     Cherry,
-    // Mens
     Gamepad,
     Rocket,
     Bolt,
@@ -52,6 +55,29 @@ pub enum StickerKind {
     Robot,
     Planet,
     Sunglasses,
+    // Live
+    BabyChick,
+    BabyPanda,
+    BabyFrog,
+    BabyKitten,
+    BabyHedgehog,
+    BabyHamster,
+    BabyPenguin,
+    BabyBunny,
+    BabyLion,
+    BabyTrex,
+    BabyDuck,
+    BabyCapybara,
+    BabyBear,
+    BabyPiglet,
+    BabyPuppy,
+    BabySeal,
+    BabyAxolotl,
+    BabyKoala,
+    BabyOtter,
+    BabySloth,
+    BabyWhale,
+    BabyKitsune,
 }
 
 /// Prefix that marks a [`StickerArt::Saved`] in `settings.json`
@@ -147,6 +173,9 @@ fn default_size() -> f32 {
 pub struct Decorations {
     /// Hides every sticker without throwing the arrangement away.
     pub visible: bool,
+    /// Whether Live stickers move. Off draws them still; the frontend also
+    /// draws them still while the Appearance page's "Reduce motion" is on.
+    pub animate: bool,
     /// Paint order: later entries are drawn on top.
     #[serde(deserialize_with = "lenient_stickers")]
     pub stickers: Vec<Sticker>,
@@ -156,6 +185,7 @@ impl Default for Decorations {
     fn default() -> Self {
         Self {
             visible: true,
+            animate: true,
             stickers: Vec::new(),
         }
     }
@@ -281,6 +311,25 @@ mod tests {
         assert!(json.contains(r#""kind":"bow""#), "{json}");
     }
 
+    /// Live kinds are kebab-case, and a file written before `animate` existed
+    /// keeps its stickers moving.
+    #[test]
+    fn live_kinds_are_kebab_case_and_animate_defaults_on() {
+        let d = parse(r#"{"stickers":[{"id":"a","kind":"baby-panda","x":10,"y":20}]}"#);
+        assert!(d.animate);
+        assert_eq!(
+            d.stickers[0].kind,
+            StickerArt::Builtin(StickerKind::BabyPanda)
+        );
+
+        let mut placed = sticker("a");
+        placed.kind = StickerArt::Builtin(StickerKind::BabyKitsune);
+        let json = serde_json::to_string(&placed).unwrap();
+        assert!(json.contains(r#""kind":"baby-kitsune""#), "{json}");
+
+        assert!(!parse(r#"{"animate":false}"#).animate);
+    }
+
     #[test]
     fn a_downloaded_sticker_is_saved_plus_its_id() {
         let d = parse(r#"{"stickers":[{"id":"a","kind":"saved:pink-bow-2","x":10,"y":20}]}"#);
@@ -342,6 +391,7 @@ mod tests {
         stickers.extend((0..MAX_STICKERS + 5).map(|i| sticker(&i.to_string())));
         let d = Decorations {
             visible: true,
+            animate: true,
             stickers,
         }
         .sanitized();

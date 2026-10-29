@@ -403,6 +403,7 @@ mod tests {
             }),
             decorations: Decorations {
                 visible: false,
+                animate: false,
                 stickers: vec![stickers::Sticker {
                     id: "s1".to_string(),
                     kind: stickers::StickerArt::Builtin(stickers::StickerKind::Bow),

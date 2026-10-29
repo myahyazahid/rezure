@@ -664,9 +664,31 @@ mana saja di window, dengan preview Rezure untuk memilih posisinya.
   `drop-shadow`) di `main.css`, bukan di SVG-nya, supaya tebalnya sama di semua ukuran
 - Posisi (`x`, `y`) dan ukuran disimpan dalam **persen dari window**, jadi satu rumus
   (`stickerStyle` di `stores/decorations.ts`) dipakai baik untuk window asli maupun preview
-- Preview di halaman Decorations memakai rasio dan tata letak window yang sedang dipakai (ukuran
-  title bar dan sidebar dalam persen) dan ikut berubah saat window di-resize, jadi posisi di preview
-  sama dengan posisi di window
+- Preview di halaman Decorations memakai rasio dan tata letak window yang sedang dipakai dan ikut
+  berubah saat window di-resize, jadi posisi di preview sama dengan posisi di window. **Sejak v3.5**
+  miniaturnya (`components/decorations/AppWindowMiniature.vue`) berupa skeleton layout saat ini
+  (title bar dengan brand dan tombol window, sidebar 12 menu + kartu "Services up", halaman
+  Services) yang digambar dalam pixel asli window lalu di-`scale()` ke lebar preview. Kalau
+  layout `App.vue`/`AppTitleBar`/`AppSidebar`/`DashboardView`/`ServiceRow` berubah, samakan
+  class-nya di file itu
+- **Sejak v3.5** (permintaan maintainer) palet punya tab **Live** (default), **Classic**, dan
+  **Downloaded**; tab Girls/Mens/All dihapus dan 24 stiker lama masuk Classic. **Live** berisi 22
+  stiker anak hewan kawaii beranimasi di `src/assets/stickers/live/` (gambar original, gaya sama
+  dengan stiker bawaan: anak ayam, panda, katak, kucing tidur, landak, hamster, penguin, kelinci,
+  singa, T-rex, bebek, kapibara, beruang, babi, anak anjing, anjing laut, axolotl, koala,
+  berang-berang, sloth, paus, kitsune). Kitsune-nya desain sendiri dari cerita rakyat, sengaja
+  bukan karakter Naruto. Animasinya CSS di dalam tiap SVG, hanya `transform`/`opacity`, kedip
+  jarang, dan ikut `prefers-reduced-motion`. Karena CSS app tak bisa menjangkau animasi di dalam
+  `<img>`, `stores/decorations.ts` menyimpan tiap stiker Live dua kali (bergerak dan diam, via
+  `<style>*{animation:none}</style>`); versi diam dipakai saat switch **Animate** mati
+  (`decorations.animate` di `settings.json`, default `true`) atau Reduce motion menyala.
+  `StickerKind` di Rust pindah ke `kebab-case` (`baby-panda`); kind satu kata tetap sama di JSON
+- **Sejak v3.5** (permintaan maintainer) stiker diatur langsung di preview: stiker terpilih punya
+  bingkai dengan 4 handle pojok (resize, skala dari jarak pointer ke tengah stiker) dan handle
+  rotasi di atas (Shift = snap 15°). Stiker bisa di-drag dari palet ke preview (pakai pointer
+  events, bukan HTML5 drag-and-drop yang bentrok dengan file-drop WebView2 Tauri; klik biasa tetap
+  menambah di tengah). Menyeret stiker ke bawah preview memunculkan tempat sampah; dilepas di
+  atasnya atau di bawah preview = stiker dihapus
 - `StickerOverlay.vue` (di `App.vue`) menggambar stiker di layer `fixed inset-0 z-40
   pointer-events-none`: di atas halaman, di bawah modal (`z-50`), dan tidak pernah menghalangi
   klik. Layer ini disembunyikan di halaman Decorations sendiri supaya tidak menutupi editor

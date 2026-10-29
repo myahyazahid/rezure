@@ -169,6 +169,13 @@ your own dump suggests the original name).
 Import is not transactional. A dump that fails halfway leaves the database partially
 imported.
 
+An import into the **local** server skips the binary log (`SET SESSION sql_log_bin = 0`, for
+that import's connection only). MySQL 8 logs every change by default and keeps the logs for
+30 days, so without this a 2 GB dump also wrote about 1 GB of `binlog.*` files that nothing on
+a dev machine reads. The server's own binlog setting and every other connection are untouched.
+Imports into a **remote** connection never do this — the binlog may feed a replica or a backup
+there.
+
 ---
 
 ## Dropping a database
@@ -541,4 +548,6 @@ passed `-db=`. Delete it in HeidiSQL's session manager. Current versions don't c
 **Sizes look wrong** — the Size column is `data_length + index_length` from
 `information_schema`, which is a storage estimate for InnoDB, not an exact byte count. A
 freshly created or freshly imported database can read as `0` until MariaDB updates its
-statistics.
+statistics. On MySQL 8+ those numbers are also cached for a day
+(`information_schema_stats_expiry`); Rezure turns that cache off for its own query, so Refresh
+shows the current size rather than the one from when the first tables appeared.

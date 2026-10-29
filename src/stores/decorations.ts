@@ -10,62 +10,114 @@ import type {
   StickerKind,
 } from '@/types/settings'
 import { useStickerLibraryStore } from '@/stores/stickerLibrary'
+import { useAppearanceStore } from '@/stores/appearance'
 
-export type StickerCategory = 'Girls' | 'Mens'
+/** The palette's tabs for built-in art: Live (animated) and Classic (still). */
+export type StickerCategory = 'Live' | 'Classic'
 
-export const STICKER_CATEGORIES: readonly StickerCategory[] = ['Girls', 'Mens']
+export const STICKER_CATEGORIES: readonly StickerCategory[] = ['Live', 'Classic']
 
 export interface StickerInfo {
   kind: StickerKind
   label: string
   category: StickerCategory
-  url: string
 }
 
 // Bundled by Vite; small enough that each ends up inlined as a data URI.
-const ART = import.meta.glob<string>('../assets/stickers/*.svg', {
+const CLASSIC_ART = import.meta.glob<string>('../assets/stickers/*.svg', {
   eager: true,
   query: '?url',
   import: 'default',
 })
 
+// Live art carries its own CSS animation, which nothing outside an <img> can
+// reach — not the "reduce-motion" class, not a paused animation. So each is
+// kept twice: as drawn, and with every animation switched off.
+const LIVE_SOURCE = import.meta.glob<string>('../assets/stickers/live/*.svg', {
+  eager: true,
+  query: '?raw',
+  import: 'default',
+})
+
+const STILL_STYLE = '<style>*{animation:none!important}</style>'
+
+function svgDataUrl(svg: string): string {
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`
+}
+
+const LIVE_ART = new Map(
+  Object.entries(LIVE_SOURCE).map(([path, svg]) => [
+    path.slice(path.lastIndexOf('/') + 1, -'.svg'.length),
+    { moving: svgDataUrl(svg), still: svgDataUrl(svg.replace('</svg>', `${STILL_STYLE}</svg>`)) },
+  ]),
+)
+
+/** Whether Live stickers are drawn moving right now. */
+function liveMoves(): boolean {
+  return useDecorationsStore().animate && !useAppearanceStore().reduceMotion
+}
+
 function artUrl(kind: StickerKind): string {
-  return ART[`../assets/stickers/${kind}.svg`] ?? ''
+  const live = LIVE_ART.get(kind)
+  if (live) return liveMoves() ? live.moving : live.still
+  return CLASSIC_ART[`../assets/stickers/${kind}.svg`] ?? ''
 }
 
 const CATALOG: readonly [StickerKind, string, StickerCategory][] = [
-  ['bow', 'Pink bow', 'Girls'],
-  ['heart', 'Heart', 'Girls'],
-  ['sparkle', 'Sparkle', 'Girls'],
-  ['star', 'Star', 'Girls'],
-  ['sakura', 'Sakura', 'Girls'],
-  ['cloud', 'Cloud', 'Girls'],
-  ['strawberry', 'Strawberry', 'Girls'],
-  ['cat', 'Kitty', 'Girls'],
-  ['butterfly', 'Butterfly', 'Girls'],
-  ['rainbow', 'Rainbow', 'Girls'],
-  ['crown', 'Crown', 'Girls'],
-  ['cherry', 'Cherries', 'Girls'],
-  ['gamepad', 'Gamepad', 'Mens'],
-  ['rocket', 'Rocket', 'Mens'],
-  ['bolt', 'Lightning', 'Mens'],
-  ['flame', 'Flame', 'Mens'],
-  ['coffee', 'Coffee', 'Mens'],
-  ['terminal', 'Terminal', 'Mens'],
-  ['football', 'Football', 'Mens'],
-  ['headphones', 'Headphones', 'Mens'],
-  ['shield', 'Shield', 'Mens'],
-  ['robot', 'Robot', 'Mens'],
-  ['planet', 'Planet', 'Mens'],
-  ['sunglasses', 'Sunglasses', 'Mens'],
+  ['baby-chick', 'Baby chick', 'Live'],
+  ['baby-panda', 'Baby panda', 'Live'],
+  ['baby-frog', 'Baby frog', 'Live'],
+  ['baby-kitten', 'Sleepy kitten', 'Live'],
+  ['baby-hedgehog', 'Baby hedgehog', 'Live'],
+  ['baby-hamster', 'Baby hamster', 'Live'],
+  ['baby-penguin', 'Baby penguin', 'Live'],
+  ['baby-bunny', 'Baby bunny', 'Live'],
+  ['baby-lion', 'Lion cub', 'Live'],
+  ['baby-trex', 'Baby T-rex', 'Live'],
+  ['baby-duck', 'Duckling', 'Live'],
+  ['baby-capybara', 'Baby capybara', 'Live'],
+  ['baby-bear', 'Bear cub', 'Live'],
+  ['baby-piglet', 'Piglet', 'Live'],
+  ['baby-puppy', 'Puppy', 'Live'],
+  ['baby-seal', 'Seal pup', 'Live'],
+  ['baby-axolotl', 'Axolotl', 'Live'],
+  ['baby-koala', 'Baby koala', 'Live'],
+  ['baby-otter', 'Baby otter', 'Live'],
+  ['baby-sloth', 'Baby sloth', 'Live'],
+  ['baby-whale', 'Baby whale', 'Live'],
+  ['baby-kitsune', 'Little kitsune', 'Live'],
+  ['bow', 'Pink bow', 'Classic'],
+  ['heart', 'Heart', 'Classic'],
+  ['sparkle', 'Sparkle', 'Classic'],
+  ['star', 'Star', 'Classic'],
+  ['sakura', 'Sakura', 'Classic'],
+  ['cloud', 'Cloud', 'Classic'],
+  ['strawberry', 'Strawberry', 'Classic'],
+  ['cat', 'Kitty', 'Classic'],
+  ['butterfly', 'Butterfly', 'Classic'],
+  ['rainbow', 'Rainbow', 'Classic'],
+  ['crown', 'Crown', 'Classic'],
+  ['cherry', 'Cherries', 'Classic'],
+  ['gamepad', 'Gamepad', 'Classic'],
+  ['rocket', 'Rocket', 'Classic'],
+  ['bolt', 'Lightning', 'Classic'],
+  ['flame', 'Flame', 'Classic'],
+  ['coffee', 'Coffee', 'Classic'],
+  ['terminal', 'Terminal', 'Classic'],
+  ['football', 'Football', 'Classic'],
+  ['headphones', 'Headphones', 'Classic'],
+  ['shield', 'Shield', 'Classic'],
+  ['robot', 'Robot', 'Classic'],
+  ['planet', 'Planet', 'Classic'],
+  ['sunglasses', 'Sunglasses', 'Classic'],
 ]
 
-/** The sticker palette on the Decorations page, in display order. */
+/** The sticker palette on the Decorations page, in display order. Images
+ *  come from `stickerUrl`, which picks a Live sticker's moving or still art. */
 export const STICKERS: readonly StickerInfo[] = CATALOG.map(([kind, label, category]) => ({
   kind,
   label,
   category,
-  url: artUrl(kind),
 }))
 
 const SAVED_PREFIX = 'saved:'
@@ -130,6 +182,7 @@ function newId(): string {
 
 export const useDecorationsStore = defineStore('decorations', () => {
   const visible = ref(true)
+  const animate = ref(true)
   const stickers = ref<Sticker[]>([])
   const error = ref<string | null>(null)
 
@@ -137,6 +190,7 @@ export const useDecorationsStore = defineStore('decorations', () => {
 
   function apply(value: Decorations) {
     visible.value = value.visible
+    animate.value = value.animate
     stickers.value = value.stickers
   }
 
@@ -160,7 +214,13 @@ export const useDecorationsStore = defineStore('decorations', () => {
     error.value = null
     try {
       await invoke<Settings>('update_settings', {
-        patch: { decorations: { visible: visible.value, stickers: stickers.value } },
+        patch: {
+          decorations: {
+            visible: visible.value,
+            animate: animate.value,
+            stickers: stickers.value,
+          },
+        },
       })
     } catch (e) {
       error.value = errorMessage(e)
@@ -171,16 +231,17 @@ export const useDecorationsStore = defineStore('decorations', () => {
     return stickers.value.find((s) => s.id === id)
   }
 
-  /** Adds a sticker near the middle, nudged so a few added in a row don't
+  /** Adds a sticker at `at` (percent of the window, for one dropped onto
+   *  the preview), or near the middle, nudged so a few added in a row don't
    *  land exactly on top of each other. Returns its id, or null when full. */
-  function add(kind: StickerArt): string | null {
+  function add(kind: StickerArt, at?: { x: number; y: number }): string | null {
     if (isFull.value) return null
     const jitter = () => (Math.random() - 0.5) * 16
     const sticker: Sticker = {
       id: newId(),
       kind,
-      x: 50 + jitter(),
-      y: 50 + jitter(),
+      x: at ? Math.min(100, Math.max(0, at.x)) : 50 + jitter(),
+      y: at ? Math.min(100, Math.max(0, at.y)) : 50 + jitter(),
       size: DEFAULT_SIZE,
       rotation: Math.round((Math.random() - 0.5) * 24),
       flip: false,
@@ -264,8 +325,14 @@ export const useDecorationsStore = defineStore('decorations', () => {
     persist()
   }
 
+  function setAnimate(value: boolean) {
+    animate.value = value
+    persist()
+  }
+
   return {
     visible,
+    animate,
     stickers,
     error,
     isFull,
@@ -280,5 +347,6 @@ export const useDecorationsStore = defineStore('decorations', () => {
     placedCount,
     removeSaved,
     setVisible,
+    setAnimate,
   }
 })

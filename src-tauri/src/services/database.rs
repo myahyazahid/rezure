@@ -265,6 +265,9 @@ pub struct Conn {
     /// The engine of the *client binary*, which is not always the engine of
     /// the server — see `connections::client_dir`.
     client_engine: Engine,
+    /// The engine of the *server*: the local profile's, or what a remote
+    /// connection was saved as. Decides SQL only one engine understands.
+    server_engine: Engine,
     /// True when this client is MySQL 8+, whose `mysqldump` takes two
     /// options no other build has.
     mysql_8_client: bool,
@@ -296,6 +299,52 @@ impl Conn {
     /// to the OS's own TCP timeout.
     fn dump_args(&self) -> Vec<String> {
         self.base_args(false)
+    }
+
+    /// What an import adds after [`Self::args`], before the schema name.
+    ///
+    /// Local: the session skips the binary log. MySQL 8 logs every change by
+    /// default and keeps the files for 30 days, so importing a 2 GB dump
+    /// wrote another ~1 GB of binlog that nothing on a dev machine reads —
+    /// imports repeated over a few weeks filled the disk. `sql_log_bin` is
+    /// per session, set by `--init-command` before the dump's first
+    /// statement, and gone when the import ends; the server's own setting
+    /// is untouched. Both engines know it, and the local user is `root`,
+    /// which may set it.
+    ///
+    /// Remote: never. There the binlog may feed a replica or a backup, and
+    /// the account usually lacks the privilege, which would fail the import.
+    /// It gets a bigger packet instead — the counterpart to the dump side,
+    /// where a statement holding one large row is rejected by the server's
+    /// own limit otherwise.
+    fn import_args(&self) -> Vec<String> {
+        if self.is_remote() {
+            vec!["--max-allowed-packet=512M".to_string()]
+        } else {
+            vec!["--init-command=SET SESSION sql_log_bin = 0".to_string()]
+        }
+    }
+
+    /// Put in front of a query that reads sizes from
+    /// `information_schema.tables`, so the numbers are current.
+    ///
+    /// MySQL 8+ answers those columns from a cache that is only refreshed
+    /// once a day (`information_schema_stats_expiry`, 86400 s by default):
+    /// a schema imported a minute ago kept the size it had when its first
+    /// tables appeared, and Refresh changed nothing. Zero for this session
+    /// makes the server read the storage engine instead.
+    ///
+    /// The variable is wrapped in a version comment so MySQL 5.7, which
+    /// doesn't have it, runs only the harmless user-variable half; MariaDB
+    /// has no such cache and never gets the statement at all.
+    fn fresh_table_stats(&self) -> &'static str {
+        match self.server_engine {
+            Engine::MySql => {
+                "SET /*!80000 SESSION information_schema_stats_expiry = 0, */ \
+                 @rezure_fresh_stats = 1; "
+            }
+            Engine::MariaDb => "",
+        }
     }
 
     fn base_args(&self, connect_timeout: bool) -> Vec<String> {
@@ -451,6 +500,7 @@ fn local_conn() -> Result<Conn, AppError> {
         // for TLS here would fail a connection that is already private.
         tls: TlsMode::Preferred,
         client_engine: profile.engine,
+        server_engine: profile.engine,
         mysql_8_client: false,
         bin,
         defaults: None,
@@ -481,6 +531,7 @@ fn remote_conn(connection: Connection) -> Result<Conn, AppError> {
         user: connection.user.clone(),
         tls: connection.tls_mode,
         client_engine: build.engine,
+        server_engine: connection.engine,
         mysql_8_client: build.is_mysql_8_or_newer(),
         bin: build.dir,
         defaults,
@@ -726,6 +777,7 @@ pub fn probe(request: Probe<'_>) -> Result<String, AppError> {
         user: user.trim().to_string(),
         tls,
         client_engine: build.engine,
+        server_engine: engine,
         mysql_8_client: build.is_mysql_8_or_newer(),
         bin: build.dir,
         defaults: match password {
@@ -829,13 +881,14 @@ impl DbClient for Conn {
         let excluded = SYSTEM_SCHEMAS
             .map(|schema| format!("'{schema}'"))
             .join(", ");
+        let fresh = self.fresh_table_stats();
 
         // LEFT JOIN, not an inner one: a schema with no tables yet still has to
         // appear in the list (with a count of 0) rather than vanish from it.
         let rows = query_on(
             self,
             &format!(
-                "SELECT s.schema_name, s.default_collation_name, COUNT(t.table_name), \
+                "{fresh}SELECT s.schema_name, s.default_collation_name, COUNT(t.table_name), \
                  COALESCE(SUM(t.data_length + t.index_length), 0) \
                  FROM information_schema.schemata s \
                  LEFT JOIN information_schema.tables t ON t.table_schema = s.schema_name \
@@ -962,14 +1015,9 @@ impl DbClient for Conn {
 
         let input = std::fs::File::open(file)
             .map_err(|e| AppError::Io(format!("could not read {}: {e}", file.display())))?;
-        let mut command = Command::new(self.client(db_engine::CLIENT_EXE)?);
-        command.args(self.args());
-        if self.is_remote() {
-            // The counterpart to the dump side: a statement holding one large
-            // row is rejected by the server's own limit otherwise.
-            command.arg("--max-allowed-packet=512M");
-        }
-        let output = command
+        let output = Command::new(self.client(db_engine::CLIENT_EXE)?)
+            .args(self.args())
+            .args(self.import_args())
             .arg(name)
             .stdin(input)
             .hidden()
@@ -1104,8 +1152,9 @@ fn schema_size_bytes(conn: &Conn, name: &str) -> Result<u64, AppError> {
     let rows = query_on(
         conn,
         &format!(
-            "SELECT COALESCE(SUM(data_length + index_length), 0) FROM \
-             information_schema.tables WHERE table_schema = '{name}'"
+            "{}SELECT COALESCE(SUM(data_length + index_length), 0) FROM \
+             information_schema.tables WHERE table_schema = '{name}'",
+            conn.fresh_table_stats()
         ),
     )?;
     rows.first()
@@ -1242,11 +1291,45 @@ mod tests {
             user: "app".to_string(),
             tls,
             client_engine,
+            server_engine: client_engine,
             mysql_8_client: client_engine == Engine::MySql,
             bin: PathBuf::from(r"C:\rezure\bin\mysql\8.4.0\bin"),
             defaults: None,
             remote,
         }
+    }
+
+    /// A local import skips the binary log; a remote one never does, since
+    /// its binlog may matter there and the account may not be allowed to.
+    #[test]
+    fn only_a_local_import_skips_the_binary_log() {
+        let local = conn_for(TlsMode::Preferred, Engine::MySql, None);
+        assert_eq!(
+            local.import_args(),
+            ["--init-command=SET SESSION sql_log_bin = 0"]
+        );
+
+        let remote = conn_for(
+            TlsMode::Preferred,
+            Engine::MySql,
+            Some(remote_connection(false)),
+        );
+        let args = remote.import_args();
+        assert!(args.iter().all(|a| !a.contains("sql_log_bin")), "{args:?}");
+        assert_eq!(args, ["--max-allowed-packet=512M"]);
+    }
+
+    /// MySQL 8 caches `information_schema` sizes for a day; only a MySQL
+    /// server is asked to skip that, and only 8+ sees the variable itself.
+    #[test]
+    fn only_a_mysql_server_is_asked_for_fresh_table_stats() {
+        let mut conn = conn_for(TlsMode::Preferred, Engine::MySql, None);
+        assert!(conn
+            .fresh_table_stats()
+            .starts_with("SET /*!80000 SESSION information_schema_stats_expiry = 0, */"));
+        // A MySQL client against a MariaDB server: the server decides.
+        conn.server_engine = Engine::MariaDb;
+        assert_eq!(conn.fresh_table_stats(), "");
     }
 
     fn remote_connection(read_only: bool) -> Connection {
