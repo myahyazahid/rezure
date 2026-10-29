@@ -490,7 +490,11 @@ dari tiga kategori (Default, Girls, Mens), dari menu sendiri di sidebar. Tidak a
 **ditambahkan atas permintaan maintainer**.
 
 ### Keputusan yang sudah diambil
-- **Nama kategori:** `Default`, `Girls`, `Mens`. Nama ini ditampilkan apa adanya di UI
+- **Nama kategori:** `Default`, `Girls`, `Mens`. ~~Nama ini ditampilkan apa adanya di UI~~ —
+  **dihapus di v3.5** atas permintaan maintainer: tab filter kategori dan badge kategori di kartu
+  tema dibuang, semua tema tampil dalam satu grid tanpa filter. Field `category` dan
+  `THEME_CATEGORIES` ikut dihapus dari `stores/appearance.ts`. Kolom Kategori di tabel bawah
+  tinggal catatan sejarah
 - **Tema ada empat belas:** awalnya tiga (satu per kategori). Atas permintaan maintainer ditambah
   **Soft Pink** (Girls) dan **Navy** (Mens), lalu enam lagi dari rekomendasi yang disetujui
   maintainer: **Lavender Dream**, **Peach**, **Matcha** (Girls) serta **Carbon**, **Forest**,

@@ -4,12 +4,9 @@ import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import type { AppearanceSettings, Settings, ThemeMode, ThemePreset } from '@/types/settings'
 
-export type ThemeCategory = 'Default' | 'Girls' | 'Mens'
-
 export interface ThemeInfo {
   id: ThemePreset
   name: string
-  category: ThemeCategory
   description: string
   /** Always drawn with the dark text colours, whatever the light/dark
    *  choice — for themes whose backdrop is mid-tone, where dark text would
@@ -17,97 +14,82 @@ export interface ThemeInfo {
   forcesDark?: boolean
 }
 
-/** The themes, grouped by category on the page. The colours are in `main.css`, under
- *  `[data-theme='<id>']`; this is only what the Appearance page lists. */
+/** The themes, in the order the Appearance page shows them. The colours are
+ *  in `main.css`, under `[data-theme='<id>']`; this is only what the
+ *  Appearance page lists. */
 export const THEMES: readonly ThemeInfo[] = [
   {
     id: 'rezure',
     name: 'Rezure',
-    category: 'Default',
     description: 'Coral red over a warm glass backdrop.',
   },
   {
     id: 'fullglass',
     name: 'Full Glass',
-    category: 'Default',
     description: 'Crystal-clear glass over an iridescent backdrop.',
   },
   {
     id: 'clearglass',
     name: 'Clear Glass',
-    category: 'Default',
     description: 'Colourless glass on white — pure light and edges.',
   },
   {
     id: 'skyglass',
     name: 'Sky Glass',
-    category: 'Default',
     description: 'Frosted, sky-tinted panels over a dusk sky. Always white text.',
     forcesDark: true,
   },
   {
     id: 'blossom',
     name: 'Blossom',
-    category: 'Girls',
     description: 'Pink and lavender, scattered with petals.',
   },
   {
     id: 'softpink',
     name: 'Soft Pink',
-    category: 'Girls',
     description: 'Clear, airy glass over soft pink, with bubbles.',
   },
   {
     id: 'lavender',
     name: 'Lavender Dream',
-    category: 'Girls',
     description: 'Lilac and baby blue, with a crescent moon and stars.',
   },
   {
     id: 'peach',
     name: 'Peach',
-    category: 'Girls',
     description: 'Warm peach and cream, with little hearts.',
   },
   {
     id: 'matcha',
     name: 'Matcha',
-    category: 'Girls',
     description: 'Soft mint and sage, with tiny leaves.',
   },
   {
     id: 'midnight',
     name: 'Midnight',
-    category: 'Mens',
     description: 'Navy and teal with a faint grid.',
   },
   {
     id: 'navy',
     name: 'Navy',
-    category: 'Mens',
     description: 'Deep navy with a touch of gold and soft waves.',
   },
   {
     id: 'carbon',
     name: 'Carbon',
-    category: 'Mens',
     description: 'Graphite and orange, with a carbon-fibre weave.',
   },
   {
     id: 'forest',
     name: 'Forest',
-    category: 'Mens',
     description: 'Olive and deep green, with map contour lines.',
   },
   {
     id: 'terminal',
     name: 'Terminal',
-    category: 'Mens',
     description: 'Neon green on black, with CRT scanlines.',
   },
 ]
-
-export const THEME_CATEGORIES: readonly ThemeCategory[] = ['Default', 'Girls', 'Mens']
 
 /** `settings.json` is the source of truth, but it only arrives after an
  *  `invoke` round trip — by then the window has already painted. This copy

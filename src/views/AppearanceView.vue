@@ -1,13 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
 import {
   ADJUSTMENTS,
   THEMES,
-  THEME_CATEGORIES,
   UI_SCALES,
   useAppearanceStore,
   type AdjustmentKey,
-  type ThemeCategory,
 } from '@/stores/appearance'
 
 const appearance = useAppearanceStore()
@@ -47,13 +44,6 @@ const SLIDERS: readonly {
 function onSlider(key: AdjustmentKey, e: Event, save: boolean) {
   appearance.setAdjustment(key, Number((e.target as HTMLInputElement).value), save)
 }
-
-const category = ref<ThemeCategory | 'All'>('All')
-const categoryTabs = computed(() => ['All' as const, ...THEME_CATEGORIES])
-
-const visibleThemes = computed(() =>
-  category.value === 'All' ? THEMES : THEMES.filter((t) => t.category === category.value),
-)
 </script>
 
 <template>
@@ -68,29 +58,8 @@ const visibleThemes = computed(() =>
     </p>
 
     <div class="mt-6">
-      <div class="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Theme</h2>
-          <p class="mt-0.5 text-xs text-neutral-500">Accent colour, backdrop and decoration.</p>
-        </div>
-
-        <div class="glass-inset flex gap-0.5 rounded-full p-0.5">
-          <button
-            v-for="tab in categoryTabs"
-            :key="tab"
-            type="button"
-            class="rounded-full px-3 py-1 text-xs font-semibold transition"
-            :class="
-              category === tab
-                ? 'glass-raised text-neutral-900 dark:text-neutral-100'
-                : 'glass-ghost'
-            "
-            @click="category = tab"
-          >
-            {{ tab }}
-          </button>
-        </div>
-      </div>
+      <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Theme</h2>
+      <p class="mt-0.5 text-xs text-neutral-500">Accent colour, backdrop and decoration.</p>
 
       <div
         role="radiogroup"
@@ -98,7 +67,7 @@ const visibleThemes = computed(() =>
         class="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3"
       >
         <button
-          v-for="t in visibleThemes"
+          v-for="t in THEMES"
           :key="t.id"
           type="button"
           role="radio"
@@ -146,16 +115,7 @@ const visibleThemes = computed(() =>
 
           <div class="flex items-start justify-between gap-2 px-1.5 pt-2.5 pb-1">
             <div class="min-w-0">
-              <p class="flex items-center gap-2">
-                <span class="font-semibold text-neutral-900 dark:text-neutral-100">
-                  {{ t.name }}
-                </span>
-                <span
-                  class="glass-inset rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide text-neutral-500 uppercase dark:text-neutral-400"
-                >
-                  {{ t.category }}
-                </span>
-              </p>
+              <p class="font-semibold text-neutral-900 dark:text-neutral-100">{{ t.name }}</p>
               <p class="mt-0.5 text-xs text-neutral-500">{{ t.description }}</p>
             </div>
             <svg
