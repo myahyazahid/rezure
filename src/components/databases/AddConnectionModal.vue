@@ -534,43 +534,47 @@ function switchClass(on: boolean) {
           </div>
 
           <div>
-            <label for="conn-host" :class="LABEL_CLASS">
-              {{ draft.useSsh ? 'Database address, as seen from the SSH server' : 'Address' }}
-            </label>
-            <div :class="FIELD_CLASS">
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                :class="FIELD_ICON_CLASS"
-              >
-                <circle cx="12" cy="12" r="9" />
-                <path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18" />
-              </svg>
-              <input
-                id="conn-host"
-                v-model="draft.host"
-                type="text"
-                :placeholder="
-                  isSqlServer ? 'db.office.local or host\\SQLEXPRESS' : 'db.example.com'
-                "
-                :class="[INPUT_CLASS, 'font-mono']"
-              />
-              <span
-                class="flex h-6 shrink-0 items-center border-l border-neutral-900/10 pl-2.5 font-mono text-sm text-neutral-400 dark:border-white/10"
-              >
-                <span aria-hidden="true">:</span>
-                <input
-                  v-model.number="draft.port"
-                  type="number"
-                  min="1"
-                  max="65535"
-                  aria-label="Port"
-                  :placeholder="isSqlServer ? 'auto' : ''"
-                  class="no-spin w-14 bg-transparent pl-0.5 text-neutral-900 outline-none placeholder:text-neutral-400 dark:text-neutral-100"
-                />
-              </span>
+            <div class="flex gap-3">
+              <div class="min-w-0 flex-1">
+                <label for="conn-host" :class="LABEL_CLASS">
+                  {{ draft.useSsh ? 'Host / IP, as seen from the SSH server' : 'Host / IP' }}
+                </label>
+                <div :class="FIELD_CLASS">
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    :class="FIELD_ICON_CLASS"
+                  >
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18" />
+                  </svg>
+                  <input
+                    id="conn-host"
+                    v-model="draft.host"
+                    type="text"
+                    :placeholder="
+                      isSqlServer ? 'db.office.local or host\\SQLEXPRESS' : 'db.example.com'
+                    "
+                    :class="[INPUT_CLASS, 'font-mono']"
+                  />
+                </div>
+              </div>
+              <div class="w-28 shrink-0">
+                <label for="conn-port" :class="LABEL_CLASS">Port</label>
+                <div :class="FIELD_CLASS">
+                  <input
+                    id="conn-port"
+                    v-model.number="draft.port"
+                    type="number"
+                    min="1"
+                    max="65535"
+                    :placeholder="isSqlServer ? 'auto' : ''"
+                    :class="[INPUT_CLASS, 'no-spin font-mono']"
+                  />
+                </div>
+              </div>
             </div>
             <p v-if="isSqlServer" class="mt-1.5 text-xs text-neutral-500">
               For a named instance (<span class="font-mono">host\SQLEXPRESS</span>), leave the port
@@ -721,22 +725,22 @@ function switchClass(on: boolean) {
                         placeholder="203.0.113.10"
                         :class="[INPUT_CLASS, 'font-mono']"
                       />
-                      <span
-                        class="flex h-6 shrink-0 items-center border-l border-neutral-900/10 pl-2.5 font-mono text-sm text-neutral-400 dark:border-white/10"
-                      >
-                        <span aria-hidden="true">:</span>
-                        <input
-                          v-model.number="draft.sshPort"
-                          type="number"
-                          min="1"
-                          max="65535"
-                          aria-label="SSH port"
-                          class="no-spin w-10 bg-transparent pl-0.5 text-neutral-900 outline-none dark:text-neutral-100"
-                        />
-                      </span>
                     </div>
                   </div>
-                  <div class="w-36 shrink-0">
+                  <div class="w-20 shrink-0">
+                    <label for="conn-ssh-port" :class="LABEL_CLASS">Port</label>
+                    <div :class="FIELD_CLASS">
+                      <input
+                        id="conn-ssh-port"
+                        v-model.number="draft.sshPort"
+                        type="number"
+                        min="1"
+                        max="65535"
+                        :class="[INPUT_CLASS, 'no-spin font-mono']"
+                      />
+                    </div>
+                  </div>
+                  <div class="w-32 shrink-0">
                     <label for="conn-ssh-user" :class="LABEL_CLASS">SSH user</label>
                     <div :class="FIELD_CLASS">
                       <input
@@ -1016,20 +1020,11 @@ function switchClass(on: boolean) {
           </button>
           <button
             type="button"
-            class="glass-btn flex shrink-0 items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-neutral-700 transition disabled:opacity-50 dark:text-neutral-200"
+            class="glass-btn shrink-0 rounded-xl px-4 py-2.5 text-sm font-semibold text-neutral-700 transition disabled:opacity-50 dark:text-neutral-200"
             :disabled="!complete || store.testing"
             @click="store.test(draft)"
           >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              class="h-4 w-4"
-            >
-              <path stroke-linejoin="round" d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" />
-            </svg>
-            {{ store.testing ? 'Testing…' : store.testResult ? 'Test again' : 'Test' }}
+            {{ store.testing ? 'Testing…' : store.testResult ? 'Test again' : 'Test connection' }}
           </button>
           <button
             type="button"

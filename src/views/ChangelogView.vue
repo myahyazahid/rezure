@@ -12,18 +12,10 @@ const PAGE_SIZE = 10
 const page = ref(1)
 const topRef = useTemplateRef<HTMLElement>('top')
 
-// Versions whose body is shown. Only the newest release starts open, so a long
-// entry no longer pushes every older one off the page.
-const expanded = ref(new Set<string>())
-
+// Which releases are open lives in the store, so it survives leaving the
+// page; only a newly listed release opens on its own.
 function isExpanded(version: string): boolean {
-  return expanded.value.has(version)
-}
-
-function toggle(version: string) {
-  const next = new Set(expanded.value)
-  if (!next.delete(version)) next.add(version)
-  expanded.value = next
+  return store.expandedVersions.has(version)
 }
 
 onActivated(async () => {
@@ -31,8 +23,6 @@ onActivated(async () => {
   // see what changed, not to resume where the last visit left off.
   page.value = 1
   await store.fetchAll()
-  const newest = store.entries[0]?.version
-  expanded.value = new Set(newest ? [newest] : [])
   await store.markSeen()
   await Promise.all([updateStore.checkForUpdate(), updateStore.fetchUpgradeNotice()])
 })
@@ -153,7 +143,7 @@ function goToPage(next: number) {
           type="button"
           class="flex w-full items-center justify-between gap-3 p-4 text-left"
           :aria-expanded="isExpanded(entry.version)"
-          @click="toggle(entry.version)"
+          @click="store.toggleExpanded(entry.version)"
         >
           <span class="min-w-0 font-semibold text-neutral-900 dark:text-neutral-100">
             {{ entry.title }}
