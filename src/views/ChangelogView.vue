@@ -12,11 +12,27 @@ const PAGE_SIZE = 10
 const page = ref(1)
 const topRef = useTemplateRef<HTMLElement>('top')
 
+// Versions whose body is shown. Only the newest release starts open, so a long
+// entry no longer pushes every older one off the page.
+const expanded = ref(new Set<string>())
+
+function isExpanded(version: string): boolean {
+  return expanded.value.has(version)
+}
+
+function toggle(version: string) {
+  const next = new Set(expanded.value)
+  if (!next.delete(version)) next.add(version)
+  expanded.value = next
+}
+
 onActivated(async () => {
   // Back to the newest on every visit — the reason to open this page is to
   // see what changed, not to resume where the last visit left off.
   page.value = 1
   await store.fetchAll()
+  const newest = store.entries[0]?.version
+  expanded.value = new Set(newest ? [newest] : [])
   await store.markSeen()
   await Promise.all([updateStore.checkForUpdate(), updateStore.fetchUpgradeNotice()])
 })
@@ -132,23 +148,39 @@ function goToPage(next: number) {
     </p>
 
     <div v-else class="mt-5 space-y-2.5">
-      <article v-for="entry in pagedEntries" :key="entry.version" class="glass rounded-2xl p-4">
-        <div class="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 class="font-semibold text-neutral-900 dark:text-neutral-100">
+      <article v-for="entry in pagedEntries" :key="entry.version" class="glass rounded-2xl">
+        <button
+          type="button"
+          class="flex w-full items-center justify-between gap-3 p-4 text-left"
+          :aria-expanded="isExpanded(entry.version)"
+          @click="toggle(entry.version)"
+        >
+          <span class="min-w-0 font-semibold text-neutral-900 dark:text-neutral-100">
             {{ entry.title }}
-          </h2>
-          <div class="flex items-center gap-2 text-xs text-neutral-500">
+          </span>
+          <div class="flex shrink-0 items-center gap-2 text-xs text-neutral-500">
             <span
               class="rounded-full bg-accent-500/10 px-2 py-0.5 font-mono font-semibold text-accent-600 dark:bg-accent-500/10 dark:text-accent-400"
             >
               v{{ entry.version }}
             </span>
             <span>{{ formatDate(entry.releasedAt) }}</span>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              class="h-4 w-4 shrink-0 text-neutral-400 transition-transform"
+              :class="isExpanded(entry.version) ? 'rotate-180' : ''"
+            >
+              <path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6" />
+            </svg>
           </div>
-        </div>
+        </button>
         <!-- eslint-disable-next-line vue/no-v-html -->
         <div
-          class="changelog-body mt-2 text-sm text-neutral-700 dark:text-neutral-300"
+          v-if="isExpanded(entry.version)"
+          class="changelog-body -mt-2 px-4 pb-4 text-sm text-neutral-700 dark:text-neutral-300"
           v-html="renderBody(entry.body)"
         />
       </article>
