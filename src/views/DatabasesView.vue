@@ -4,12 +4,14 @@ import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
 import { useDatabasesStore } from '@/stores/databases'
 import { useDbProfilesStore } from '@/stores/dbProfiles'
 import { useDbConnectionsStore } from '@/stores/dbConnections'
+import { useResizableColumns } from '@/composables/useResizableColumns'
 import OpenInClientMenu from '@/components/databases/OpenInClientMenu.vue'
 import NewDatabaseModal from '@/components/databases/NewDatabaseModal.vue'
 import ImportSqlModal from '@/components/databases/ImportSqlModal.vue'
 import DeleteDatabaseModal from '@/components/databases/DeleteDatabaseModal.vue'
 import DbTargetSwitcher from '@/components/databases/DbTargetSwitcher.vue'
 import SearchInput from '@/components/common/SearchInput.vue'
+import ColumnResizeHandle from '@/components/common/ColumnResizeHandle.vue'
 import BusyOverlay from '@/components/common/BusyOverlay.vue'
 import LeafLoader from '@/components/common/LeafLoader.vue'
 import type { DatabaseInfo } from '@/types/database'
@@ -52,6 +54,52 @@ const filteredDatabases = computed(() => {
   if (!query) return store.databases
   return store.databases.filter((db) => db.name.toLowerCase().includes(query))
 })
+
+/** For the table's totals row: the databases shown, not every one there is. */
+const shownTables = computed(() =>
+  filteredDatabases.value.reduce((sum, db) => sum + db.tableCount, 0),
+)
+const shownBytes = computed(() =>
+  filteredDatabases.value.reduce((sum, db) => sum + db.sizeBytes, 0),
+)
+
+/** Table columns the user can drag wider or narrower, as on the Projects
+ *  page: until the first drag they share the window's width, after that
+ *  the widths are the user's, and remembered. Actions stays a fixed width. */
+const {
+  resizing: resizingColumn,
+  styleFor: columnStyle,
+  fitting: columnsFit,
+  startResize: startColumnResize,
+  reset: resetColumns,
+} = useResizableColumns('rezure.databases.column-widths', {
+  database: { initial: 260, min: 120 },
+  tables: { initial: 80, min: 56 },
+  size: { initial: 96, min: 64 },
+  usedBy: { initial: 160, min: 96 },
+})
+/** "Used by" is only shown for the local server: a local project folder
+ *  says nothing about a schema on somebody else's machine. */
+const shownColumns = computed(
+  () =>
+    [
+      { key: 'database', label: 'Database', class: '' },
+      { key: 'tables', label: 'Tables', class: 'text-right' },
+      { key: 'size', label: 'Size', class: 'text-right' },
+      { key: 'usedBy', label: 'Used by', class: 'pl-6' },
+    ].filter((column) => column.key !== 'usedBy' || !remote.value) as {
+      key: 'database' | 'tables' | 'size' | 'usedBy'
+      label: string
+      class: string
+    }[],
+)
+
+/** The headings sit outside the rows' scroller so they stay put vertically;
+ *  sideways they follow it. */
+const listHeader = ref<HTMLElement | null>(null)
+function syncHeaderScroll(event: Event) {
+  if (listHeader.value) listHeader.value.scrollLeft = (event.target as HTMLElement).scrollLeft
+}
 
 const subtitle = computed(() => {
   const client = store.preferredClient
@@ -292,7 +340,7 @@ const exporting = computed(
       v-if="!store.serverDown && store.databases.length > 0"
       class="mt-5 flex shrink-0 flex-wrap items-center gap-3"
     >
-      <SearchInput v-model="search" placeholder="Search databases" class="w-full max-w-md" />
+      <SearchInput v-model="search" placeholder="Search databases" class="min-w-0 flex-1" />
 
       <!-- Not merely disabled: on a read-only connection an import is not a
            thing the user can do here at all, and a greyed button invites a
@@ -312,10 +360,6 @@ const exporting = computed(
         </svg>
         Import {{ importLabel }}
       </button>
-
-      <span class="shrink-0 text-sm text-neutral-500">
-        {{ filteredDatabases.length }} databases · {{ store.totalTables }} tables total
-      </span>
     </div>
 
     <!-- First load only, so it never replaces a list that's already correct.
@@ -356,132 +400,191 @@ const exporting = computed(
       v-else-if="filteredDatabases.length > 0"
       class="glass mt-5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl"
     >
-      <!-- Column headings stay put; only the rows below them move. -->
+      <!-- Column headings stay put; only the rows below them move. Both
+           reserve the scrollbar's gutter, so they are the same width and
+           scroll sideways in step. -->
       <div
-        class="glass-divider flex shrink-0 items-center gap-3 border-b bg-white/50 px-5 py-3 text-[11px] font-semibold tracking-wide text-neutral-400 uppercase dark:bg-white/4"
+        ref="listHeader"
+        class="glass-divider shrink-0 overflow-hidden border-b bg-white/50 scrollbar-gutter-stable dark:bg-white/4"
       >
-        <span class="flex-1">Database</span>
-        <span class="w-20 shrink-0 text-right">Tables</span>
-        <span class="w-24 shrink-0 text-right">Size</span>
-        <span v-if="!remote" class="w-40 shrink-0 pl-6">Used by</span>
-        <span class="shrink-0 text-right" :class="canDrop ? 'w-63' : 'w-52'">Actions</span>
+        <div
+          class="group/cols flex min-w-max items-center gap-3 px-5 py-3 text-[11px] font-semibold tracking-wide text-neutral-400 uppercase"
+        >
+          <span
+            v-for="column in shownColumns"
+            :key="column.key"
+            class="relative"
+            :data-column="column.key"
+            :style="columnStyle(column.key)"
+          >
+            <!-- Truncated on its own: clipping the cell would clip the handle. -->
+            <span class="block truncate" :class="column.class">{{ column.label }}</span>
+            <ColumnResizeHandle
+              :active="resizingColumn === column.key"
+              @pointerdown="startColumnResize(column.key, $event)"
+              @dblclick="resetColumns()"
+            />
+          </span>
+          <span v-if="!columnsFit" class="flex-1"></span>
+          <span class="shrink-0 text-right" :class="canDrop ? 'w-63' : 'w-52'">Actions</span>
+        </div>
       </div>
 
-      <div class="min-h-0 flex-1 overflow-y-auto">
-        <div
-          v-for="db in filteredDatabases"
-          :key="db.name"
-          class="glass-divider flex items-center gap-3 border-b px-5 py-3.5 transition last:border-b-0 hover:bg-white/50 dark:hover:bg-white/5"
-        >
-          <div class="min-w-0 flex-1">
-            <p class="truncate font-mono font-semibold text-neutral-900 dark:text-neutral-100">
-              {{ db.name }}
-            </p>
-            <p class="truncate font-mono text-xs text-neutral-500">{{ db.collation }}</p>
-          </div>
+      <div class="min-h-0 flex-1 overflow-auto scrollbar-gutter-stable" @scroll="syncHeaderScroll">
+        <div class="min-w-max">
+          <div
+            v-for="db in filteredDatabases"
+            :key="db.name"
+            class="glass-divider flex items-center gap-3 border-b px-5 py-3.5 transition last:border-b-0 hover:bg-white/50 dark:hover:bg-white/5"
+          >
+            <div class="min-w-0" :style="columnStyle('database')">
+              <p class="truncate font-mono font-semibold text-neutral-900 dark:text-neutral-100">
+                {{ db.name }}
+              </p>
+              <p class="truncate font-mono text-xs text-neutral-500">{{ db.collation }}</p>
+            </div>
 
-          <span
-            class="w-20 shrink-0 text-right font-mono text-sm text-neutral-600 dark:text-neutral-300"
-          >
-            {{ db.tableCount }}
-          </span>
-          <span
-            class="w-24 shrink-0 text-right font-mono text-sm text-neutral-600 dark:text-neutral-300"
-          >
-            {{ formatSize(db.sizeBytes) }}
-          </span>
-          <!-- Hidden rather than dashed out for a remote server: a local
+            <span
+              class="truncate text-right font-mono text-sm text-neutral-600 dark:text-neutral-300"
+              :style="columnStyle('tables')"
+            >
+              {{ db.tableCount }}
+            </span>
+            <span
+              class="truncate text-right font-mono text-sm text-neutral-600 dark:text-neutral-300"
+              :style="columnStyle('size')"
+            >
+              {{ formatSize(db.sizeBytes) }}
+            </span>
+            <!-- Hidden rather than dashed out for a remote server: a local
                project folder says nothing about a schema on somebody else's
                machine, so there is no answer to show. -->
-          <span v-if="!remote" class="w-40 shrink-0 truncate pl-6 font-mono text-xs">
-            <span v-if="db.usedBy" class="text-neutral-600 dark:text-neutral-300">{{
-              db.usedBy
-            }}</span>
-            <span v-else class="text-neutral-300 dark:text-neutral-600">-</span>
-          </span>
+            <span
+              v-if="!remote"
+              class="truncate pl-6 font-mono text-xs"
+              :style="columnStyle('usedBy')"
+            >
+              <span v-if="db.usedBy" class="text-neutral-600 dark:text-neutral-300">{{
+                db.usedBy
+              }}</span>
+              <span v-else class="text-neutral-300 dark:text-neutral-600">-</span>
+            </span>
 
-          <div
-            class="flex shrink-0 items-center justify-end gap-1.5"
-            :class="canDrop ? 'w-63' : 'w-52'"
-          >
-            <OpenInClientMenu :database="db.name" />
-            <!-- Disabled rather than hidden where it can't work, with the
+            <span v-if="!columnsFit" class="flex-1"></span>
+            <div
+              class="flex shrink-0 items-center justify-end gap-1.5"
+              :class="canDrop ? 'w-63' : 'w-52'"
+            >
+              <OpenInClientMenu :database="db.name" />
+              <!-- Disabled rather than hidden where it can't work, with the
                  reason in reach: a remote SQL Server's BACKUP lands on its own
                  disk, not this one. -->
-            <button
-              type="button"
-              :class="ACTION_BUTTON_CLASS"
-              :disabled="store.busy === db.name || !exportSupported"
-              :title="
-                !exportSupported
-                  ? `Export isn't available here - SQL Server writes a backup onto its own disk, and ${store.server?.label} isn't this machine`
-                  : `Export ${db.name} to a timestamped ${isSqlServer ? '.bak' : '.sql'} file`
-              "
-              @click="store.exportDatabase(db.name)"
-            >
-              <svg
-                v-if="store.busy === db.name"
-                viewBox="0 0 24 24"
-                fill="none"
-                class="h-4 w-4 animate-spin"
+              <button
+                type="button"
+                :class="ACTION_BUTTON_CLASS"
+                :disabled="store.busy === db.name || !exportSupported"
+                :title="
+                  !exportSupported
+                    ? `Export isn't available here - SQL Server writes a backup onto its own disk, and ${store.server?.label} isn't this machine`
+                    : `Export ${db.name} to a timestamped ${isSqlServer ? '.bak' : '.sql'} file`
+                "
+                @click="store.exportDatabase(db.name)"
               >
-                <circle
-                  cx="12"
-                  cy="12"
-                  r="9"
+                <svg
+                  v-if="store.busy === db.name"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  class="h-4 w-4 animate-spin"
+                >
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="9"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                    opacity="0.25"
+                  />
+                  <path
+                    d="M21 12a9 9 0 0 0-9-9"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                    stroke-linecap="round"
+                  />
+                </svg>
+                <svg
+                  v-else
+                  viewBox="0 0 24 24"
+                  fill="none"
                   stroke="currentColor"
-                  stroke-width="2.5"
-                  opacity="0.25"
-                />
-                <path
-                  d="M21 12a9 9 0 0 0-9-9"
+                  stroke-width="2"
+                  class="h-4 w-4"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M12 20V9m0 0-4 4m4-4 4 4M5 5h14"
+                  />
+                </svg>
+                {{ store.busy === db.name ? 'Exporting…' : 'Export' }}
+              </button>
+              <button
+                v-if="canDrop"
+                type="button"
+                class="glass-btn flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:text-red-600 disabled:opacity-40 dark:text-neutral-400 dark:hover:text-red-400"
+                :disabled="store.busy === db.name"
+                :title="`Delete ${db.name}`"
+                :aria-label="`Delete ${db.name}`"
+                @click="deleting = db"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
                   stroke="currentColor"
-                  stroke-width="2.5"
-                  stroke-linecap="round"
-                />
-              </svg>
-              <svg
-                v-else
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                class="h-4 w-4"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M12 20V9m0 0-4 4m4-4 4 4M5 5h14"
-                />
-              </svg>
-              {{ store.busy === db.name ? 'Exporting…' : 'Export' }}
-            </button>
-            <button
-              v-if="canDrop"
-              type="button"
-              class="glass-btn flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:text-red-600 disabled:opacity-40 dark:text-neutral-400 dark:hover:text-red-400"
-              :disabled="store.busy === db.name"
-              :title="`Delete ${db.name}`"
-              :aria-label="`Delete ${db.name}`"
-              @click="deleting = db"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                class="h-4 w-4"
-                aria-hidden="true"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4h6v3"
-                />
-              </svg>
-            </button>
+                  stroke-width="2"
+                  class="h-4 w-4"
+                  aria-hidden="true"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4h6v3"
+                  />
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
+      </div>
+
+      <!-- Totals for what's listed: the table's footer rather than a
+           sentence beside the search box. Spelled out in words, since bare
+           figures under the columns didn't say what they counted. -->
+      <div
+        class="glass-divider flex shrink-0 flex-wrap items-center gap-x-2 border-t bg-white/50 px-5 py-2.5 text-xs text-neutral-500 dark:bg-white/4"
+      >
+        <span>
+          <strong class="font-semibold text-neutral-700 dark:text-neutral-200">{{
+            filteredDatabases.length
+          }}</strong>
+          <template v-if="search.trim()"> of {{ store.databases.length }}</template>
+          {{ store.databases.length === 1 ? 'database' : 'databases' }}
+        </span>
+        <span aria-hidden="true">·</span>
+        <span>
+          <strong class="font-semibold text-neutral-700 dark:text-neutral-200">{{
+            shownTables.toLocaleString()
+          }}</strong>
+          {{ shownTables === 1 ? 'table' : 'tables' }}
+        </span>
+        <template v-if="shownBytes > 0">
+          <span aria-hidden="true">·</span>
+          <span>
+            <strong class="font-semibold text-neutral-700 dark:text-neutral-200">{{
+              formatSize(shownBytes)
+            }}</strong>
+            on disk
+          </span>
+        </template>
       </div>
     </div>
   </section>

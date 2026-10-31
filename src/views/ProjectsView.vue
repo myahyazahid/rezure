@@ -5,6 +5,7 @@ import { useDevServersStore } from '@/stores/devServers'
 import { servedFolderLabel } from '@/composables/servedFolder'
 import { useResizableColumns } from '@/composables/useResizableColumns'
 import SearchInput from '@/components/common/SearchInput.vue'
+import ColumnResizeHandle from '@/components/common/ColumnResizeHandle.vue'
 import BasePill from '@/components/common/BasePill.vue'
 import ProjectActionButtons from '@/components/projects/ProjectActionButtons.vue'
 import NewProjectModal from '@/components/projects/NewProjectModal.vue'
@@ -157,6 +158,17 @@ const listHeader = ref<HTMLElement | null>(null)
 function syncHeaderScroll(event: Event) {
   if (listHeader.value) listHeader.value.scrollLeft = (event.target as HTMLElement).scrollLeft
 }
+
+/** For the list's totals row: the projects shown, not every one there is. */
+const shownLinked = computed(
+  () => filteredProjects.value.filter((project) => project.kind === 'linked').length,
+)
+/** The store decides what counts as unresolved; this only narrows it to the
+ *  projects shown. */
+const shownUnresolved = computed(() => {
+  const unresolved = new Set(store.unresolvedProjects.map((project) => project.id))
+  return filteredProjects.value.filter((project) => unresolved.has(project.id)).length
+})
 
 const TOGGLE_BUTTON_CLASS =
   'flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-semibold transition'
@@ -712,7 +724,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
         class="glass-divider shrink-0 overflow-hidden border-b bg-white/40 scrollbar-gutter-stable dark:bg-white/4"
       >
         <div
-          class="flex min-w-max items-center gap-3 px-4 py-3 text-[11px] font-semibold tracking-wide text-neutral-400 uppercase"
+          class="group/cols flex min-w-max items-center gap-3 px-4 py-3 text-[11px] font-semibold tracking-wide text-neutral-400 uppercase"
         >
           <span
             v-for="column in RESIZABLE_COLUMNS"
@@ -723,23 +735,11 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
           >
             <!-- Truncated on its own: clipping the cell would clip the handle. -->
             <span class="block truncate">{{ column.label }}</span>
-            <!-- Covers the gap to the next heading and the header's full
-                 height, so it's easy to grab. -->
-            <span
-              class="group absolute -top-3 -right-3 -bottom-3 z-10 flex w-3 cursor-col-resize justify-center"
-              title="Drag to resize, double-click to fit the window"
+            <ColumnResizeHandle
+              :active="resizingColumn === column.key"
               @pointerdown="startColumnResize(column.key, $event)"
               @dblclick="resetColumns()"
-            >
-              <span
-                class="w-px transition"
-                :class="
-                  resizingColumn === column.key
-                    ? 'bg-accent-500'
-                    : 'bg-neutral-300/70 group-hover:bg-accent-400 dark:bg-white/10'
-                "
-              ></span>
-            </span>
+            />
           </span>
           <span v-if="!columnsFit" class="flex-1"></span>
           <span class="w-88 shrink-0 text-right">Actions</span>
@@ -879,6 +879,47 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- Totals for what's listed, as on the Databases page: the table's
+           footer, spelled out in words. Counts that are zero are left out. -->
+      <div
+        class="glass-divider flex shrink-0 flex-wrap items-center gap-x-2 border-t bg-white/40 px-4 py-2.5 text-xs text-neutral-500 dark:bg-white/4"
+      >
+        <span>
+          <strong class="font-semibold text-neutral-700 dark:text-neutral-200">{{
+            filteredProjects.length
+          }}</strong>
+          <template v-if="search.trim()"> of {{ store.projects.length }}</template>
+          {{ store.projects.length === 1 ? 'project' : 'projects' }}
+        </span>
+        <template v-if="shownLinked > 0">
+          <span aria-hidden="true">·</span>
+          <span>
+            <strong class="font-semibold text-neutral-700 dark:text-neutral-200">{{
+              shownLinked
+            }}</strong>
+            linked
+          </span>
+        </template>
+        <template v-if="shownUnresolved > 0">
+          <span aria-hidden="true">·</span>
+          <span>
+            <strong class="font-semibold text-neutral-700 dark:text-neutral-200">{{
+              shownUnresolved
+            }}</strong>
+            not in the hosts file
+          </span>
+        </template>
+        <template v-if="devServers.runningCount > 0">
+          <span aria-hidden="true">·</span>
+          <span>
+            <strong class="font-semibold text-emerald-700 dark:text-emerald-300">{{
+              devServers.runningCount
+            }}</strong>
+            {{ devServers.runningCount === 1 ? 'dev server' : 'dev servers' }} running
+          </span>
+        </template>
       </div>
     </div>
   </section>

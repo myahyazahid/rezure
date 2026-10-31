@@ -2,7 +2,8 @@ import { computed, onUnmounted, ref, type CSSProperties, type Ref } from 'vue'
 
 export interface ColumnSpec {
   /** The column's share of the width until the user drags one. Columns
-   *  split the room in proportion to it, so the table fits its container. */
+   *  split the room in proportion to it, so the table fits its container.
+   *  Given in px, as the width the column would have in a roomy window. */
   initial: number
   /** Narrowest it can be squeezed or dragged to. */
   min: number
@@ -100,12 +101,14 @@ export function useResizableColumns<K extends string>(
   }
 
   /** The widths the headings have on screen — what fixing them keeps. Each
-   *  heading carries `data-column="<key>"`, and they share a parent. */
+   *  heading carries `data-column="<key>"`, and they share a parent. A
+   *  column that isn't shown right now (some only apply in one mode) gets
+   *  its `initial` as a width. */
   function measure(heading: Element | null | undefined): Record<K, number> {
     const out = {} as Record<K, number>
     for (const key of keys) {
       const el = heading?.parentElement?.querySelector(`[data-column="${key}"]`)
-      const width = el?.getBoundingClientRect().width ?? 0
+      const width = el ? el.getBoundingClientRect().width : columns[key].initial
       out[key] = Math.max(columns[key].min, Math.round(width))
     }
     return out

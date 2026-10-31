@@ -84,7 +84,6 @@ export const useDatabasesStore = defineStore('databases', () => {
   const importingInto = ref<string | null>(null)
 
   const serverDown = computed(() => error.value !== null && CONNECTION_REFUSED.test(error.value))
-  const totalTables = computed(() => databases.value.reduce((sum, db) => sum + db.tableCount, 0))
 
   /** 0-100, or `null` before the first progress tick or when the schema's
    *  size couldn't be read up front.
@@ -294,7 +293,6 @@ ezure\dumps` and reports back where the file landed. */
     importError,
     importingInto,
     serverDown,
-    totalTables,
     preferredClient,
     fetchAll,
     fetchCollations,
