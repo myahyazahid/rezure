@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useProjectsStore } from '@/stores/projects'
 import { useDevServersStore } from '@/stores/devServers'
 import { servedFolderLabel } from '@/composables/servedFolder'
+import { useResizableColumns } from '@/composables/useResizableColumns'
 import SearchInput from '@/components/common/SearchInput.vue'
 import BasePill from '@/components/common/BasePill.vue'
 import ProjectActionButtons from '@/components/projects/ProjectActionButtons.vue'
@@ -128,6 +129,34 @@ const filteredProjects = computed(() => {
       project.name.toLowerCase().includes(query) || project.domain.toLowerCase().includes(query),
   )
 })
+
+/** List view columns the user can drag wider or narrower. Actions stays a
+ *  fixed width — its buttons have to line up down the list. Until the first
+ *  drag the other columns share the window's width, so the list fits it;
+ *  after that the widths are the user's, and remembered. */
+const {
+  resizing: resizingColumn,
+  styleFor: columnStyle,
+  fitting: columnsFit,
+  startResize: startColumnResize,
+  reset: resetColumns,
+} = useResizableColumns('rezure.projects.column-widths', {
+  project: { initial: 240, min: 120 },
+  domain: { initial: 144, min: 80 },
+  framework: { initial: 128, min: 80 },
+})
+const RESIZABLE_COLUMNS = [
+  { key: 'project', label: 'Project' },
+  { key: 'domain', label: 'Domain' },
+  { key: 'framework', label: 'Framework' },
+] as const
+
+/** The headings sit outside the rows' scroller so they stay put vertically;
+ *  sideways they follow it. */
+const listHeader = ref<HTMLElement | null>(null)
+function syncHeaderScroll(event: Event) {
+  if (listHeader.value) listHeader.value.scrollLeft = (event.target as HTMLElement).scrollLeft
+}
 
 const TOGGLE_BUTTON_CLASS =
   'flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-semibold transition'
@@ -498,7 +527,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
       <SearchInput
         v-model="search"
         placeholder="Search projects or domains"
-        class="w-full max-w-md"
+        class="min-w-0 flex-1"
       />
 
       <div class="glass flex shrink-0 items-center gap-0.5 rounded-full p-1">
@@ -538,8 +567,6 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
           Grid
         </button>
       </div>
-
-      <span class="shrink-0 text-sm text-neutral-500">{{ filteredProjects.length }} projects</span>
     </div>
 
     <div
@@ -677,140 +704,179 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
     </div>
 
     <div v-else class="glass mt-5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl">
-      <!-- Column headings stay put; only the rows below them move. -->
+      <!-- Column headings stay put; only the rows below them move. Both
+           reserve the scrollbar's gutter, so they are the same width and
+           scroll sideways in step. -->
       <div
-        class="glass-divider flex shrink-0 items-center gap-3 border-b bg-white/40 px-4 py-3 text-[11px] font-semibold tracking-wide text-neutral-400 uppercase dark:bg-white/4"
+        ref="listHeader"
+        class="glass-divider shrink-0 overflow-hidden border-b bg-white/40 scrollbar-gutter-stable dark:bg-white/4"
       >
-        <span class="flex-1">Project</span>
-        <span class="w-36 shrink-0">Domain</span>
-        <span class="w-32 shrink-0">Framework</span>
-        <span class="w-80 shrink-0 text-right">Actions</span>
+        <div
+          class="flex min-w-max items-center gap-3 px-4 py-3 text-[11px] font-semibold tracking-wide text-neutral-400 uppercase"
+        >
+          <span
+            v-for="column in RESIZABLE_COLUMNS"
+            :key="column.key"
+            class="relative"
+            :data-column="column.key"
+            :style="columnStyle(column.key)"
+          >
+            <!-- Truncated on its own: clipping the cell would clip the handle. -->
+            <span class="block truncate">{{ column.label }}</span>
+            <!-- Covers the gap to the next heading and the header's full
+                 height, so it's easy to grab. -->
+            <span
+              class="group absolute -top-3 -right-3 -bottom-3 z-10 flex w-3 cursor-col-resize justify-center"
+              title="Drag to resize, double-click to fit the window"
+              @pointerdown="startColumnResize(column.key, $event)"
+              @dblclick="resetColumns()"
+            >
+              <span
+                class="w-px transition"
+                :class="
+                  resizingColumn === column.key
+                    ? 'bg-accent-500'
+                    : 'bg-neutral-300/70 group-hover:bg-accent-400 dark:bg-white/10'
+                "
+              ></span>
+            </span>
+          </span>
+          <span v-if="!columnsFit" class="flex-1"></span>
+          <span class="w-88 shrink-0 text-right">Actions</span>
+        </div>
       </div>
 
-      <div class="min-h-0 flex-1 overflow-y-auto">
-        <div
-          v-for="project in filteredProjects"
-          :key="project.id"
-          class="glass-divider flex items-center gap-3 border-b px-4 py-3.5 transition last:border-b-0 hover:bg-white/50 dark:hover:bg-white/5"
-        >
-          <div class="min-w-0 flex-1">
-            <p
-              class="flex items-center gap-2 truncate font-semibold text-neutral-900 dark:text-neutral-100"
-            >
-              {{ project.name }}
-              <!-- Only linked projects carry a badge: a project in www is the
-                 norm and doesn't need labelling. -->
-              <span
-                v-if="project.kind === 'linked'"
-                class="glass-inset shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide text-neutral-500 uppercase dark:text-neutral-400"
-                title="Served from a folder outside your www directory"
-              >
-                Linked
-              </span>
-            </p>
-            <p class="truncate font-mono text-xs text-neutral-500">{{ project.path }}</p>
-            <!-- Always three lines, so every row is the same height. Leaving
-                 this one out for never-opened projects made the list ragged,
-                 and rows changed height the first time you opened one. -->
-            <p v-if="project.missing" class="truncate text-xs text-amber-600 dark:text-amber-400">
-              Folder not found - it may have moved, or be on a drive that isn't connected.
-            </p>
-            <p
-              v-else-if="project.domainInvalid"
-              class="truncate text-xs text-amber-600 dark:text-amber-400"
-              title="Rename the folder using letters, digits and hyphens only"
-            >
-              Not served - rename the folder using letters, digits and hyphens only.
-            </p>
-            <p v-else class="truncate text-xs text-neutral-400">
-              {{ lastOpenedLabel(project) }}
-            </p>
-          </div>
-          <span
-            class="w-36 shrink-0 truncate font-mono text-xs"
-            :class="domainClass(project.hasHostsEntry)"
-            :title="domainTitle(project.hasHostsEntry)"
+      <div class="min-h-0 flex-1 overflow-auto scrollbar-gutter-stable" @scroll="syncHeaderScroll">
+        <div class="min-w-max">
+          <div
+            v-for="project in filteredProjects"
+            :key="project.id"
+            class="glass-divider flex items-center gap-3 border-b px-4 py-3.5 transition last:border-b-0 hover:bg-white/50 dark:hover:bg-white/5"
           >
-            {{ project.domain }}
-          </span>
-          <span class="w-32 shrink-0">
-            <!-- The badge is the way in to correcting it: detection reads
-                 marker files, and a project can always fool it. -->
-            <button
-              type="button"
-              class="max-w-full rounded-full transition hover:opacity-80 disabled:cursor-default disabled:hover:opacity-100"
-              :disabled="project.missing"
-              :title="frameworkTitle(project)"
-              @click="store.openFrameworkModal(project.id)"
-            >
-              <BasePill class="max-w-full">
-                <span class="truncate">{{ frameworkBadge(project) }}</span>
+            <div class="min-w-0" :style="columnStyle('project')">
+              <!-- No path line: it's in the tooltip, and Open folder is one
+                   click away in the actions. -->
+              <p
+                class="flex items-center gap-2 font-semibold text-neutral-900 dark:text-neutral-100"
+                :title="project.path"
+              >
+                <span class="truncate">{{ project.name }}</span>
+                <!-- Only linked projects carry a badge: a project in www is the
+                 norm and doesn't need labelling. -->
                 <span
-                  v-if="project.frameworkOverridden"
-                  class="ml-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent-500"
-                  aria-label="set manually"
-                ></span>
-              </BasePill>
-            </button>
-          </span>
-          <!-- Every control keeps its column across all rows. The buttons used
+                  v-if="project.kind === 'linked'"
+                  class="glass-inset shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide text-neutral-500 uppercase dark:text-neutral-400"
+                  title="Served from a folder outside your www directory"
+                >
+                  Linked
+                </span>
+              </p>
+              <!-- Always two lines, so every row is the same height. Leaving
+                   this one out for never-opened projects made the list ragged,
+                   and rows changed height the first time you opened one. -->
+              <p v-if="project.missing" class="truncate text-xs text-amber-600 dark:text-amber-400">
+                Folder not found - it may have moved, or be on a drive that isn't connected.
+              </p>
+              <p
+                v-else-if="project.domainInvalid"
+                class="truncate text-xs text-amber-600 dark:text-amber-400"
+                title="Rename the folder using letters, digits and hyphens only"
+              >
+                Not served - rename the folder using letters, digits and hyphens only.
+              </p>
+              <p v-else class="truncate text-xs text-neutral-400">
+                {{ lastOpenedLabel(project) }}
+              </p>
+            </div>
+            <span
+              class="truncate font-mono text-xs"
+              :style="columnStyle('domain')"
+              :class="domainClass(project.hasHostsEntry)"
+              :title="domainTitle(project.hasHostsEntry)"
+            >
+              {{ project.domain }}
+            </span>
+            <span :style="columnStyle('framework')">
+              <!-- The badge is the way in to correcting it: detection reads
+                 marker files, and a project can always fool it. -->
+              <button
+                type="button"
+                class="max-w-full rounded-full transition hover:opacity-80 disabled:cursor-default disabled:hover:opacity-100"
+                :disabled="project.missing"
+                :title="frameworkTitle(project)"
+                @click="store.openFrameworkModal(project.id)"
+              >
+                <BasePill class="max-w-full">
+                  <span class="truncate">{{ frameworkBadge(project) }}</span>
+                  <span
+                    v-if="project.frameworkOverridden"
+                    class="ml-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent-500"
+                    aria-label="set manually"
+                  ></span>
+                </BasePill>
+              </button>
+            </span>
+            <!-- Every control keeps its column across all rows. The buttons used
                to be dropped rather than hidden, so a row without an unlink
                button pushed Open to the right and the actions never lined up
-               down the list. -->
-          <div class="flex w-88 shrink-0 items-center justify-end gap-1">
-            <ProjectActionButtons
-              :class="project.missing || project.domainInvalid ? 'invisible' : ''"
-              :project-id="project.id"
-              :domain="project.domain"
-              :path="project.path"
-              :php-version="project.phpVersion"
-              :node-version="project.nodeVersion"
-              :dev-server="isDevServer(project)"
-            />
-            <!-- One slot, two meanings: a linked project is unlinked (X, the
+               down the list. The spacer takes whatever width the columns
+               leave, keeping the actions against the right edge. -->
+            <span v-if="!columnsFit" class="flex-1"></span>
+            <div class="flex w-88 shrink-0 items-center justify-end gap-1">
+              <ProjectActionButtons
+                :class="project.missing || project.domainInvalid ? 'invisible' : ''"
+                :project-id="project.id"
+                :domain="project.domain"
+                :path="project.path"
+                :php-version="project.phpVersion"
+                :node-version="project.nodeVersion"
+                :dev-server="isDevServer(project)"
+              />
+              <!-- One slot, two meanings: a linked project is unlinked (X, the
                folder is left alone); a project in www is deleted (trash, the
                folder goes to the Recycle Bin, behind a typed confirmation).
                `h-9 w-9` matches the height of the actions toolbar beside it. -->
-            <button
-              v-if="project.kind === 'linked'"
-              type="button"
-              title="Remove from Rezure (the folder is left alone)"
-              class="glass-ghost flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition hover:text-red-600 dark:hover:text-red-400"
-              @click="confirmingUnlink = project.id"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                class="h-4 w-4"
+              <button
+                v-if="project.kind === 'linked'"
+                type="button"
+                title="Remove from Rezure (the folder is left alone)"
+                class="glass-ghost flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition hover:text-red-600 dark:hover:text-red-400"
+                @click="confirmingUnlink = project.id"
               >
-                <path stroke-linecap="round" d="M18.4 5.6 5.6 18.4M5.6 5.6l12.8 12.8" />
-              </svg>
-            </button>
-            <button
-              v-else
-              type="button"
-              :title="`Delete ${project.name} (the folder goes to the Recycle Bin)`"
-              :aria-label="`Delete ${project.name}`"
-              class="glass-ghost flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition hover:text-red-600 dark:hover:text-red-400"
-              @click="deletingProject = project"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                class="h-4 w-4"
-                aria-hidden="true"
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  class="h-4 w-4"
+                >
+                  <path stroke-linecap="round" d="M18.4 5.6 5.6 18.4M5.6 5.6l12.8 12.8" />
+                </svg>
+              </button>
+              <button
+                v-else
+                type="button"
+                :title="`Delete ${project.name} (the folder goes to the Recycle Bin)`"
+                :aria-label="`Delete ${project.name}`"
+                class="glass-ghost flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition hover:text-red-600 dark:hover:text-red-400"
+                @click="deletingProject = project"
               >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4h6v3"
-                />
-              </svg>
-            </button>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  class="h-4 w-4"
+                  aria-hidden="true"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4h6v3"
+                  />
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
       </div>

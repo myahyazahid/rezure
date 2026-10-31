@@ -117,6 +117,20 @@ beneran kekirim gak" itu pertanyaan harian buat siapapun yang develop fitur auth
 
 ---
 
+## Perbaikan UI (di luar fase, atas permintaan maintainer)
+
+Murni frontend — tidak ada perubahan command, store logic, atau skema.
+
+- [x] **Add connection jadi dialog dua panel.** Kiri: Server type (logo asli), Server engine,
+      preview baris koneksi yang live; kanan: form (Host / IP + Port terpisah, SSH, Read-only,
+      More options). `TechIcon` dapat logo asli MySQL (dolphin) dan SQL Server dari devicon (MIT)
+- [x] **Changelog bisa di-collapse**; status buka/tutup disimpan di store `changelog` selama app
+      jalan, hanya rilis yang baru muncul yang terbuka otomatis
+- Verifikasi: `eslint`, `prettier --check`, `vue-tsc` bersih. Tampilan Add connection sudah dilihat
+  maintainer di app; collapse changelog yang tetap tertutup belum dicek di app
+
+---
+
 ## Catatan Arsitektur
 
 Fitur ini **tidak membutuhkan sistem plugin dinamis**. Fondasi `Service` trait yang sudah ada di `docs/architecture.md` sudah cukup — menambah service baru cukup dengan mengimplementasikan trait tersebut dan compile ulang. Sama seperti Redis (sekarang v4 Fase 4.6), sistem plugin (dynamic loading tanpa compile ulang) baru relevan jika suatu saat ingin membuka jalur bagi kontributor/komunitas luar menambah service tanpa menyentuh source code inti — itu dipertimbangkan terpisah, bukan prasyarat untuk fase ini.
