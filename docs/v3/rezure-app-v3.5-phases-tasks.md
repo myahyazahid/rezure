@@ -201,7 +201,7 @@ Live, total jadi 36. Gaya dan aturannya sama dengan 22 yang lama: SVG original `
 | `baby-jellyfish` | kepala berdenyut sambil melayang, tentakel melambai | |
 | `baby-lamb` | bulu wol mengembang pelan, telinga berkedut | |
 | `baby-unicorn` | surai bergoyang, kilau muncul di dekat tanduk | |
-| `baby-kitty` | kepala bergoyang, pita bergoyang, telinga berkedut, hati kecil melayang | ditambahkan belakangan: versi Live dari stiker Classic "Kitty" (`cat.svg`), wajah dan pita yang sama. Di palet tepat setelah "Sleepy kitten" |
+| `baby-kitty` | lompat kecil dengan squash & stretch, kepala bergoyang, mata melirik kiri-kanan dan kedip dua kali, sesekali "meow" (mulut terbuka), kumis dan kedua telinga berkedut, pita bergoyang, kaki depan melambai, tiga hati muncul dan melayang | dibuat lebih ramai dari stiker lain atas permintaan maintainer ("kurang hidup"). Mulut terbuka/tertutup ditukar lewat `opacity`, jadi tetap hanya `transform`/`opacity`; versi diam menampilkan mulut tertutup | ditambahkan belakangan: versi Live dari stiker Classic "Kitty" (`cat.svg`), wajah dan pita yang sama. Di palet tepat setelah "Sleepy kitten" |
 
 - [x] Rust: varian baru di `StickerKind` (kebab-case otomatis, jadi `BabyArcticFox` =
       `"baby-arctic-fox"`). Test `live_kinds_are_kebab_case_and_animate_defaults_on` ditambah
