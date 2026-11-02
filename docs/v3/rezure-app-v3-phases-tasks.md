@@ -498,7 +498,9 @@ dari tiga kategori (Default, Girls, Mens), dari menu sendiri di sidebar. Tidak a
 - **Tema ada empat belas:** awalnya tiga (satu per kategori). Atas permintaan maintainer ditambah
   **Soft Pink** (Girls) dan **Navy** (Mens), lalu enam lagi dari rekomendasi yang disetujui
   maintainer: **Lavender Dream**, **Peach**, **Matcha** (Girls) serta **Carbon**, **Forest**,
-  **Terminal** (Mens), lalu **Full Glass**, **Clear Glass**, dan **Sky Glass** (Default):
+  **Terminal** (Mens), lalu **Full Glass**, **Clear Glass**, dan **Sky Glass** (Default).
+  Sebelas tema lagi (termasuk kategori baru Developer) ditambahkan di v3.5, lihat
+  `docs/v3/rezure-app-v3.5-phases-tasks.md`, bagian "Tema Appearance tambahan":
 
   | Kategori | Tema | Aksen | Latar (mesh) & dekorasi |
   |---|---|---|---|

@@ -40,6 +40,16 @@ export const THEMES: readonly ThemeInfo[] = [
     forcesDark: true,
   },
   {
+    id: 'highcontrast',
+    name: 'High Contrast',
+    description: 'Solid surfaces, hard edges and stronger text - the easiest to read.',
+  },
+  {
+    id: 'aurora',
+    name: 'Aurora',
+    description: 'Teal and violet northern lights, with soft light ribbons.',
+  },
+  {
     id: 'blossom',
     name: 'Blossom',
     description: 'Pink and lavender, scattered with petals.',
@@ -65,6 +75,16 @@ export const THEMES: readonly ThemeInfo[] = [
     description: 'Soft mint and sage, with tiny leaves.',
   },
   {
+    id: 'honey',
+    name: 'Honey',
+    description: 'Warm honey and cream, with little honeycombs.',
+  },
+  {
+    id: 'berry',
+    name: 'Berry',
+    description: 'Raspberry and plum, with tiny berries.',
+  },
+  {
     id: 'midnight',
     name: 'Midnight',
     description: 'Navy and teal with a faint grid.',
@@ -88,6 +108,45 @@ export const THEMES: readonly ThemeInfo[] = [
     id: 'terminal',
     name: 'Terminal',
     description: 'Neon green on black, with CRT scanlines.',
+  },
+  {
+    id: 'synthwave',
+    name: 'Synthwave',
+    description: 'Magenta and sunset orange on a retro grid.',
+  },
+  {
+    id: 'arctic',
+    name: 'Arctic',
+    description: 'Icy cyan and snow white, with snowflakes.',
+  },
+  // Editor palettes developers already know. Light mode uses each
+  // palette's own light variant (Nord Snow Storm, Catppuccin Latte,
+  // Gruvbox light, Tokyo Night Day); Dracula's light mode is a pale
+  // lavender built from its dark palette's colours.
+  {
+    id: 'nord',
+    name: 'Nord',
+    description: 'Frost blue on polar grey, with a dot grid.',
+  },
+  {
+    id: 'catppuccin',
+    name: 'Catppuccin',
+    description: 'Latte by day, Mocha by night, with paw prints.',
+  },
+  {
+    id: 'dracula',
+    name: 'Dracula',
+    description: 'Purple and pink on dusky grey, with bats.',
+  },
+  {
+    id: 'gruvbox',
+    name: 'Gruvbox',
+    description: 'Retro orange on warm sand, with pinstripes.',
+  },
+  {
+    id: 'tokyonight',
+    name: 'Tokyo Night',
+    description: 'Neon blue on deep indigo, with falling rain.',
   },
 ]
 

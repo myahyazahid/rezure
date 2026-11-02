@@ -18,6 +18,17 @@ export type ThemePreset =
   | 'carbon'
   | 'forest'
   | 'terminal'
+  | 'highcontrast'
+  | 'aurora'
+  | 'honey'
+  | 'berry'
+  | 'synthwave'
+  | 'arctic'
+  | 'nord'
+  | 'catppuccin'
+  | 'dracula'
+  | 'gruvbox'
+  | 'tokyonight'
 
 export interface AppearanceSettings {
   mode: ThemeMode

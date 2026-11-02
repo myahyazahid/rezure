@@ -1083,6 +1083,522 @@ body,
   --glass-fill: rgb(90 105 180 / var(--glass-solidity));
 }
 
+/* High Contrast (category Default): legibility over looks. Solid surfaces
+   instead of glass, 1px edges dark enough to stand out (3:1 or better)
+   against what they sit on, no backdrop colour or pattern, no blur, and an
+   accent two steps darker than usual (500 is blue-700) so accent text
+   passes 4.5:1. The muted greys the app writes as text-neutral-400/500 are
+   lifted too; like Sky Glass, this touches the Tailwind palette, and only
+   those two steps. Replaces glass tokens, so the dark block must override
+   every token this one does. */
+[data-theme='highcontrast'] {
+  --accent-50: var(--color-blue-50);
+  --accent-100: var(--color-blue-100);
+  --accent-200: var(--color-blue-200);
+  --accent-300: var(--color-blue-400);
+  --accent-400: var(--color-blue-600);
+  --accent-500: var(--color-blue-700);
+  --accent-600: var(--color-blue-800);
+  --accent-700: var(--color-blue-900);
+  --accent-800: var(--color-blue-950);
+  --accent-900: var(--color-blue-950);
+  --accent-950: var(--color-blue-950);
+  --accent-alt: var(--color-blue-500);
+
+  --color-neutral-400: var(--color-neutral-600);
+  --color-neutral-500: var(--color-neutral-700);
+
+  --app-pattern: none;
+  --app-mesh: linear-gradient(180deg, #ffffff, #ffffff);
+
+  --glass-bg: rgb(255 255 255);
+  --glass-bg-hover: var(--color-neutral-100);
+  --glass-border: rgb(0 0 0 / 0.55);
+  --glass-border-hover: rgb(0 0 0 / 0.85);
+  --glass-highlight: transparent;
+  --glass-shadow: none;
+
+  --glass-strong-bg: rgb(255 255 255);
+  --glass-strong-shadow: 0 0 0 1px rgb(0 0 0 / 0.85), 0 12px 32px -12px rgb(0 0 0 / 0.35);
+  --glass-blur: 0px;
+
+  --glass-inset-bg: var(--color-neutral-50);
+  --glass-inset-border: rgb(0 0 0 / 0.5);
+
+  --glass-selected-bg: var(--color-blue-50);
+  --glass-selected-border: var(--color-blue-700);
+  --glass-selected-shadow: none;
+
+  --glass-accent-bg: rgb(255 255 255);
+  --glass-accent-bg-hover: var(--color-neutral-100);
+  --glass-accent-border: rgb(0 0 0 / 0.85);
+  --glass-accent-text: var(--color-black);
+  --glass-accent-icon: var(--color-blue-700);
+  --glass-accent-shadow: none;
+
+  --glass-raised-bg: rgb(255 255 255);
+  --glass-raised-bg-hover: var(--color-neutral-100);
+  --glass-raised-shadow: 0 0 0 1px rgb(0 0 0 / 0.55);
+
+  --glass-ghost-text: var(--color-neutral-800);
+  --glass-ghost-text-hover: var(--color-black);
+  --glass-ghost-bg-hover: var(--color-neutral-100);
+
+  --glass-divider: rgb(0 0 0 / 0.35);
+  --glass-scrim: rgb(0 0 0 / 0.5);
+}
+
+.dark[data-theme='highcontrast'],
+.dark [data-theme='highcontrast'] {
+  /* Blue-700 would vanish on black; the scale moves up three steps. */
+  --accent-300: var(--color-blue-200);
+  --accent-400: var(--color-blue-300);
+  --accent-500: var(--color-blue-400);
+  --accent-600: var(--color-blue-500);
+  --accent-700: var(--color-blue-600);
+
+  --color-neutral-400: var(--color-neutral-300);
+  --color-neutral-500: var(--color-neutral-300);
+
+  --app-pattern: none;
+  --app-mesh: linear-gradient(180deg, #000000, #000000);
+
+  --glass-bg: rgb(10 10 10);
+  --glass-bg-hover: rgb(30 30 30);
+  --glass-border: rgb(255 255 255 / 0.6);
+  --glass-border-hover: rgb(255 255 255 / 0.9);
+  --glass-highlight: transparent;
+  --glass-shadow: none;
+
+  --glass-strong-bg: rgb(10 10 10);
+  --glass-strong-shadow: 0 0 0 1px rgb(255 255 255 / 0.85), 0 12px 32px -12px rgb(0 0 0 / 0.9);
+  --glass-blur: 0px;
+
+  --glass-inset-bg: rgb(22 22 22);
+  --glass-inset-border: rgb(255 255 255 / 0.5);
+
+  --glass-selected-bg: var(--color-blue-950);
+  --glass-selected-border: var(--color-blue-300);
+  --glass-selected-shadow: none;
+
+  --glass-accent-bg: rgb(0 0 0);
+  --glass-accent-bg-hover: rgb(30 30 30);
+  --glass-accent-border: rgb(255 255 255 / 0.85);
+  --glass-accent-text: var(--color-white);
+  --glass-accent-icon: var(--color-blue-300);
+  --glass-accent-shadow: none;
+
+  --glass-raised-bg: rgb(30 30 30);
+  --glass-raised-bg-hover: rgb(44 44 44);
+  --glass-raised-shadow: 0 0 0 1px rgb(255 255 255 / 0.55);
+
+  --glass-ghost-text: var(--color-neutral-200);
+  --glass-ghost-text-hover: var(--color-white);
+  --glass-ghost-bg-hover: rgb(40 40 40);
+
+  --glass-divider: rgb(255 255 255 / 0.35);
+  --glass-scrim: rgb(0 0 0 / 0.7);
+}
+
+/* Aurora (category Default): teal accent over mint and violet, with soft
+   ribbons of light; in dark mode the northern lights over a night sky,
+   with stars. */
+[data-theme='aurora'] {
+  --accent-50: var(--color-teal-50);
+  --accent-100: var(--color-teal-100);
+  --accent-200: var(--color-teal-200);
+  --accent-300: var(--color-teal-300);
+  --accent-400: var(--color-teal-400);
+  --accent-500: var(--color-teal-500);
+  --accent-600: var(--color-teal-600);
+  --accent-700: var(--color-teal-700);
+  --accent-800: var(--color-teal-800);
+  --accent-900: var(--color-teal-900);
+  --accent-950: var(--color-teal-950);
+  --accent-alt: var(--color-violet-400);
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='160'><g fill='none' stroke='%23ffffff' stroke-linecap='round'><path stroke-opacity='0.45' stroke-width='3' d='M0 50 C60 20 160 80 240 50'/><path stroke-opacity='0.3' stroke-width='2' d='M0 120 C80 95 160 145 240 120'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(110 231 183 / 0.45), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(196 181 253 / 0.45), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(153 246 228 / 0.35), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(167 139 250 / 0.3), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(125 211 252 / 0.35), transparent 70%),
+    linear-gradient(180deg, #f0fbf7, #f3f1fb);
+}
+
+.dark[data-theme='aurora'],
+.dark [data-theme='aurora'] {
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='160'><g fill='none' stroke='%2399f6e4' stroke-linecap='round'><path stroke-opacity='0.05' stroke-width='3' d='M0 50 C60 20 160 80 240 50'/><path stroke-opacity='0.04' stroke-width='2' d='M0 120 C80 95 160 145 240 120'/></g><g fill='%23ffffff'><circle cx='30' cy='22' r='1' fill-opacity='0.3'/><circle cx='150' cy='14' r='0.8' fill-opacity='0.25'/><circle cx='200' cy='92' r='1.1' fill-opacity='0.2'/><circle cx='90' cy='140' r='0.8' fill-opacity='0.25'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(70% 45% at 20% 0%, rgb(16 185 129 / 0.35), transparent 70%),
+    radial-gradient(50% 50% at 100% 10%, rgb(124 58 237 / 0.32), transparent 70%),
+    radial-gradient(45% 40% at 55% 35%, rgb(45 212 191 / 0.16), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(76 29 149 / 0.35), transparent 70%),
+    radial-gradient(45% 50% at 5% 100%, rgb(6 78 59 / 0.4), transparent 70%),
+    linear-gradient(180deg, #050b14, #04070d);
+}
+
+/* Honey (category Girls): amber accent over cream and soft yellow, with
+   little honeycombs. Amber is light for its step, so 600 and up shift one
+   step darker than the scale, or accent text on cream would be unreadable. */
+[data-theme='honey'] {
+  --accent-50: var(--color-amber-50);
+  --accent-100: var(--color-amber-100);
+  --accent-200: var(--color-amber-200);
+  --accent-300: var(--color-amber-300);
+  --accent-400: var(--color-amber-400);
+  --accent-500: var(--color-amber-500);
+  --accent-600: var(--color-amber-700);
+  --accent-700: var(--color-amber-800);
+  --accent-800: var(--color-amber-900);
+  --accent-900: var(--color-amber-950);
+  --accent-950: var(--color-amber-950);
+  --accent-alt: var(--color-yellow-300);
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><defs><path id='h' d='M0 -10 L8.66 -5 L8.66 5 L0 10 L-8.66 5 L-8.66 -5 Z'/></defs><g fill='%23ffffff' fill-opacity='0.2' stroke='%23ffffff' stroke-opacity='0.7' stroke-width='1.4' stroke-linejoin='round'><use href='%23h' transform='translate(40 40)'/><use href='%23h' transform='translate(57.32 40)'/><use href='%23h' transform='translate(48.66 55)'/><use href='%23h' transform='translate(120 112) scale(0.8)'/><use href='%23h' transform='translate(122 30) scale(0.55)'/></g><circle cx='34' cy='122' r='1.5' fill='%23ffffff' fill-opacity='0.6'/></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(252 211 77 / 0.5), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(254 240 138 / 0.55), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(254 243 199 / 0.6), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(253 186 116 / 0.35), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(253 230 138 / 0.5), transparent 70%),
+    linear-gradient(180deg, #fffbeb, #fdf6e3);
+}
+
+.dark[data-theme='honey'],
+.dark [data-theme='honey'] {
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><defs><path id='h' d='M0 -10 L8.66 -5 L8.66 5 L0 10 L-8.66 5 L-8.66 -5 Z'/></defs><g fill='%23fcd34d' fill-opacity='0.03' stroke='%23fcd34d' stroke-opacity='0.08' stroke-width='1.4' stroke-linejoin='round'><use href='%23h' transform='translate(40 40)'/><use href='%23h' transform='translate(57.32 40)'/><use href='%23h' transform='translate(48.66 55)'/><use href='%23h' transform='translate(120 112) scale(0.8)'/><use href='%23h' transform='translate(122 30) scale(0.55)'/></g><circle cx='34' cy='122' r='1.5' fill='%23fcd34d' fill-opacity='0.08'/></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(217 119 6 / 0.26), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(202 138 4 / 0.14), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(120 53 15 / 0.22), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(180 83 9 / 0.2), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(68 64 60 / 0.35), transparent 70%),
+    linear-gradient(180deg, #15100a, #0d0a06);
+}
+
+/* Berry (category Girls): raspberry accent (fuchsia mixed with rose) over
+   plum and berry tones, deeper than Blossom's pink, with tiny berries. */
+[data-theme='berry'] {
+  --accent-50: color-mix(in oklab, var(--color-fuchsia-50) 60%, var(--color-rose-50));
+  --accent-100: color-mix(in oklab, var(--color-fuchsia-100) 60%, var(--color-rose-100));
+  --accent-200: color-mix(in oklab, var(--color-fuchsia-200) 60%, var(--color-rose-200));
+  --accent-300: color-mix(in oklab, var(--color-fuchsia-300) 60%, var(--color-rose-300));
+  --accent-400: color-mix(in oklab, var(--color-fuchsia-400) 60%, var(--color-rose-400));
+  --accent-500: color-mix(in oklab, var(--color-fuchsia-500) 60%, var(--color-rose-500));
+  --accent-600: color-mix(in oklab, var(--color-fuchsia-600) 60%, var(--color-rose-600));
+  --accent-700: color-mix(in oklab, var(--color-fuchsia-700) 60%, var(--color-rose-700));
+  --accent-800: color-mix(in oklab, var(--color-fuchsia-800) 60%, var(--color-rose-800));
+  --accent-900: color-mix(in oklab, var(--color-fuchsia-900) 60%, var(--color-rose-900));
+  --accent-950: color-mix(in oklab, var(--color-fuchsia-950) 60%, var(--color-rose-950));
+  --accent-alt: var(--color-violet-400);
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='150' height='150'><defs><g id='b'><circle r='3'/><circle cx='5' r='3'/><circle cx='-5' r='3'/><circle cx='2.5' cy='4.3' r='3'/><circle cx='-2.5' cy='4.3' r='3'/><circle cx='2.5' cy='-4.3' r='3'/><circle cx='-2.5' cy='-4.3' r='3'/><path d='M0 -8 C3 -12 6 -11 7 -9 C4 -9 2 -8 0 -8 Z'/></g></defs><g fill='%23ffffff' fill-opacity='0.55'><use href='%23b' transform='translate(34 38)'/><use href='%23b' transform='translate(108 102) scale(0.8) rotate(15)'/><use href='%23b' transform='translate(112 32) scale(0.55) rotate(-20)'/><circle cx='36' cy='118' r='1.5'/><circle cx='74' cy='72' r='1.2'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(217 70 239 / 0.3), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(244 63 94 / 0.22), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(245 208 254 / 0.45), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(126 34 206 / 0.22), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(190 24 93 / 0.18), transparent 70%),
+    linear-gradient(180deg, #fbf2f8, #f7eff7);
+}
+
+.dark[data-theme='berry'],
+.dark [data-theme='berry'] {
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='150' height='150'><defs><g id='b'><circle r='3'/><circle cx='5' r='3'/><circle cx='-5' r='3'/><circle cx='2.5' cy='4.3' r='3'/><circle cx='-2.5' cy='4.3' r='3'/><circle cx='2.5' cy='-4.3' r='3'/><circle cx='-2.5' cy='-4.3' r='3'/><path d='M0 -8 C3 -12 6 -11 7 -9 C4 -9 2 -8 0 -8 Z'/></g></defs><g fill='%23f0abfc' fill-opacity='0.07'><use href='%23b' transform='translate(34 38)'/><use href='%23b' transform='translate(108 102) scale(0.8) rotate(15)'/><use href='%23b' transform='translate(112 32) scale(0.55) rotate(-20)'/><circle cx='36' cy='118' r='1.5'/><circle cx='74' cy='72' r='1.2'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(55% 50% at 0% 0%, rgb(162 28 175 / 0.38), transparent 70%),
+    radial-gradient(45% 45% at 100% 0%, rgb(190 18 60 / 0.2), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(88 28 135 / 0.3), transparent 70%),
+    radial-gradient(50% 50% at 92% 100%, rgb(134 25 143 / 0.3), transparent 70%),
+    radial-gradient(45% 50% at 5% 100%, rgb(76 5 25 / 0.4), transparent 70%),
+    linear-gradient(180deg, #160a14, #0d070c);
+}
+
+/* Synthwave (category Mens): magenta accent with a sunset-orange gradient
+   stop, over pink, violet and a touch of cyan, on a retro grid. */
+[data-theme='synthwave'] {
+  --accent-50: var(--color-fuchsia-50);
+  --accent-100: var(--color-fuchsia-100);
+  --accent-200: var(--color-fuchsia-200);
+  --accent-300: var(--color-fuchsia-300);
+  --accent-400: var(--color-fuchsia-400);
+  --accent-500: var(--color-fuchsia-500);
+  --accent-600: var(--color-fuchsia-600);
+  --accent-700: var(--color-fuchsia-700);
+  --accent-800: var(--color-fuchsia-800);
+  --accent-900: var(--color-fuchsia-900);
+  --accent-950: var(--color-fuchsia-950);
+  --accent-alt: var(--color-orange-400);
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'><path d='M40 .5H.5V40' fill='none' stroke='%23c026d3' stroke-opacity='0.08'/></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(232 121 249 / 0.4), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(251 146 60 / 0.38), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(196 181 253 / 0.3), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(34 211 238 / 0.25), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(244 114 182 / 0.35), transparent 70%),
+    linear-gradient(180deg, #fbf0fb, #f5eefb);
+}
+
+.dark[data-theme='synthwave'],
+.dark [data-theme='synthwave'] {
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'><path d='M40 .5H.5V40' fill='none' stroke='%23f0abfc' stroke-opacity='0.07'/></svg>");
+
+  --app-mesh:
+    radial-gradient(55% 50% at 0% 0%, rgb(192 38 211 / 0.4), transparent 70%),
+    radial-gradient(45% 45% at 100% 0%, rgb(249 115 22 / 0.26), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(76 29 149 / 0.4), transparent 70%),
+    radial-gradient(50% 50% at 92% 100%, rgb(8 145 178 / 0.22), transparent 70%),
+    radial-gradient(45% 50% at 5% 100%, rgb(219 39 119 / 0.3), transparent 70%),
+    linear-gradient(180deg, #140a24, #0b0616);
+}
+
+/* Arctic (category Mens): icy cyan over snow white and pale blue, with
+   snowflakes. Cyan is light for its step, so the scale from 500 down sits
+   one step darker (500 is cyan-600), and dark mode moves it back. */
+[data-theme='arctic'] {
+  --accent-50: var(--color-cyan-50);
+  --accent-100: var(--color-cyan-100);
+  --accent-200: var(--color-cyan-200);
+  --accent-300: var(--color-cyan-300);
+  --accent-400: var(--color-cyan-500);
+  --accent-500: var(--color-cyan-600);
+  --accent-600: var(--color-cyan-700);
+  --accent-700: var(--color-cyan-800);
+  --accent-800: var(--color-cyan-900);
+  --accent-900: var(--color-cyan-950);
+  --accent-950: var(--color-cyan-950);
+  --accent-alt: var(--color-sky-300);
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><defs><g id='f'><path d='M0 -9 V9 M-7.8 -4.5 L7.8 4.5 M-7.8 4.5 L7.8 -4.5 M-2.5 -7 L0 -4.5 L2.5 -7 M-2.5 7 L0 4.5 L2.5 7'/></g></defs><g fill='none' stroke='%23ffffff' stroke-opacity='0.8' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'><use href='%23f' transform='translate(36 40)'/><use href='%23f' transform='translate(112 108) scale(0.8) rotate(15)'/><use href='%23f' transform='translate(120 32) scale(0.5)'/></g><g fill='%23ffffff' fill-opacity='0.7'><circle cx='40' cy='124' r='1.6'/><circle cx='78' cy='76' r='1.2'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(165 243 252 / 0.55), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(186 230 253 / 0.6), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(255 255 255 / 0.7), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(103 232 249 / 0.35), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(199 210 254 / 0.4), transparent 70%),
+    linear-gradient(180deg, #f5fcfe, #eef7fb);
+}
+
+.dark[data-theme='arctic'],
+.dark [data-theme='arctic'] {
+  --accent-400: var(--color-cyan-400);
+  --accent-500: var(--color-cyan-500);
+  --accent-600: var(--color-cyan-600);
+  --accent-700: var(--color-cyan-700);
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><defs><g id='f'><path d='M0 -9 V9 M-7.8 -4.5 L7.8 4.5 M-7.8 4.5 L7.8 -4.5 M-2.5 -7 L0 -4.5 L2.5 -7 M-2.5 7 L0 4.5 L2.5 7'/></g></defs><g fill='none' stroke='%23a5f3fc' stroke-opacity='0.08' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'><use href='%23f' transform='translate(36 40)'/><use href='%23f' transform='translate(112 108) scale(0.8) rotate(15)'/><use href='%23f' transform='translate(120 32) scale(0.5)'/></g><g fill='%23a5f3fc' fill-opacity='0.08'><circle cx='40' cy='124' r='1.6'/><circle cx='78' cy='76' r='1.2'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(55% 50% at 0% 0%, rgb(8 145 178 / 0.32), transparent 70%),
+    radial-gradient(45% 45% at 100% 0%, rgb(14 165 233 / 0.18), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(22 78 99 / 0.35), transparent 70%),
+    radial-gradient(50% 50% at 92% 100%, rgb(103 232 249 / 0.1), transparent 70%),
+    radial-gradient(45% 50% at 5% 100%, rgb(30 58 138 / 0.3), transparent 70%),
+    linear-gradient(180deg, #071219, #050b10);
+}
+
+/* Developer palettes (category Developer): Nord, Catppuccin, Dracula,
+   Gruvbox and Tokyo Night, each in its own published colours. A palette
+   names one accent colour rather than a 50–950 scale, so the scale is
+   derived here from `--accent-base`: the lighter steps mixed toward white,
+   the darker ones toward black. A theme only sets `--accent-base`, and its
+   dark block may set a different one; the steps follow, because the var()
+   inside them resolves against the element's final `--accent-base`. Glass
+   stays default for all five. */
+:is(
+  [data-theme='nord'],
+  [data-theme='catppuccin'],
+  [data-theme='dracula'],
+  [data-theme='gruvbox'],
+  [data-theme='tokyonight']
+) {
+  --accent-50: color-mix(in oklab, var(--accent-base) 8%, white);
+  --accent-100: color-mix(in oklab, var(--accent-base) 16%, white);
+  --accent-200: color-mix(in oklab, var(--accent-base) 32%, white);
+  --accent-300: color-mix(in oklab, var(--accent-base) 52%, white);
+  --accent-400: color-mix(in oklab, var(--accent-base) 76%, white);
+  --accent-500: var(--accent-base);
+  --accent-600: color-mix(in oklab, var(--accent-base) 82%, black);
+  --accent-700: color-mix(in oklab, var(--accent-base) 66%, black);
+  --accent-800: color-mix(in oklab, var(--accent-base) 52%, black);
+  --accent-900: color-mix(in oklab, var(--accent-base) 40%, black);
+  --accent-950: color-mix(in oklab, var(--accent-base) 26%, black);
+}
+
+/* Nord: Frost blue (nord10) over Snow Storm; Polar Night in dark mode, with
+   a dot grid. */
+[data-theme='nord'] {
+  --accent-base: #5e81ac;
+  --accent-alt: #88c0d0;
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><circle cx='12' cy='12' r='1.1' fill='%234c566a' fill-opacity='0.14'/></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(136 192 208 / 0.45), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(129 161 193 / 0.4), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(216 222 233 / 0.6), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(94 129 172 / 0.28), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(143 188 187 / 0.35), transparent 70%),
+    linear-gradient(180deg, #eceff4, #e5e9f0);
+}
+
+.dark[data-theme='nord'],
+.dark [data-theme='nord'] {
+  --accent-base: color-mix(in oklab, #81a1c1 60%, #5e81ac);
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><circle cx='12' cy='12' r='1.1' fill='%23d8dee9' fill-opacity='0.06'/></svg>");
+
+  --app-mesh:
+    radial-gradient(55% 50% at 0% 0%, rgb(94 129 172 / 0.35), transparent 70%),
+    radial-gradient(45% 45% at 100% 0%, rgb(136 192 208 / 0.16), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(67 76 94 / 0.5), transparent 70%),
+    radial-gradient(50% 50% at 92% 100%, rgb(180 142 173 / 0.14), transparent 70%),
+    radial-gradient(45% 50% at 5% 100%, rgb(59 66 82 / 0.6), transparent 70%),
+    linear-gradient(180deg, #2e3440, #262b35);
+}
+
+/* Catppuccin: Mauve over Latte by day, over Mocha by night, with paw
+   prints. Mocha's mauve is a pastel too pale to carry white text, so the
+   dark accent sits between the two flavours' mauves. */
+[data-theme='catppuccin'] {
+  --accent-base: #8839ef;
+  --accent-alt: #ea76cb;
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><defs><g id='p'><ellipse cy='4' rx='6' ry='5'/><circle cx='-6.5' cy='-4' r='2.4'/><circle cx='-2.2' cy='-7.5' r='2.4'/><circle cx='2.2' cy='-7.5' r='2.4'/><circle cx='6.5' cy='-4' r='2.4'/></g></defs><g fill='%23ffffff' fill-opacity='0.6'><use href='%23p' transform='translate(34 38) rotate(-15)'/><use href='%23p' transform='translate(104 100) scale(0.8) rotate(20)'/><use href='%23p' transform='translate(108 30) scale(0.55) rotate(10)'/><circle cx='32' cy='112' r='1.5'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(136 57 239 / 0.22), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(234 118 203 / 0.25), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(114 135 253 / 0.18), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(254 100 11 / 0.14), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(23 146 153 / 0.16), transparent 70%),
+    linear-gradient(180deg, #eff1f5, #e6e9ef);
+}
+
+.dark[data-theme='catppuccin'],
+.dark [data-theme='catppuccin'] {
+  --accent-base: color-mix(in oklab, #cba6f7 55%, #8839ef);
+  --accent-alt: #f5c2e7;
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><defs><g id='p'><ellipse cy='4' rx='6' ry='5'/><circle cx='-6.5' cy='-4' r='2.4'/><circle cx='-2.2' cy='-7.5' r='2.4'/><circle cx='2.2' cy='-7.5' r='2.4'/><circle cx='6.5' cy='-4' r='2.4'/></g></defs><g fill='%23cba6f7' fill-opacity='0.07'><use href='%23p' transform='translate(34 38) rotate(-15)'/><use href='%23p' transform='translate(104 100) scale(0.8) rotate(20)'/><use href='%23p' transform='translate(108 30) scale(0.55) rotate(10)'/><circle cx='32' cy='112' r='1.5'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(55% 50% at 0% 0%, rgb(203 166 247 / 0.2), transparent 70%),
+    radial-gradient(45% 45% at 100% 0%, rgb(245 194 231 / 0.12), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(180 190 254 / 0.08), transparent 70%),
+    radial-gradient(50% 50% at 92% 100%, rgb(250 179 135 / 0.1), transparent 70%),
+    radial-gradient(45% 50% at 5% 100%, rgb(148 226 213 / 0.1), transparent 70%),
+    linear-gradient(180deg, #1e1e2e, #181825);
+}
+
+/* Dracula: purple with a pink gradient stop over the Dracula background,
+   with bats. Light mode is a pale lavender made from the same colours. */
+[data-theme='dracula'] {
+  --accent-base: #7c5cdb;
+  --accent-alt: #ff79c6;
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><defs><path id='b' d='M0 -2 C-2 -5 -7 -6 -12 -3 C-9 -2 -9 1 -10 4 C-7 2 -5 3 -4 6 C-3 3 -1 3 0 5 C1 3 3 3 4 6 C5 3 7 2 10 4 C9 1 9 -2 12 -3 C7 -6 2 -5 0 -2 Z'/></defs><g fill='%236d28d9' fill-opacity='0.07'><use href='%23b' transform='translate(38 40) scale(1.2)'/><use href='%23b' transform='translate(116 104) scale(0.9) rotate(-12)'/><use href='%23b' transform='translate(120 34) scale(0.6) rotate(8)'/><circle cx='40' cy='118' r='1.4'/><circle cx='80' cy='74' r='1.1'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(189 147 249 / 0.45), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(255 121 198 / 0.32), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(139 233 253 / 0.18), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(98 114 164 / 0.25), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(255 184 108 / 0.2), transparent 70%),
+    linear-gradient(180deg, #f7f5fc, #f0edf8);
+}
+
+.dark[data-theme='dracula'],
+.dark [data-theme='dracula'] {
+  --accent-base: color-mix(in oklab, #bd93f9 70%, #7c3aed);
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><defs><path id='b' d='M0 -2 C-2 -5 -7 -6 -12 -3 C-9 -2 -9 1 -10 4 C-7 2 -5 3 -4 6 C-3 3 -1 3 0 5 C1 3 3 3 4 6 C5 3 7 2 10 4 C9 1 9 -2 12 -3 C7 -6 2 -5 0 -2 Z'/></defs><g fill='%23bd93f9' fill-opacity='0.08'><use href='%23b' transform='translate(38 40) scale(1.2)'/><use href='%23b' transform='translate(116 104) scale(0.9) rotate(-12)'/><use href='%23b' transform='translate(120 34) scale(0.6) rotate(8)'/><circle cx='40' cy='118' r='1.4'/><circle cx='80' cy='74' r='1.1'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(55% 50% at 0% 0%, rgb(189 147 249 / 0.22), transparent 70%),
+    radial-gradient(45% 45% at 100% 0%, rgb(255 121 198 / 0.14), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(68 71 90 / 0.55), transparent 70%),
+    radial-gradient(50% 50% at 92% 100%, rgb(98 114 164 / 0.25), transparent 70%),
+    radial-gradient(45% 50% at 5% 100%, rgb(139 233 253 / 0.06), transparent 70%),
+    linear-gradient(180deg, #282a36, #21222c);
+}
+
+/* Gruvbox: orange with a yellow gradient stop, over the light palette's
+   sand or the dark palette's warm charcoal, with faint pinstripes. */
+[data-theme='gruvbox'] {
+  --accent-base: #d65d0e;
+  --accent-alt: #d79921;
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12'><path d='M-3 3 L3 -3 M0 12 L12 0 M9 15 L15 9' stroke='%237c6f64' stroke-opacity='0.08'/></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(250 189 47 / 0.35), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(254 128 25 / 0.25), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(235 219 178 / 0.6), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(142 192 124 / 0.25), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(211 134 155 / 0.18), transparent 70%),
+    linear-gradient(180deg, #fbf1c7, #f2e5bc);
+}
+
+.dark[data-theme='gruvbox'],
+.dark [data-theme='gruvbox'] {
+  --accent-alt: #fabd2f;
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12'><path d='M-3 3 L3 -3 M0 12 L12 0 M9 15 L15 9' stroke='%23ebdbb2' stroke-opacity='0.035'/></svg>");
+
+  --app-mesh:
+    radial-gradient(55% 50% at 0% 0%, rgb(214 93 14 / 0.22), transparent 70%),
+    radial-gradient(45% 45% at 100% 0%, rgb(215 153 33 / 0.14), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(60 56 54 / 0.6), transparent 70%),
+    radial-gradient(50% 50% at 92% 100%, rgb(104 157 106 / 0.16), transparent 70%),
+    radial-gradient(45% 50% at 5% 100%, rgb(80 73 69 / 0.5), transparent 70%),
+    linear-gradient(180deg, #282828, #1d2021);
+}
+
+/* Tokyo Night: blue with a magenta gradient stop, over the Day palette's
+   pale grey or the Night palette's deep indigo, with falling rain. */
+[data-theme='tokyonight'] {
+  --accent-base: #2e7de9;
+  --accent-alt: #9854f1;
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><g stroke='%233760bf' stroke-opacity='0.1' stroke-width='1.2' stroke-linecap='round'><path d='M20 10 l-4 14'/><path d='M70 40 l-3 10'/><path d='M100 6 l-4 14'/><path d='M44 78 l-4 14'/><path d='M96 92 l-3 10'/><path d='M14 104 l-3 10'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(60% 55% at 0% 0%, rgb(46 125 233 / 0.25), transparent 70%),
+    radial-gradient(45% 50% at 100% 0%, rgb(152 84 241 / 0.2), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(196 200 218 / 0.5), transparent 70%),
+    radial-gradient(50% 50% at 90% 100%, rgb(0 113 151 / 0.18), transparent 70%),
+    radial-gradient(45% 50% at 6% 100%, rgb(245 42 101 / 0.1), transparent 70%),
+    linear-gradient(180deg, #e9eaf0, #e1e2e7);
+}
+
+.dark[data-theme='tokyonight'],
+.dark [data-theme='tokyonight'] {
+  --accent-base: color-mix(in oklab, #7aa2f7 60%, #2e7de9);
+  --accent-alt: #bb9af7;
+
+  --app-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><g stroke='%237dcfff' stroke-opacity='0.08' stroke-width='1.2' stroke-linecap='round'><path d='M20 10 l-4 14'/><path d='M70 40 l-3 10'/><path d='M100 6 l-4 14'/><path d='M44 78 l-4 14'/><path d='M96 92 l-3 10'/><path d='M14 104 l-3 10'/></g></svg>");
+
+  --app-mesh:
+    radial-gradient(55% 50% at 0% 0%, rgb(122 162 247 / 0.22), transparent 70%),
+    radial-gradient(45% 45% at 100% 0%, rgb(187 154 247 / 0.16), transparent 70%),
+    radial-gradient(40% 45% at 55% 50%, rgb(36 40 59 / 0.6), transparent 70%),
+    radial-gradient(50% 50% at 92% 100%, rgb(125 207 255 / 0.1), transparent 70%),
+    radial-gradient(45% 50% at 5% 100%, rgb(247 118 142 / 0.08), transparent 70%),
+    linear-gradient(180deg, #1a1b26, #16161e);
+}
+
 /* The "Redscale" wordmark in the title bar, set in a serif so it reads as
    the studio's name rather than more UI text. */
 .brand-wordmark {

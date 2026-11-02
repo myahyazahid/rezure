@@ -130,6 +130,30 @@ pub enum ThemePreset {
     /// Category "Default": sky-tinted frosted glass over a dusk sky, always
     /// with white text. Stored as `"skyglass"`.
     SkyGlass,
+    /// Category "Default": solid surfaces and hard edges instead of glass,
+    /// for legibility. Stored as `"highcontrast"`.
+    HighContrast,
+    /// Category "Default": teal and violet northern lights.
+    Aurora,
+    /// Category "Girls": honey and cream, honeycombs.
+    Honey,
+    /// Category "Girls": raspberry and plum, berries.
+    Berry,
+    /// Category "Mens": magenta and sunset orange, retro grid.
+    Synthwave,
+    /// Category "Mens": icy cyan and snow white, snowflakes.
+    Arctic,
+    /// Category "Developer": the Nord editor palette.
+    Nord,
+    /// Category "Developer": the Catppuccin palette (Latte light, Mocha dark).
+    Catppuccin,
+    /// Category "Developer": the Dracula palette.
+    Dracula,
+    /// Category "Developer": the Gruvbox palette.
+    Gruvbox,
+    /// Category "Developer": the Tokyo Night palette. Stored as
+    /// `"tokyonight"`.
+    TokyoNight,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -512,6 +536,17 @@ mod tests {
             ("fullglass", ThemePreset::FullGlass),
             ("clearglass", ThemePreset::ClearGlass),
             ("skyglass", ThemePreset::SkyGlass),
+            ("highcontrast", ThemePreset::HighContrast),
+            ("aurora", ThemePreset::Aurora),
+            ("honey", ThemePreset::Honey),
+            ("berry", ThemePreset::Berry),
+            ("synthwave", ThemePreset::Synthwave),
+            ("arctic", ThemePreset::Arctic),
+            ("nord", ThemePreset::Nord),
+            ("catppuccin", ThemePreset::Catppuccin),
+            ("dracula", ThemePreset::Dracula),
+            ("gruvbox", ThemePreset::Gruvbox),
+            ("tokyonight", ThemePreset::TokyoNight),
         ] {
             let json = format!(r#"{{"defaultPort":80,"appearance":{{"theme":"{name}"}}}}"#);
             std::fs::write(&path, json).unwrap();

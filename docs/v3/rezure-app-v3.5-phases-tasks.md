@@ -128,6 +128,54 @@ Murni frontend — tidak ada perubahan command, store logic, atau skema.
       jalan, hanya rilis yang baru muncul yang terbuka otomatis
 - Verifikasi: `eslint`, `prettier --check`, `vue-tsc` bersih. Tampilan Add connection sudah dilihat
   maintainer di app; collapse changelog yang tetap tertutup belum dicek di app
+- [x] **Tombol "Install version" di halaman Switch.** Label sempat jadi "Install" saja dengan ikon
+      "+", yang terlihat gemuk dan tidak cocok maknanya ("+" di app ini berarti "New …"). Sekarang
+      "Install version" dengan ikon download yang sama seperti tombol Install di `ServiceRow.vue`,
+      sejajar dengan "New project"/"New database". Layout halaman Switch tetap satu kolom (opsi
+      dua kolom, grid kartu, master-detail, dan chip versi sudah dicoba di canvas desain dan tidak
+      dipakai)
+
+---
+
+## Tema Appearance tambahan (atas permintaan maintainer)
+
+Lanjutan Fase 3.13 (`docs/v3/rezure-app-v3-phases-tasks.md`). Sebelas tema baru dari rekomendasi
+yang disetujui maintainer, total jadi 25. Kategori tetap hanya catatan di komentar kode (tab
+kategori sudah dihapus di v3.5), dengan satu kategori baru, **Developer**:
+
+| Kategori | Tema | Aksen | Latar (mesh) & dekorasi |
+|---|---|---|---|
+| Default | **High Contrast** | biru tua (`500` = `blue-700`) | permukaan solid tanpa glass, tepi 1px tegas, tanpa warna latar, pola, dan blur. Teks redup (`neutral-400/500`) dinaikkan dua tingkat, seperti Sky Glass |
+| Default | **Aurora** | teal, ujung gradien violet | mint dan violet dengan pita cahaya; versi dark berupa aurora di langit malam dengan bintang |
+| Girls | **Honey** | amber (`600` ke atas satu tingkat lebih gelap supaya teks aksen terbaca di krem) | krem dan kuning madu, sarang lebah kecil |
+| Girls | **Berry** | raspberry (fuchsia dicampur rose) | plum dan berry, lebih tua dari pink Blossom, buah berry kecil |
+| Mens | **Synthwave** | fuchsia, ujung gradien oranye | pink, violet, sedikit cyan; grid retro |
+| Mens | **Arctic** | cyan (`500` = `cyan-600`, dikembalikan di mode dark) | putih salju dan biru es, kepingan salju |
+| Developer | **Nord** | Frost `#5e81ac` | Snow Storm (light) / Polar Night (dark), grid titik |
+| Developer | **Catppuccin** | Mauve | Latte (light) / Mocha (dark), jejak kaki kucing |
+| Developer | **Dracula** | ungu, ujung gradien pink | lavender pucat dari warna Dracula (light) / latar Dracula `#282a36` (dark), kelelawar |
+| Developer | **Gruvbox** | oranye, ujung gradien kuning | pasir Gruvbox light / arang hangat Gruvbox dark, garis diagonal tipis |
+| Developer | **Tokyo Night** | biru, ujung gradien magenta | Tokyo Night Day / Night, rintik hujan |
+
+- [x] Rust: varian baru di `ThemePreset` (`highcontrast`, `aurora`, `honey`, `berry`, `synthwave`,
+      `arctic`, `nord`, `catppuccin`, `dracula`, `gruvbox`, `tokyonight`), dan test "setiap nama
+      tema terbaca sebagai dirinya sendiri" ikut diperluas
+- [x] Frontend: `ThemePreset` di `src/types/settings.ts`, daftar `THEMES` di `stores/appearance.ts`
+      (diurutkan dekat tema sejenis, lima tema Developer di akhir), blok light dan dark di
+      `main.css`
+- [x] Lima palet Developer hanya menyebut satu warna aksen, jadi skala 50–950 diturunkan sekali
+      di `main.css` dari `--accent-base` lewat `color-mix` (ke putih untuk tingkat terang, ke hitam
+      untuk tingkat gelap). Tiap tema cukup mengisi `--accent-base`. Di mode dark, aksen Nord,
+      Catppuccin, Dracula, dan Tokyo Night digeser ke tengah antara warna light dan dark palet
+      aslinya, karena warna pastel versi dark terlalu pucat untuk isian dengan teks putih
+- [x] High Contrast mengganti token glass, jadi blok dark-nya meng-override setiap token yang sama
+      (aturan yang sama dengan Soft Pink/Navy/Full Glass)
+- Verifikasi: `cargo fmt --check`, `cargo clippy`, test `config::settings`, `prettier --check`,
+  `eslint`, `vue-tsc`, dan `vite build` bersih, dan kesebelas selector ada di CSS hasil build.
+  **Belum dilihat di app sungguhan**, baik light maupun dark. Kontras teks kecil di tema baru
+  belum diukur, kecuali High Contrast yang memang dirancang untuk lolos 4.5:1
+- Nama palet Developer (Nord, Catppuccin, Dracula, Gruvbox, Tokyo Night) dipakai sebagai nama
+  tema. Paletnya open source; aturan pemakaian nama dari masing-masing proyek belum dicek
 
 ---
 

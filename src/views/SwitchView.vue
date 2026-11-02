@@ -176,9 +176,14 @@ const hasPhpConfig = computed(
           fill="none"
           stroke="currentColor"
           stroke-width="2.5"
+          aria-hidden="true"
           class="h-4 w-4"
         >
-          <path stroke-linecap="round" d="M12 5v14M5 12h14" />
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"
+          />
         </svg>
         Install version
       </button>
