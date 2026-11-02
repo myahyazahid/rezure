@@ -78,6 +78,20 @@ pub enum StickerKind {
     BabySloth,
     BabyWhale,
     BabyKitsune,
+    BabyBee,
+    BabyBat,
+    BabyOwl,
+    BabyArcticFox,
+    BabyCrab,
+    BabySnail,
+    BabyOctopus,
+    BabyRedPanda,
+    BabyTurtle,
+    BabyElephant,
+    BabyJellyfish,
+    BabyLamb,
+    BabyUnicorn,
+    BabyKitty,
 }
 
 /// Prefix that marks a [`StickerArt::Saved`] in `settings.json`
@@ -326,6 +340,17 @@ mod tests {
         placed.kind = StickerArt::Builtin(StickerKind::BabyKitsune);
         let json = serde_json::to_string(&placed).unwrap();
         assert!(json.contains(r#""kind":"baby-kitsune""#), "{json}");
+
+        // Multi-word animals split at every capital, matching their art's
+        // file names (`baby-arctic-fox.svg`, `baby-red-panda.svg`).
+        for (kind, name) in [
+            (StickerKind::BabyArcticFox, "baby-arctic-fox"),
+            (StickerKind::BabyRedPanda, "baby-red-panda"),
+        ] {
+            placed.kind = StickerArt::Builtin(kind);
+            let json = serde_json::to_string(&placed).unwrap();
+            assert!(json.contains(&format!(r#""kind":"{name}""#)), "{json}");
+        }
 
         assert!(!parse(r#"{"animate":false}"#).animate);
     }

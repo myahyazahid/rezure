@@ -179,6 +179,42 @@ kategori sudah dihapus di v3.5), dengan satu kategori baru, **Developer**:
 
 ---
 
+## Stiker Live tambahan (atas permintaan maintainer)
+
+Lanjutan Fase 3.13d (`docs/v3/rezure-app-v3-phases-tasks.md`). Empat belas stiker baru di tab
+Live, total jadi 36. Gaya dan aturannya sama dengan 22 yang lama: SVG original `viewBox 0 0 100
+100`, outline `#6b2d45`, mata berkedip, pipi pink, animasi CSS di dalam SVG hanya `transform`/
+`opacity`, dan mati saat `prefers-reduced-motion`.
+
+| Stiker | Gerakan khas | Catatan |
+|---|---|---|
+| `baby-bee` | sayap bergetar cepat, antena berkedut, melayang | pasangan tema Honey |
+| `baby-bat` | sayap mengepak dari bahu, taring kecil | pasangan tema Dracula. Sayap kanan = cerminan sayap kiri supaya selalu seirama |
+| `baby-owl` | kepala dan badan miring pelan, sayap bergoyang | pasangan tema Tokyo Night |
+| `baby-arctic-fox` | ekor tebal bergoyang, telinga berkedut | pasangan tema Arctic. Putih polos dengan bayangan biru es dan satu ekor, supaya beda dari kitsune |
+| `baby-crab` | capit membuka-menutup dua kali, jalan ke samping | anggukan ke Rust, tapi kepiting generik, bukan Ferris |
+| `baby-snail` | antena bergoyang, merayap pelan | |
+| `baby-octopus` | enam tentakel melambai tidak serempak | sengaja tidak mirip Octocat GitHub (bukan kucing, warna coral) |
+| `baby-red-panda` | ekor belang bergoyang, telinga berkedut | |
+| `baby-turtle` | kepala masuk ke cangkang lalu keluar lagi | |
+| `baby-elephant` | belalai mengayun, telinga mengipas | |
+| `baby-jellyfish` | kepala berdenyut sambil melayang, tentakel melambai | |
+| `baby-lamb` | bulu wol mengembang pelan, telinga berkedut | |
+| `baby-unicorn` | surai bergoyang, kilau muncul di dekat tanduk | |
+| `baby-kitty` | kepala bergoyang, pita bergoyang, telinga berkedut, hati kecil melayang | ditambahkan belakangan: versi Live dari stiker Classic "Kitty" (`cat.svg`), wajah dan pita yang sama. Di palet tepat setelah "Sleepy kitten" |
+
+- [x] Rust: varian baru di `StickerKind` (kebab-case otomatis, jadi `BabyArcticFox` =
+      `"baby-arctic-fox"`). Test `live_kinds_are_kebab_case_and_animate_defaults_on` ditambah
+      cek untuk nama dua kata, karena nama itu harus sama dengan nama file SVG-nya
+- [x] Frontend: `LiveStickerKind` di `src/types/settings.ts` dan `CATALOG` di
+      `stores/decorations.ts` (urutan di palet: setelah kitsune). File SVG di
+      `src/assets/stickers/live/` otomatis ikut lewat `import.meta.glob`
+- Verifikasi: keempat belas SVG dirender di headless Chrome, diam dan dibekukan di 50% dan 76%
+  animasinya, untuk cek bentuk dan poros putar. **Belum dilihat di app sungguhan** (palet
+  Decorations, overlay, switch Animate)
+
+---
+
 ## Catatan Arsitektur
 
 Fitur ini **tidak membutuhkan sistem plugin dinamis**. Fondasi `Service` trait yang sudah ada di `docs/architecture.md` sudah cukup — menambah service baru cukup dengan mengimplementasikan trait tersebut dan compile ulang. Sama seperti Redis (sekarang v4 Fase 4.6), sistem plugin (dynamic loading tanpa compile ulang) baru relevan jika suatu saat ingin membuka jalur bagi kontributor/komunitas luar menambah service tanpa menyentuh source code inti — itu dipertimbangkan terpisah, bukan prasyarat untuk fase ini.

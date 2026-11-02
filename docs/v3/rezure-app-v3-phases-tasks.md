@@ -678,7 +678,8 @@ mana saja di window, dengan preview Rezure untuk memilih posisinya.
   stiker anak hewan kawaii beranimasi di `src/assets/stickers/live/` (gambar original, gaya sama
   dengan stiker bawaan: anak ayam, panda, katak, kucing tidur, landak, hamster, penguin, kelinci,
   singa, T-rex, bebek, kapibara, beruang, babi, anak anjing, anjing laut, axolotl, koala,
-  berang-berang, sloth, paus, kitsune). Kitsune-nya desain sendiri dari cerita rakyat, sengaja
+  berang-berang, sloth, paus, kitsune; 14 lagi ditambahkan belakangan, lihat
+  `docs/v3/rezure-app-v3.5-phases-tasks.md`, bagian "Stiker Live tambahan"). Kitsune-nya desain sendiri dari cerita rakyat, sengaja
   bukan karakter Naruto. Animasinya CSS di dalam tiap SVG, hanya `transform`/`opacity`, kedip
   jarang, dan ikut `prefers-reduced-motion`. Karena CSS app tak bisa menjangkau animasi di dalam
   `<img>`, `stores/decorations.ts` menyimpan tiap stiker Live dua kali (bergerak dan diam, via

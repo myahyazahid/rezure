@@ -98,6 +98,20 @@ export type LiveStickerKind =
   | 'baby-sloth'
   | 'baby-whale'
   | 'baby-kitsune'
+  | 'baby-bee'
+  | 'baby-bat'
+  | 'baby-owl'
+  | 'baby-arctic-fox'
+  | 'baby-crab'
+  | 'baby-snail'
+  | 'baby-octopus'
+  | 'baby-red-panda'
+  | 'baby-turtle'
+  | 'baby-elephant'
+  | 'baby-jellyfish'
+  | 'baby-lamb'
+  | 'baby-unicorn'
+  | 'baby-kitty'
 
 /** A sticker downloaded from Decorations → Browse: `saved:` plus its catalog id.
  *  Mirrors `config::stickers::StickerArt::Saved`. */

@@ -214,9 +214,6 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
     <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
       <div>
         <h1 class="text-[28px] leading-tight font-bold tracking-tight">Projects</h1>
-        <p class="mt-1 text-sm text-neutral-500">
-          {{ store.projects.length }} local sites, auto-served with their own domain.
-        </p>
       </div>
 
       <div class="flex flex-wrap items-center gap-2">
