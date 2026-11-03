@@ -14,6 +14,7 @@ pub mod database;
 pub mod db_clients;
 pub mod db_engine;
 pub mod db_profiles;
+pub mod dev_server_failure;
 pub mod dev_servers;
 pub mod doctor;
 pub mod donate;
@@ -173,6 +174,14 @@ pub trait Service: Send + Sync {
     /// database mid-crash-recovery.
     fn restarts_on_crash(&self) -> bool {
         false
+    }
+
+    /// Why the last start failed, in more detail than its error message —
+    /// the cause, the fix and the output that explains it — until the next
+    /// start. Only a project's dev server can say more than its error does;
+    /// every other service defaults to `None`.
+    fn start_failure(&self) -> Option<dev_server_failure::StartFailure> {
+        None
     }
 }
 

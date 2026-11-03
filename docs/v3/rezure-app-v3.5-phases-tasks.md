@@ -266,6 +266,50 @@ spesifik, lalu satu prompt UAC.
 
 ---
 
+## Pesan gagal start dev server yang spesifik (atas permintaan maintainer)
+
+Kasus nyata: Open di `company-profile` (Astro) gagal dengan satu paragraf merah berisi output
+mentah: `[astro] Unable to load your Astro config / Cannot find module '@astrojs/node' imported
+from '…' / Location: / C:\…\vite\dist\node\chunks\node.js:36285:32`, lalu saran generik "Its
+dependencies look incomplete". Nama paketnya tidak disebut di saran, lokasi kode di dalam Vite
+ikut tampil, dan "run Install" juga disarankan untuk paket yang tidak ada di `package.json`, yang
+tidak akan terbantu oleh Install.
+
+- [x] Modul baru `services::dev_server_failure` menggantikan `dev_servers::summarize_failure`.
+      `diagnose()` menghasilkan `StartFailure { what, cause, fix, output }`:
+  - **Modul tidak ditemukan** (format Vite, ESM, CommonJS): nama paket diambil dari specifier
+    (`@astrojs/node/server` jadi `@astrojs/node`), dan file yang meng-import ikut disebut. Paket
+    dicocokkan ke `package.json`: kalau tercantum, fix `install`; kalau tidak, fix
+    `addDependency` dengan perintah sesuai package manager (`npm install x`, `pnpm add x`, …).
+    Perintah ini **hanya ditampilkan untuk disalin**, tidak pernah dijalankan Rezure, karena
+    namanya berasal dari output dev server. Nama yang bukan nama paket npm valid tidak dipakai.
+    Path relatif (`./routes/home`) disebut sebagai file yang hilang, tanpa saran Install
+  - **Perintah tidak dikenal** (`'vite' is not recognized`): fix `install`
+  - **Copy lain sudah jalan**: fix `stopOther`
+  - **Port salah**: fix `usePort` (dulu string bebas di `process.rs`)
+  - Output: mulai dari baris error pertama, maksimal 12 baris. Stack frame, banner npm, baris
+    `Location:`, dan baris lokasi kode (`C:\…\x.js:1:2`, `file:///…`) dibuang
+- [x] Pesan `DevServerFailed` jadi pendek: *company-profile's dev server didn't come up -
+      @astrojs/node isn't installed (imported by astro.config.mjs). Run Install in Dev servers,
+      then start it again*. Detailnya disimpan di `ProcessService`, dibaca lewat method trait
+      baru `Service::start_failure()` (default `None`, hanya dev server yang mengisinya), lalu
+      dikirim sebagai `DevServerRow.lastFailure`. Dibersihkan saat start berikutnya
+- [x] Komponen baru `DevServerFailureCard.vue`: judul, penyebab, kotak **Recommended fix**
+      berisi penjelasan singkat dan tombol aksinya (**npm install & open**, **Stop the other
+      copy & open**, perintah + **Copy** + **Open terminal here**, **Set the port in Dev
+      servers**, atau **Try again**), lalu **What it printed** yang bisa dilipat (terbuka otomatis
+      kalau penyebabnya tidak dikenali). Dipakai di halaman Projects menggantikan teks merah (bisa
+      ditutup), dan versi ringkas di baris dialog Dev servers. Error yang sama tidak diulang di
+      bagian bawah dialog
+- [x] `docs/v1/projects.md` diperbarui
+- Verifikasi: `cargo fmt`, `cargo clippy --all-targets` bersih; 9 test baru di
+  `dev_server_failure` (termasuk output asli kasus Astro di atas, paket yang tidak tercantum,
+  file lokal yang hilang, nama paket berbahaya ditolak) dan test `dev_servers`/`process` lolos.
+  `npm run type-check`, `npm run lint`, `prettier` bersih. **Belum dilihat di app sungguhan**
+  (tampilan kartu light/dark, alur tombol Install & open)
+
+---
+
 ## Catatan Arsitektur
 
 Fitur ini **tidak membutuhkan sistem plugin dinamis**. Fondasi `Service` trait yang sudah ada di `docs/architecture.md` sudah cukup — menambah service baru cukup dengan mengimplementasikan trait tersebut dan compile ulang. Sama seperti Redis (sekarang v4 Fase 4.6), sistem plugin (dynamic loading tanpa compile ulang) baru relevan jika suatu saat ingin membuka jalur bagi kontributor/komunitas luar menambah service tanpa menyentuh source code inti — itu dipertimbangkan terpisah, bukan prasyarat untuk fase ini.

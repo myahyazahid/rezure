@@ -20,6 +20,7 @@ use super::binaries;
 use super::database;
 use super::db_engine;
 use super::db_profiles;
+use super::dev_server_failure::{self, StartFailure};
 use super::dev_servers::{self, DevSpec};
 use super::frameworks::PortMode;
 use super::php_ini;
@@ -142,7 +143,7 @@ pub const DEV_SERVER_CATEGORY: &str = "Dev server";
 
 /// How many of a dev server's last output lines are kept, to say why it
 /// didn't come up. Enough to reach back past a stack trace to the message
-/// above it (`dev_servers::summarize_failure` picks that out).
+/// above it (`dev_server_failure::diagnose` picks that out).
 const TAIL_LINES: usize = 40;
 
 pub struct ProcessService {
@@ -179,6 +180,9 @@ pub struct ProcessService {
     /// usually the whole explanation (a missing module, a syntax error).
     /// `None` for the other services, whose logs say it already.
     tail: Option<Arc<Mutex<VecDeque<String>>>>,
+    /// Why a dev server's last start failed, until the next start. See
+    /// [`Service::start_failure`].
+    start_failure: Mutex<Option<StartFailure>>,
 }
 
 const PHASE_IDLE: u8 = 0;
@@ -261,6 +265,7 @@ impl ProcessService {
             phase: AtomicU8::new(PHASE_IDLE),
             output: OutputClock::default(),
             tail: None,
+            start_failure: Mutex::new(None),
         })
     }
 
@@ -289,6 +294,7 @@ impl ProcessService {
             phase: AtomicU8::new(PHASE_IDLE),
             output: OutputClock::default(),
             tail: None,
+            start_failure: Mutex::new(None),
         })
     }
 
@@ -318,6 +324,7 @@ impl ProcessService {
             phase: AtomicU8::new(PHASE_IDLE),
             output: OutputClock::default(),
             tail: None,
+            start_failure: Mutex::new(None),
         }
     }
 
@@ -345,6 +352,7 @@ impl ProcessService {
             phase: AtomicU8::new(PHASE_IDLE),
             output: OutputClock::default(),
             tail: None,
+            start_failure: Mutex::new(None),
         })
     }
 
@@ -370,6 +378,7 @@ impl ProcessService {
             phase: AtomicU8::new(PHASE_IDLE),
             output: OutputClock::default(),
             tail: None,
+            start_failure: Mutex::new(None),
         })
     }
 
@@ -394,6 +403,7 @@ impl ProcessService {
             phase: AtomicU8::new(PHASE_IDLE),
             output: OutputClock::default(),
             tail: None,
+            start_failure: Mutex::new(None),
         }
     }
 
@@ -429,6 +439,7 @@ impl ProcessService {
             phase: AtomicU8::new(PHASE_IDLE),
             output: OutputClock::default(),
             tail: Some(tail),
+            start_failure: Mutex::new(None),
         }
     }
 
@@ -1217,6 +1228,10 @@ impl Service for ProcessService {
     fn restarts_on_crash(&self) -> bool {
         matches!(self.launch, Launch::Php { .. })
     }
+
+    fn start_failure(&self) -> Option<StartFailure> {
+        self.start_failure.lock().unwrap().clone()
+    }
 }
 
 /// Holds [`ProcessService::phase`] at a start or stop for as long as it
@@ -1307,8 +1322,10 @@ impl ProcessService {
         // a 502 in between.
         if let Launch::DevServer(spec) = &self.launch {
             if let Some((_, child)) = spawned.first_mut() {
-                if let Err(reason) = self.wait_for_dev_server(child, spec) {
+                if let Err(failure) = self.wait_for_dev_server(child, spec) {
                     self.discard(spawned);
+                    let reason = failure.reason();
+                    *self.start_failure.lock().unwrap() = Some(failure);
                     return Err(AppError::DevServerFailed {
                         name: self.name.clone(),
                         reason,
@@ -1413,7 +1430,7 @@ impl ProcessService {
     /// Not [`wait_until_accepting`]: a dev server that came up on a port of
     /// its own choosing would otherwise be waited on for minutes, when the
     /// answer — "it's on :3001, not :20128" — is there as soon as it listens.
-    fn wait_for_dev_server(&self, child: &mut Child, spec: &DevSpec) -> Result<(), String> {
+    fn wait_for_dev_server(&self, child: &mut Child, spec: &DevSpec) -> Result<(), StartFailure> {
         let started = Instant::now();
         // A `fixed` app owns its port, so a different one is a wrong guess
         // to report at once; any other mode was told the port, and a server
@@ -1426,9 +1443,11 @@ impl ProcessService {
         loop {
             match child.try_wait() {
                 Ok(Some(status)) => {
-                    return Err(format!("it exited ({status}){}", self.tail_text()));
+                    return Err(self.diagnose(format!("it exited ({status})"), spec));
                 }
-                Err(err) => return Err(format!("couldn't check on it: {err}")),
+                Err(err) => {
+                    return Err(StartFailure::plain(format!("couldn't check on it: {err}")))
+                }
                 Ok(None) => {}
             }
             if dev_server_answers(spec.port) {
@@ -1439,44 +1458,43 @@ impl ProcessService {
             if now >= next_tree_check {
                 let held = ports::ports_held_by_tree(child.id());
                 if !held.is_empty() && !held.contains(&spec.port) {
-                    let held: Vec<String> = held.iter().map(|port| format!(":{port}")).collect();
-                    return Err(format!(
-                        "it's listening on {} instead of :{} - set that port in Dev servers, or make the app use :{}",
-                        held.join(", "),
-                        spec.port,
-                        spec.port
-                    ));
+                    return Err(StartFailure::wrong_port(held, spec.port));
                 }
                 next_tree_check = now + Duration::from_secs(3);
             }
             if started.elapsed() >= DEV_READY_MAX_TIMEOUT {
-                return Err(format!(
-                    "nothing answered on :{} after {}s{}",
-                    spec.port,
-                    DEV_READY_MAX_TIMEOUT.as_secs(),
-                    self.tail_text()
+                return Err(self.diagnose(
+                    format!(
+                        "nothing answered on :{} after {}s",
+                        spec.port,
+                        DEV_READY_MAX_TIMEOUT.as_secs()
+                    ),
+                    spec,
                 ));
             }
             if self.output.quiet_for() >= DEV_READY_QUIET_TIMEOUT {
-                return Err(format!(
-                    "no output and nothing on :{} for {}s{}",
-                    spec.port,
-                    DEV_READY_QUIET_TIMEOUT.as_secs(),
-                    self.tail_text()
+                return Err(self.diagnose(
+                    format!(
+                        "no output and nothing on :{} for {}s",
+                        spec.port,
+                        DEV_READY_QUIET_TIMEOUT.as_secs()
+                    ),
+                    spec,
                 ));
             }
             std::thread::sleep(READY_POLL_INTERVAL);
         }
     }
 
-    /// What a dev server said before it failed, and how to fix it when that's
-    /// a familiar failure — see `dev_servers::summarize_failure`.
-    fn tail_text(&self) -> String {
-        let Some(tail) = &self.tail else {
-            return String::new();
-        };
-        let lines: Vec<String> = tail.lock().unwrap().iter().cloned().collect();
-        dev_servers::summarize_failure(&lines)
+    /// `what` happened to a dev server, read against what it said before —
+    /// see `dev_server_failure::diagnose`.
+    fn diagnose(&self, what: String, spec: &DevSpec) -> StartFailure {
+        let lines: Vec<String> = self
+            .tail
+            .as_ref()
+            .map(|tail| tail.lock().unwrap().iter().cloned().collect())
+            .unwrap_or_default();
+        dev_server_failure::diagnose(what, &lines, &spec.dir, spec.package_manager)
     }
 
     /// How [`wait_until_accepting`] tells a just-spawned database is ready.
@@ -1522,6 +1540,7 @@ impl ProcessService {
         if let Some(tail) = &self.tail {
             tail.lock().unwrap().clear();
         }
+        *self.start_failure.lock().unwrap() = None;
 
         // A pooled PHP service's folder (`data/php-<version>`) is never created
         // by anything else, and without it this write fails silently — which

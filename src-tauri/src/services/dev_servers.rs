@@ -45,6 +45,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
+use super::dev_server_failure::StartFailure;
 use super::frameworks::{self, PortMode, Registry, ServeProfile};
 use super::process::{LogSink, LogStream};
 use super::{database, db_profiles, launcher, localdb_bridge, node, php_pool, postgres, process};
@@ -239,6 +240,15 @@ impl PackageManager {
     /// Vite read everything after it as file names.
     fn needs_separator(self) -> bool {
         self == Self::Npm
+    }
+
+    /// The subcommand that adds a package to `package.json` — `npm install
+    /// x`, but `pnpm add x` and the like.
+    pub fn add_verb(self) -> &'static str {
+        match self {
+            Self::Npm => "install",
+            Self::Pnpm | Self::Yarn | Self::Bun => "add",
+        }
     }
 }
 
@@ -588,78 +598,6 @@ pub fn stop_outside(spec: &DevSpec) -> Result<(), AppError> {
     })
 }
 
-/// Words that say what a dev server's failure was, as opposed to where in
-/// its code it happened.
-const ERROR_WORDS: &[&str] = &[
-    "error",
-    "already",
-    "eaddrinuse",
-    "cannot",
-    "can't",
-    "not found",
-    "not recognized",
-    "failed",
-    "unable",
-    "lock",
-    "missing",
-];
-
-/// A dev server's last output, cut down to what explains a failed start,
-/// with the step that fixes it when the failure is a familiar one.
-///
-/// Stack frames and npm's own `> script` banner are dropped: the line worth
-/// reading is usually above a dozen `at …` lines, and the last few lines
-/// alone are nothing but frames.
-pub fn summarize_failure(lines: &[String]) -> String {
-    let meaningful: Vec<&str> = lines
-        .iter()
-        .map(|line| line.trim())
-        .filter(|line| {
-            !line.is_empty()
-                && !line.starts_with("at ")
-                && !line.starts_with("> ")
-                && *line != "Stack trace:"
-                && !line.starts_with("npm error")
-                && !line.starts_with("npm ERR!")
-        })
-        .collect();
-    if meaningful.is_empty() {
-        return String::new();
-    }
-    let first_error = meaningful.iter().position(|line| {
-        let lower = line.to_lowercase();
-        ERROR_WORDS.iter().any(|word| lower.contains(word))
-    });
-    let start = first_error.unwrap_or(meaningful.len().saturating_sub(3));
-    let shown: Vec<&str> = meaningful.iter().skip(start).take(4).copied().collect();
-    let mut text = format!(". It said: {}", shown.join(" / "));
-
-    let all = meaningful.join("\n").to_lowercase();
-    let hint = if all.contains("already running")
-        || all.contains("eaddrinuse")
-        || all.contains("address already in use")
-        || all.contains("acquire lock")
-        || all.contains("another instance")
-    {
-        Some(
-            "Another copy of this dev server is still running - stop it (Dev servers offers to) and start again",
-        )
-    } else if all.contains("cannot find module")
-        || all.contains("err_module_not_found")
-        || all.contains("is not recognized as an internal or external command")
-        || all.contains("command not found")
-    {
-        Some("Its dependencies look incomplete - run Install in Dev servers, then start again")
-    } else {
-        None
-    };
-    if let Some(hint) = hint {
-        text.push_str(". ");
-        text.push_str(hint);
-    }
-    text
-}
-
 /// `PATH` for a process run in `spec`'s project: its Node.js version first,
 /// like a terminal opened for the project gets (`launcher::open_terminal`).
 fn path_for(node_pin: Option<&str>) -> Result<OsString, DevServerIssue> {
@@ -904,6 +842,9 @@ pub struct DevServerRow {
     pub auto_start: bool,
     pub status: ServiceStatus,
     pub issue: Option<DevServerIssue>,
+    /// Why its last start failed, while it's stopped — see
+    /// `dev_server_failure`. Cleared by the next start.
+    pub last_failure: Option<StartFailure>,
 }
 
 /// The dialog's rows, with each dev server's live status from `manager`. A
@@ -931,7 +872,16 @@ pub fn rows(specs: &[DevSpec], manager: &ServiceManager) -> Vec<DevServerRow> {
                 Some(servers) => Some(DevServerIssue::AlreadyRunning { servers }),
                 None => issue(spec),
             };
+            let last_failure = if status == ServiceStatus::Stopped {
+                manager
+                    .find(&service_id)
+                    .ok()
+                    .and_then(|service| service.start_failure())
+            } else {
+                None
+            };
             DevServerRow {
+                last_failure,
                 command: spec.script.as_deref().map(|script| {
                     command_line(spec.package_manager, script, spec.port_mode, spec.port)
                 }),
@@ -1253,55 +1203,6 @@ mod tests {
             })
         );
         std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    fn lines(text: &str) -> Vec<String> {
-        text.lines().map(str::to_string).collect()
-    }
-
-    /// What `astro dev` printed when one was already running from a terminal
-    /// — the last three lines alone were nothing but stack frames.
-    #[test]
-    fn a_failure_is_explained_by_its_message_not_its_stack_trace() {
-        let said = summarize_failure(&lines(
-            "> companyprofile@0.0.1 dev\n\
-             > astro dev --port 4401\n\
-             Another astro dev server is already running.\n\
-             \n\
-             \x20 URL:  http://localhost:4321\n\
-             \x20 PID:  20584\n\
-             \n\
-             Run `astro dev stop` to stop it, or use `astro dev --force` to replace it.\n\
-             Stack trace:\n\
-             \x20 at dev (file:///C:/x/node_modules/astro/dist/cli/dev/index.js:182:10)\n\
-             \x20 at async runCommand (file:///C:/x/node_modules/astro/dist/cli/index.js:170:19)",
-        ));
-        assert!(
-            said.contains("Another astro dev server is already running."),
-            "{said}"
-        );
-        assert!(said.contains("PID:  20584"), "{said}");
-        assert!(!said.contains("at dev"), "{said}");
-        assert!(
-            said.contains("stop it"),
-            "a fix, not just the error: {said}"
-        );
-    }
-
-    #[test]
-    fn a_missing_dependency_points_at_install() {
-        let said = summarize_failure(&lines(
-            "> vite --port 4400\n'vite' is not recognized as an internal or external command,\noperable program or batch file.",
-        ));
-        assert!(said.contains("'vite' is not recognized"), "{said}");
-        assert!(said.contains("run Install"), "{said}");
-    }
-
-    #[test]
-    fn an_unfamiliar_failure_still_shows_its_last_words_without_a_made_up_fix() {
-        let said = summarize_failure(&lines("starting\nsomething odd happened"));
-        assert_eq!(said, ". It said: starting / something odd happened");
-        assert_eq!(summarize_failure(&[]), "");
     }
 
     /// A Node server started in a project folder by something other than

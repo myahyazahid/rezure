@@ -137,12 +137,23 @@ export const useProjectsStore = defineStore('projects', () => {
     if (starting) devServers.markStarting(id, true)
     try {
       await launch('open_project_site', id)
-      if (openError.value && proxied) openErrorFor.value = id
+      if (openError.value && proxied) {
+        openErrorFor.value = id
+        // The rows carry why it failed — cause, fix and output — for the
+        // card shown in place of the plain error.
+        await devServers.fetchRows()
+      }
     } finally {
       if (starting) devServers.markStarting(id, false)
       if (proxied) await devServers.fetchStatuses()
     }
   }
+  /** Hides a failed Open's message. */
+  function dismissOpenError() {
+    openError.value = null
+    openErrorFor.value = null
+  }
+
   const openFolder = (id: string) => launch('open_project_folder', id)
   const openTerminal = (id: string) => launch('open_project_terminal', id)
 
@@ -511,6 +522,7 @@ export const useProjectsStore = defineStore('projects', () => {
     hostsError,
     openError,
     openErrorFor,
+    dismissOpenError,
     allHostsReady,
     unresolvedProjects,
     doctorFor,

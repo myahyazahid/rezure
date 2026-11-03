@@ -129,8 +129,21 @@ request for the project's domain to that process's port, and Rezure can run the 
 
 Click **Open**. If the dev server isn't running, Rezure starts it, waits until it answers, and
 only then opens the browser — so you land on the app, not an error page. The dot on the Open
-button is green while it runs. If it fails to start, the browser isn't opened; the message under
-the header says why, with **View log** for the rest.
+button is green while it runs. If it fails to start, the browser isn't opened. A card under the
+header says why, and recommends a fix with a button for it:
+
+| Cause | Recommended fix |
+|---|---|
+| A package listed in `package.json` isn't installed | **npm install & open** (or pnpm, yarn, bun) |
+| A package the code imports isn't in `package.json` | The command that adds it, to copy, and **Open terminal here**. Install wouldn't bring it, so Rezure doesn't suggest that |
+| A command such as `vite` isn't found | **npm install & open** |
+| Another copy is already running | **Stop the other copy & open** |
+| It came up on a different port | **Set the port in Dev servers** |
+| Anything else | **Try again**, with the output open below |
+
+**What it printed** holds the lines of output that explain the failure. Stack frames, npm's
+banners and code locations inside `node_modules` are left out. The full output is in the dev
+server's **Log** in Dev servers, and the same card shows on its row there.
 
 ### The Dev servers dialog
 
@@ -302,8 +315,11 @@ package manager, a script name restricted to letters, digits and `:_.-`, and a n
 spawning, `dev_servers::outside_servers` looks for a copy started elsewhere: a node/bun/deno
 process whose working folder is the project's, not descended from this Rezure, with something
 under it listening; the dialog offers to stop it (`dev_servers::stop_outside`, which kills from
-the topmost runtime down, never the shell). A failed start is summarised from the last 40 lines
-of output, stack frames dropped, with a fix for the familiar failures. A start
+the topmost runtime down, never the shell). A failed start is read from the last 40 lines of
+output by `dev_server_failure::diagnose`: the cause, a fix for the familiar failures, and the
+lines that explain it. A missing module is checked against `package.json`, so Install is only
+recommended when it would bring the package. The result stays on the service until its next
+start (`Service::start_failure`) and reaches the UI as the dev server row's `lastFailure`. A start
 waits until the port answers; a stop kills the whole process tree (`npm` runs the server as a
 grandchild). Dev servers are left off the Services page and out of Start all
 (`service_visibility`), carry no telemetry (their ids are project names), and are stopped with

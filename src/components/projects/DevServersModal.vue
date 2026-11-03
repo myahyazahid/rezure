@@ -9,6 +9,7 @@ import { useServicesStore } from '@/stores/services'
 import BasePill from '@/components/common/BasePill.vue'
 import LeafLoader from '@/components/common/LeafLoader.vue'
 import ServiceLogPanel from '@/components/services/ServiceLogPanel.vue'
+import DevServerFailureCard from '@/components/projects/DevServerFailureCard.vue'
 
 /**
  * Every `proxy` project's dev server: the port nginx sends its domain to,
@@ -53,6 +54,24 @@ async function freeAndStart(row: DevServerRow) {
     freeing.value = false
   }
 }
+
+/** Tries a failed dev server again after its fix — unless the fix already
+ *  started it (stopping the other copy does). */
+function retryStart(row: DevServerRow) {
+  if (store.statusOf(row.projectId) !== 'running') start(row)
+}
+
+/** The error is a start failure a row already explains with its card, so
+ *  repeating it at the bottom would only say the same thing twice. */
+const errorShownOnRow = computed(() =>
+  store.rows.some(
+    (row) =>
+      row.lastFailure !== null &&
+      !row.issue &&
+      !isRunning(row) &&
+      store.error?.startsWith(`${row.name}'s dev server didn't come up`),
+  ),
+)
 
 const PORT_MODES: { value: PortMode; label: string }[] = [
   { value: 'vite', label: '--port + --strictPort' },
@@ -361,6 +380,16 @@ const ROW_BUTTON_CLASS =
               </button>
             </div>
 
+            <DevServerFailureCard
+              v-if="row.lastFailure && !row.issue && !isRunning(row)"
+              compact
+              class="mt-2.5"
+              :row="row"
+              :failure="row.lastFailure"
+              retry-label="start"
+              @retry="retryStart(row)"
+            />
+
             <div class="mt-3 flex items-center justify-end gap-2">
               <button
                 type="button"
@@ -413,7 +442,7 @@ const ROW_BUTTON_CLASS =
         </li>
       </ul>
 
-      <p v-if="store.error" class="mt-3 text-sm text-red-600 dark:text-red-400">
+      <p v-if="store.error && !errorShownOnRow" class="mt-3 text-sm text-red-600 dark:text-red-400">
         {{ store.error }}
       </p>
       <div

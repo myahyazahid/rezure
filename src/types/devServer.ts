@@ -51,7 +51,34 @@ export interface DevServerRow {
   autoStart: boolean
   status: ServiceStatus
   issue: DevServerIssue | null
+  /** Why its last start failed, while it's stopped; null otherwise. */
+  lastFailure: StartFailure | null
 }
+
+/** Why a dev server's last start failed — mirrors
+ *  `dev_server_failure::StartFailure`. */
+export interface StartFailure {
+  /** What was seen happen: "it exited (exit code: 1)". */
+  what: string
+  /** The cause, when Rezure recognizes it: "@astrojs/node isn't installed". */
+  cause: string | null
+  /** The recommended next step for a recognized cause. */
+  fix: FailureFix | null
+  /** The lines of its output that explain it, noise taken out. */
+  output: string[]
+}
+
+/** The recommended next step — mirrors `dev_server_failure::FailureFix`. */
+export type FailureFix =
+  /** package.json lists what's missing; Install brings it. */
+  | { kind: 'install'; package: string | null }
+  /** Imported but not in package.json; `command` adds it. Shown to copy,
+   *  never run by Rezure. */
+  | { kind: 'addDependency'; package: string; command: string }
+  /** Another copy of this dev server is already running. */
+  | { kind: 'stopOther' }
+  /** It came up on another port than the one set. */
+  | { kind: 'usePort'; found: number[]; expected: number }
 
 /** A change to one project's dev server settings — mirrors
  *  `dev_servers::DevServerChange`. */

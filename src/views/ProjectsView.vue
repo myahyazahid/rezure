@@ -16,12 +16,20 @@ import ProjectPhpVersionModal from '@/components/projects/ProjectPhpVersionModal
 import ProjectNodeVersionModal from '@/components/projects/ProjectNodeVersionModal.vue'
 import ProjectFrameworkModal from '@/components/projects/ProjectFrameworkModal.vue'
 import DevServersModal from '@/components/projects/DevServersModal.vue'
+import DevServerFailureCard from '@/components/projects/DevServerFailureCard.vue'
 import DeleteProjectModal from '@/components/projects/DeleteProjectModal.vue'
 import BusyOverlay from '@/components/common/BusyOverlay.vue'
 import type { ProjectInfo } from '@/types/project'
 
 const store = useProjectsStore()
 const devServers = useDevServersStore()
+
+/** The dev server whose start just failed an Open, when its row says why. */
+const failedDevServer = computed(() =>
+  store.openErrorFor
+    ? (devServers.rows.find((row) => row.projectId === store.openErrorFor) ?? null)
+    : null,
+)
 
 // For the framework pickers, and for the problems banner below: a mistake in
 // the user's own frameworks.json should be visible without opening a picker.
@@ -433,7 +441,19 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
     <p v-if="store.hostsError" class="mt-3 text-sm text-red-600 dark:text-red-400">
       {{ store.hostsError }}
     </p>
-    <p v-if="store.openError" class="mt-3 text-sm text-red-600 dark:text-red-400">
+    <!-- A dev server that didn't come up gets its cause, the fix as a
+         button and its output, instead of one long line of red text. -->
+    <DevServerFailureCard
+      v-if="failedDevServer?.lastFailure"
+      class="mt-3"
+      :row="failedDevServer"
+      :failure="failedDevServer.lastFailure"
+      retry-label="open"
+      @retry="store.openSite(failedDevServer.projectId)"
+      @dismiss="store.dismissOpenError()"
+      @open-dev-servers="devServers.openModal(failedDevServer.projectId)"
+    />
+    <p v-else-if="store.openError" class="mt-3 text-sm text-red-600 dark:text-red-400">
       {{ store.openError }}
       <!-- The dialog has the fix (stop the copy running elsewhere, Install)
            and the dev server's full output, opened on this project. -->
