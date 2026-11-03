@@ -10,6 +10,8 @@
 //!   `process::ProcessService::reap_orphan` for the case that's meant to
 //!   catch, and can't always).
 //! - Another developer tool is the user's call, with a real name attached.
+//! - A Windows service (Odoo's PostgreSQL, a MySQL from Oracle's installer)
+//!   is stopped as a service, through a UAC prompt — see `windows_services`.
 //! - A system process must never be killed, and saying so is more useful
 //!   than failing to.
 
@@ -20,6 +22,7 @@ use serde::Serialize;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
 use super::binaries;
+use super::windows_services::{self, WindowsService};
 use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
 
@@ -34,6 +37,11 @@ pub enum HolderKind {
     /// Someone else's process. Killable, but only the user can say whether
     /// it should be.
     Foreign,
+    /// A process run by a Windows service — `PortHolder::service` names it.
+    /// Usually under another account, so it can't be killed from here; it's
+    /// stopped as a service instead, with the user's approval on a UAC
+    /// prompt.
+    Service,
     /// The kernel, a driver, or a process with no readable path — `System`
     /// (pid 4) holds port 80 whenever IIS or the Windows HTTP service is
     /// enabled. Killing it is impossible and asking would be misleading.
@@ -51,13 +59,16 @@ pub struct PortHolder {
     /// Laragon's or XAMPP's rather than just "nginx".
     pub path: Option<String>,
     pub kind: HolderKind,
+    /// The Windows service behind it, set exactly when `kind` is `Service`.
+    pub service: Option<WindowsService>,
     /// A sentence naming the holder, ready to show.
     pub description: String,
 }
 
 impl PortHolder {
-    /// Whether Rezure will offer to stop it. False for system processes,
-    /// which can't be killed and shouldn't be suggested.
+    /// Whether Rezure will offer to stop it — by killing it, or for a
+    /// Windows service by stopping the service. False for system processes,
+    /// which can't be stopped either way and shouldn't be suggested.
     pub fn reclaimable(&self) -> bool {
         self.kind != HolderKind::System
     }
@@ -163,6 +174,7 @@ pub fn holder(port: u16) -> Option<PortHolder> {
             name: "System".to_string(),
             path: None,
             kind: HolderKind::System,
+            service: None,
             description: format!(
                 "port {port} is reserved by Windows itself - usually IIS or the World Wide Web \
                  Publishing service. Stop that service to free it."
@@ -185,13 +197,26 @@ pub fn holder(port: u16) -> Option<PortHolder> {
     let path = process
         .and_then(|p| p.exe())
         .map(|exe| exe.display().to_string());
+    let ours = path.as_deref().is_some_and(is_rezure_binary);
 
-    let kind = match &path {
+    // Asked before falling back to "protected": a service's process usually
+    // runs under another account, so its path is unreadable too, but unlike
+    // the kernel it can be stopped. Rezure never installs services, so its
+    // own orphans skip the lookup.
+    let service = if ours {
+        None
+    } else {
+        let parent = process.and_then(|p| p.parent()).map(|p| p.as_u32());
+        windows_services::owning(pid, parent)
+    };
+
+    let kind = match (&path, &service) {
+        _ if ours => HolderKind::Rezure,
+        (_, Some(_)) => HolderKind::Service,
         // No readable path means a protected process — not something to
         // offer to kill.
-        None => HolderKind::System,
-        Some(path) if is_rezure_binary(path) => HolderKind::Rezure,
-        Some(_) => HolderKind::Foreign,
+        (None, None) => HolderKind::System,
+        (Some(_), None) => HolderKind::Foreign,
     };
 
     let description = match kind {
@@ -202,6 +227,13 @@ pub fn holder(port: u16) -> Option<PortHolder> {
         HolderKind::Foreign => match label_for(path.as_deref()) {
             Some(tool) => format!("port {port} is held by {tool} ({name}, pid {pid})"),
             None => format!("port {port} is held by {name} (pid {pid})"),
+        },
+        HolderKind::Service => match &service {
+            Some(service) => format!(
+                "port {port} is held by the Windows service \"{}\" ({name}, pid {pid})",
+                service.display_name
+            ),
+            None => format!("port {port} is held by a Windows service ({name}, pid {pid})"),
         },
         HolderKind::System => {
             format!("port {port} is held by a protected system process (pid {pid})")
@@ -214,6 +246,7 @@ pub fn holder(port: u16) -> Option<PortHolder> {
         name,
         path,
         kind,
+        service,
         description,
     })
 }
@@ -245,13 +278,17 @@ fn label_for(path: Option<&str>) -> Option<&'static str> {
         .map(|(_, label)| *label)
 }
 
-/// Kills whatever is listening on `port`.
+/// Stops whatever is listening on `port`: kills a process, or stops a
+/// Windows service through a UAC prompt — with `disable_autostart`, also
+/// setting it to start Manually so it doesn't take the port back at the next
+/// boot.
 ///
 /// Refuses a system process outright rather than failing obscurely, and
-/// re-reads the holder instead of trusting a pid the caller passed in — the
-/// process may have exited on its own between being shown and being killed,
-/// and a recycled pid would mean killing something unrelated.
-pub fn reclaim(port: u16) -> Result<(), AppError> {
+/// re-reads the holder instead of trusting a pid (or a service name) the
+/// caller passed in — the process may have exited on its own between being
+/// shown and being killed, and a recycled pid would mean killing something
+/// unrelated.
+pub fn reclaim(port: u16, disable_autostart: bool) -> Result<(), AppError> {
     let Some(holder) = holder(port) else {
         // Already free — the thing the caller wanted is true.
         return Ok(());
@@ -264,7 +301,10 @@ pub fn reclaim(port: u16) -> Result<(), AppError> {
         });
     }
 
-    super::process::kill_process_tree(tree_root(holder.pid));
+    match &holder.service {
+        Some(service) => windows_services::stop(service, disable_autostart)?,
+        None => super::process::kill_process_tree(tree_root(holder.pid)),
+    }
 
     // Confirm rather than assume: `taskkill` reporting success doesn't mean
     // the socket is released yet, and a still-held port would otherwise show
@@ -393,7 +433,7 @@ Active Connections
         let port = listener.local_addr().unwrap().port();
         drop(listener);
 
-        assert!(reclaim(port).is_ok());
+        assert!(reclaim(port, false).is_ok());
     }
 
     /// A child running the same binary as its parent resolves to the
@@ -485,7 +525,7 @@ Active Connections
             }
 
             println!("{port}: reclaiming {} (pid {})", found.name, found.pid);
-            reclaim(port).expect("reclaiming our own orphan must succeed");
+            reclaim(port, false).expect("reclaiming our own orphan must succeed");
             assert!(
                 holder(port).is_none(),
                 "port {port} must be free once reclaimed"
@@ -499,7 +539,7 @@ Active Connections
     #[test]
     #[ignore]
     fn print_real_holders() {
-        for port in [80, 3306, 9000] {
+        for port in [80, 3306, 5432, 9000] {
             match holder(port) {
                 Some(found) => println!(
                     "{port}: {:?} pid={} {} -> {}",

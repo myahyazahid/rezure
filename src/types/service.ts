@@ -59,8 +59,22 @@ export interface PortHolder {
   name: string
   path: string | null
   /** `rezure` is a leftover of Rezure's own from a previous run — safe to
-   *  reclaim. `system` can't be killed at all. */
-  kind: 'rezure' | 'foreign' | 'system'
+   *  reclaim. `service` is a Windows service, stopped through a UAC prompt.
+   *  `system` can't be stopped at all. */
+  kind: 'rezure' | 'foreign' | 'service' | 'system'
+  /** The Windows service behind it; set exactly when `kind` is `service`. */
+  service: WindowsService | null
   /** A ready-to-show sentence naming the holder. */
   description: string
+}
+
+/** A Windows service holding a port — mirrors
+ *  `services::windows_services::WindowsService`. */
+export interface WindowsService {
+  /** The key name `Stop-Service` takes. */
+  name: string
+  /** What `services.msc` lists it as. */
+  displayName: string
+  /** Start type Automatic — stopping it only lasts until the next boot. */
+  startsWithWindows: boolean
 }

@@ -169,6 +169,14 @@ pub enum AppError {
     #[error("{reason}")]
     PortHolderProtected { port: u16, reason: String },
 
+    #[error(
+        "stopping the {0} service was cancelled - click Yes on the admin prompt to let Rezure stop it"
+    )]
+    WindowsServiceStopCancelled(String),
+
+    #[error("couldn't stop the {name} service: {reason}")]
+    WindowsServiceStopFailed { name: String, reason: String },
+
     #[error("{path} can't be added as a project - {reason}")]
     UnusableProjectPath { path: String, reason: String },
 
@@ -331,6 +339,8 @@ impl AppError {
             Self::DatadirInUse { .. } => "DatadirInUse",
             Self::SwitchRolledBack { .. } => "SwitchRolledBack",
             Self::PortHolderProtected { .. } => "PortHolderProtected",
+            Self::WindowsServiceStopCancelled { .. } => "WindowsServiceStopCancelled",
+            Self::WindowsServiceStopFailed { .. } => "WindowsServiceStopFailed",
             Self::UnusableProjectPath { .. } => "UnusableProjectPath",
             Self::ProjectAlreadyLinked { .. } => "ProjectAlreadyLinked",
             Self::UnknownFramework { .. } => "UnknownFramework",

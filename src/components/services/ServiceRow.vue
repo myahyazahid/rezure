@@ -152,10 +152,15 @@ const blocker = computed<PortHolder | null>(
 /** How many other ports are held besides the one described. */
 const moreBlocked = computed(() => Math.max(0, blockers.value.length - 1))
 const freeing = ref(false)
+/** For a Windows service that starts with Windows: also set it to Manual,
+ *  so it doesn't take the port back after the next restart. Opt-in — it
+ *  changes how something the user installed behaves from then on. */
+const disableAutostart = ref(false)
 
 async function onPrimaryAction() {
   error.value = null
   blockers.value = []
+  disableAutostart.value = false
   try {
     await (isRunning.value ? store.stop(props.service.id) : store.start(props.service.id))
   } catch (e) {
@@ -168,15 +173,17 @@ async function onPrimaryAction() {
   }
 }
 
-/** Kills whatever holds each of the service's ports, then starts it. Two
- *  steps on purpose — if freeing fails, that's what gets reported, not a
- *  confusing start error. */
+/** Kills whatever holds each of the service's ports — or stops it through a
+ *  UAC prompt when it's a Windows service — then starts it. Two steps on
+ *  purpose — if freeing fails, that's what gets reported, not a confusing
+ *  start error. A Windows service holding several ports is stopped once:
+ *  the later ports are free by the time their turn comes. */
 async function freePortAndStart() {
   freeing.value = true
   error.value = null
   try {
     for (const held of blockers.value) {
-      await store.freePort(held.port)
+      await store.freePort(held.port, disableAutostart.value)
     }
     blockers.value = []
     await store.start(props.service.id)
@@ -529,28 +536,57 @@ function requestForceStop() {
         This one has to be stopped as a Windows service; Rezure can't end it.
       </p>
 
-      <div v-else class="mt-3 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          class="glass-accent rounded-full px-4 py-1.5 text-sm font-semibold text-red-600 transition disabled:opacity-50 dark:text-red-400"
-          :disabled="freeing || isPending"
-          @click="freePortAndStart"
-        >
-          {{ freeing ? 'Stopping…' : `Stop it and start ${service.name}` }}
-        </button>
-        <button
-          type="button"
-          class="rounded-full px-4 py-1.5 text-sm font-semibold text-neutral-600 dark:text-neutral-300"
-          @click="blockers = []"
-        >
-          Cancel
-        </button>
-        <!-- Killing someone else's server is a different decision from
-             reclaiming our own leftover, so it's labelled as one. -->
-        <span v-if="blocker.kind === 'foreign'" class="text-xs text-amber-700 dark:text-amber-300">
-          This isn't Rezure's - make sure you don't need it running.
-        </span>
-      </div>
+      <template v-else>
+        <!-- A Windows service runs under another account, so stopping it
+             takes admin rights — said before the click, so the UAC prompt
+             that follows isn't a surprise. -->
+        <template v-if="blocker.service">
+          <p class="mt-2 text-xs text-neutral-600 dark:text-neutral-300">
+            Rezure can stop this service for you - Windows asks for administrator permission first.
+            Whatever installed it won't work until the service is started again.
+          </p>
+          <label v-if="blocker.service.startsWithWindows" class="mt-2 flex items-center gap-2.5">
+            <input v-model="disableAutostart" type="checkbox" class="accent-accent-600" />
+            <span class="text-xs text-neutral-700 dark:text-neutral-200">
+              Don't start it with Windows - otherwise it takes the port back after a restart
+            </span>
+          </label>
+        </template>
+
+        <div class="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            class="glass-accent rounded-full px-4 py-1.5 text-sm font-semibold text-red-600 transition disabled:opacity-50 dark:text-red-400"
+            :disabled="freeing || isPending"
+            @click="freePortAndStart"
+          >
+            {{
+              freeing
+                ? blocker.service
+                  ? 'Stopping the service…'
+                  : 'Stopping…'
+                : blocker.service
+                  ? `Stop the service and start ${service.name}`
+                  : `Stop it and start ${service.name}`
+            }}
+          </button>
+          <button
+            type="button"
+            class="rounded-full px-4 py-1.5 text-sm font-semibold text-neutral-600 dark:text-neutral-300"
+            @click="blockers = []"
+          >
+            Cancel
+          </button>
+          <!-- Killing someone else's server is a different decision from
+               reclaiming our own leftover, so it's labelled as one. -->
+          <span
+            v-if="blocker.kind === 'foreign'"
+            class="text-xs text-amber-700 dark:text-amber-300"
+          >
+            This isn't Rezure's - make sure you don't need it running.
+          </span>
+        </div>
+      </template>
     </div>
 
     <!-- Stated plainly rather than as a generic "are you sure": the cost of

@@ -56,6 +56,7 @@ pub mod telemetry;
 pub mod tunnel;
 pub mod upgrade_notice;
 pub mod vhosts;
+pub mod windows_services;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::{Arc, Mutex};

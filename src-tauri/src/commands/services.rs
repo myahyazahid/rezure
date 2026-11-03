@@ -139,19 +139,24 @@ pub async fn port_holder(port: u16) -> Option<PortHolder> {
         .unwrap_or(None)
 }
 
-/// Kills whatever is holding `port`, then reports what (if anything) still
+/// Stops whatever is holding `port`, then reports what (if anything) still
 /// is.
 ///
-/// This is the "it says the port is taken, take it back" action. It refuses
-/// protected system processes — port 80 belonging to `System` means IIS or
-/// the Windows HTTP service, which has to be stopped as a service, not
-/// killed. Starting the service afterwards stays a separate, explicit step:
-/// freeing a port and claiming it are different decisions, and bundling
-/// them would hide a failure of one behind the other.
+/// This is the "it says the port is taken, take it back" action. A process
+/// is killed; a Windows service is stopped through a UAC prompt, and with
+/// `disable_autostart` set to start Manually. It refuses protected system
+/// processes — port 80 belonging to `System` means IIS or the Windows HTTP
+/// service, which can't be traced to one service from the port alone.
+/// Starting the service afterwards stays a separate, explicit step: freeing
+/// a port and claiming it are different decisions, and bundling them would
+/// hide a failure of one behind the other.
 #[tauri::command]
-pub async fn free_port(port: u16) -> Result<Option<PortHolder>, AppError> {
+pub async fn free_port(
+    port: u16,
+    disable_autostart: Option<bool>,
+) -> Result<Option<PortHolder>, AppError> {
     tokio::task::spawn_blocking(move || {
-        ports::reclaim(port)?;
+        ports::reclaim(port, disable_autostart.unwrap_or(false))?;
         Ok(ports::holder(port))
     })
     .await

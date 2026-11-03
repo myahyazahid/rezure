@@ -660,7 +660,9 @@ mana saja di window, dengan preview Rezure untuk memilih posisinya.
 - Stiker berupa 24 SVG buatan sendiri di `src/assets/stickers/`, dibagi dua kategori seperti tema.
   **Girls**: bow, heart, sparkle, star, sakura, cloud, strawberry, cat, butterfly, rainbow, crown,
   cherry. **Mens** (outline lebih gelap, warna lebih dingin): gamepad, rocket, bolt, flame, coffee,
-  terminal, football, headphones, shield, robot, planet, sunglasses. Dua puluh empat ini tetap
+  terminal, football, headphones, shield, robot, planet, sunglasses (di v3.5 kedua belasnya
+  digambar ulang dengan gaya kawaii yang sama dengan stiker lain, lihat
+  `docs/v3/rezure-app-v3.5-phases-tasks.md`). Dua puluh empat ini tetap
   dibundel dan tidak butuh jaringan; stiker tambahan bisa diunduh lewat Browse (Fase 3.13e). Tidak
   ada aset pihak ketiga. Tepi putih ala stiker dan bayangan dibuat lewat class `.sticker` (filter
   `drop-shadow`) di `main.css`, bukan di SVG-nya, supaya tebalnya sama di semua ukuran

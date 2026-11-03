@@ -33,9 +33,9 @@ async function start(row: DevServerRow) {
   if (holder) blocked.value = { projectId: row.projectId, holder }
 }
 
-/** Kills whatever holds the port, then starts the dev server — two steps,
- *  so a failure to free it is what gets reported, not a confusing start
- *  error. */
+/** Kills whatever holds the port (or, for a Windows service, stops it
+ *  through a UAC prompt), then starts the dev server — two steps, so a
+ *  failure to free it is what gets reported, not a confusing start error. */
 async function freeAndStart(row: DevServerRow) {
   if (!blocked.value) return
   freeing.value = true
@@ -428,7 +428,13 @@ const ROW_BUTTON_CLASS =
           :disabled="freeing"
           @click="freeAndStart(store.rows.find((row) => row.projectId === blocked?.projectId)!)"
         >
-          {{ freeing ? 'Freeing…' : `Free port ${blocked.holder.port} and start` }}
+          {{
+            freeing
+              ? 'Freeing…'
+              : blocked.holder.service
+                ? 'Stop the service and start (asks for admin)'
+                : `Free port ${blocked.holder.port} and start`
+          }}
         </button>
       </div>
 

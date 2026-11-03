@@ -73,10 +73,12 @@ export const useServicesStore = defineStore('services', () => {
     return invoke<PortHolder | null>('port_holder', { port })
   }
 
-  /** Kills whatever holds `port`. Returns whoever still holds it after —
+  /** Kills whatever holds `port` — or stops it, through a UAC prompt, when
+   *  it's a Windows service; `disableAutostart` also keeps that service from
+   *  starting with Windows. Returns whoever still holds the port after —
    *  normally null. Starting the service stays a separate step. */
-  function freePort(port: number) {
-    return invoke<PortHolder | null>('free_port', { port })
+  function freePort(port: number, disableAutostart = false) {
+    return invoke<PortHolder | null>('free_port', { port, disableAutostart })
   }
 
   function restart(id: string) {

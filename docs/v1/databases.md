@@ -439,8 +439,11 @@ What doesn't run side by side:
 - **The Databases page reads one server at a time**, the one picked in the switcher. Picking
   another only changes what the page lists — nothing is stopped.
 - **A port another program already holds.** Laragon and XAMPP use 3306. A PostgreSQL installed
-  with EDB's installer runs as a Windows service on 5432. The service then won't start, and its
-  card names the program holding the port.
+  with EDB's installer, or the one Odoo brings, runs as a Windows service on 5432. The service
+  then won't start, and its card names the program holding the port. When that program is a
+  Windows service, the card names the service and offers to stop it. Windows asks for
+  administrator permission once. If the service starts with Windows, a checkbox also sets it to
+  Manual so it doesn't take the port back after a restart.
 
 Each server keeps its own memory. Stop the ones you aren't using, or take them off the
 Services page with **Manage services**.

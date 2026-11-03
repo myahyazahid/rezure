@@ -209,9 +209,60 @@ Live, total jadi 36. Gaya dan aturannya sama dengan 22 yang lama: SVG original `
 - [x] Frontend: `LiveStickerKind` di `src/types/settings.ts` dan `CATALOG` di
       `stores/decorations.ts` (urutan di palet: setelah kitsune). File SVG di
       `src/assets/stickers/live/` otomatis ikut lewat `import.meta.glob`
+- [x] **Dua belas stiker Classic bekas kategori Mens digambar ulang** (permintaan maintainer,
+      "classic jelek"): `bolt`, `coffee`, `flame`, `football`, `gamepad`, `headphones`, `planet`,
+      `robot`, `rocket`, `shield`, `sunglasses`, `terminal`. Sebelumnya outline navy `#1e293b`
+      dan warna clip-art yang bentrok dengan stiker lain; sekarang gayanya sama dengan Live dan
+      12 Classic lainnya: outline `#6b2d45`, warna pastel, kilau putih, dan wajah kawaii (petir,
+      cangkir, api, bola, gamepad, planet, robot, roket lewat jendelanya, tameng). Kacamata jadi
+      lensa hati, headphone dapat not musik, terminal menampilkan wajah `>_<`. Nama file dan
+      `StickerKind` tidak berubah, jadi stiker yang sudah ditempel ikut berganti gambar. Masih
+      gambar diam (Classic). Dirender di headless Chrome; belum dilihat di app sungguhan
 - Verifikasi: keempat belas SVG dirender di headless Chrome, diam dan dibekukan di 50% dan 76%
   animasinya, untuk cek bentuk dan poros putar. **Belum dilihat di app sungguhan** (palet
   Decorations, overlay, switch Animate)
+
+---
+
+## Port dipegang Windows service: stop lewat UAC (atas permintaan maintainer)
+
+Kasus nyata: PostgreSQL Rezure gagal start karena 5432 dipegang `postgres.exe` milik service
+`PostgreSQL_For_Odoo` (jalan sebagai akun `openpgsvc`, start type Automatic). Path exe-nya tidak
+terbaca dari akun user, jadi `ports::holder` menganggapnya `System` dan kartu hanya bilang
+"protected system process" tanpa tombol. Sekarang alurnya sama dengan **Sync hosts file**: pesan
+spesifik, lalu satu prompt UAC.
+
+- [x] Modul baru `services::windows_services`. `owning(pid, parent)` membaca daftar service aktif
+      dari Service Control Manager (`EnumServicesStatusExW`, tanpa admin) dan mencocokkan pid
+      proses pemegang port **atau parent langsungnya** (`pg_ctl.exe` adalah service-nya,
+      `postgres.exe` anaknya yang listen). Hanya satu tingkat ke atas, supaya program biasa yang
+      dijalankan dari shell di sesi SSH tidak dikira milik `sshd`. Proses `svchost` bersama
+      (`SERVICE_WIN32_SHARE_PROCESS`) sengaja tidak dijawab: menghentikan salah satunya cuma
+      tebakan dan ikut mematikan service lain. Start type dibaca lewat `QueryServiceConfigW`
+- [x] `HolderKind::Service` baru, dan `PortHolder.service` (`name`, `displayName`,
+      `startsWithWindows`). Pesannya jadi: *port 5432 is held by the Windows service
+      "PostgreSQL_For_Odoo" (postgres.exe, pid 41144)*. Proses milik Rezure tetap dicek lebih
+      dulu dan tidak pernah dianggap service
+- [x] `ports::reclaim(port, disable_autostart)` menghentikan service lewat
+      `utils::elevation::run_script` (`Stop-Service`, opsional `Set-Service -StartupType
+      Manual`). Nama service diambil ulang dari SCM di backend, bukan dari frontend, dan masuk ke
+      script lewat `quote_ps`. Tanpa `-Force`, supaya service lain yang bergantung padanya tidak
+      ikut mati diam-diam; kalau ada, pesan error PowerShell yang ditampilkan. Command
+      `free_port` dapat argumen opsional `disableAutostart`
+- [x] Error baru: `WindowsServiceStopCancelled` (UAC ditolak) dan `WindowsServiceStopFailed`
+- [x] `ServiceRow.vue`: untuk holder service, panel menjelaskan bahwa Windows akan minta izin
+      admin, checkbox **Don't start it with Windows** (hanya kalau start type Automatic, default
+      mati), dan tombol **Stop the service and start …**. `DevServersModal.vue` memakai jalur
+      yang sama dengan label yang menyebut admin
+- [x] `docs/v1/databases.md` diperbarui
+- Verifikasi: `cargo fmt`, `cargo clippy --all-targets`, test `windows_services`,
+  `services::ports`, `utils::error` lolos; `prettier`, `eslint`, `vue-tsc` bersih. Deteksi dicek
+  ke service sungguhan lewat `print_real_holders`: Redis (6379), AnyDesk (7070), Print Spooler
+  terbaca sebagai `Service`; port `svchost` bersama tetap `System`. **Belum dicek:** jalur parent
+  (`pg_ctl` → `postgres`) dan klik tombol + UAC di app sungguhan, karena service Odoo sudah
+  dimatikan manual sebelum fitur ini selesai
+- Port 80 yang dipegang `System` (http.sys/IIS) tetap tanpa tombol: pid 4 tidak bisa ditelusuri
+  ke satu service tertentu
 
 ---
 
