@@ -1,11 +1,13 @@
 //! Thin glue between the Switch page and `services::postgres` /
-//! `services::postgres_catalog`.
+//! `services::postgres_catalog`, and between the Databases page's Users
+//! dialog and `services::postgres_roles`.
 
 use tauri::{AppHandle, Manager, State};
 
 use crate::config::settings::{self, SettingsState};
 use crate::services::postgres::{self, PostgresVersionStatus};
 use crate::services::postgres_catalog::{self, PostgresRelease};
+use crate::services::postgres_roles::{self, ConnectionSnippet, NewRole, PostgresRole};
 use crate::services::{connections, ServiceManager};
 use crate::utils::error::AppError;
 
@@ -59,4 +61,59 @@ pub async fn install_postgres_version(app: AppHandle, version: String) -> Result
     postgres_catalog::install(&app, &version).await?;
     connections::ensure_postgres();
     Ok(())
+}
+
+fn joined(e: tokio::task::JoinError) -> AppError {
+    AppError::DatabaseQueryFailed(format!("background task panicked: {e}"))
+}
+
+/// The users on Rezure's own PostgreSQL — see `services::postgres_roles`.
+#[tauri::command]
+pub async fn list_postgres_roles() -> Result<Vec<PostgresRole>, AppError> {
+    tokio::task::spawn_blocking(postgres_roles::list)
+        .await
+        .map_err(joined)?
+}
+
+/// Creates a user (and optionally a database it owns), returning the list
+/// as it now stands.
+#[tauri::command]
+pub async fn create_postgres_role(role: NewRole) -> Result<Vec<PostgresRole>, AppError> {
+    tokio::task::spawn_blocking(move || {
+        postgres_roles::create(&role)?;
+        postgres_roles::list()
+    })
+    .await
+    .map_err(joined)?
+}
+
+#[tauri::command]
+pub async fn set_postgres_role_password(
+    name: String,
+    password: Option<String>,
+) -> Result<(), AppError> {
+    tokio::task::spawn_blocking(move || postgres_roles::set_password(&name, password.as_deref()))
+        .await
+        .map_err(joined)?
+}
+
+#[tauri::command]
+pub async fn drop_postgres_role(name: String) -> Result<Vec<PostgresRole>, AppError> {
+    tokio::task::spawn_blocking(move || {
+        postgres_roles::drop(&name)?;
+        postgres_roles::list()
+    })
+    .await
+    .map_err(joined)?
+}
+
+/// The settings that point an app at `user` — `password` being the one the
+/// user just typed, since Rezure doesn't keep it.
+#[tauri::command]
+pub fn postgres_connection_snippets(
+    user: String,
+    password: Option<String>,
+    database: Option<String>,
+) -> Vec<ConnectionSnippet> {
+    postgres_roles::snippets(&user, password.as_deref(), database.as_deref())
 }

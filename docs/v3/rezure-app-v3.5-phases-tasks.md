@@ -310,6 +310,179 @@ tidak akan terbantu oleh Install.
 
 ---
 
+## PostgreSQL Rezure untuk aplikasi lain: user, start otomatis, Odoo (atas permintaan maintainer)
+
+Kasus pemicunya: installer Odoo di laptop teman maintainer tidak bisa mencentang komponen
+PostgreSQL, jadi Odoo terpasang tanpa database server. PostgreSQL Rezure sebenarnya cocok (Odoo 20
+membawa PostgreSQL 16.14, katalog Rezure punya 16.15; cluster Rezure `UTF8 --no-locale`, sama
+dengan yang dipakai Odoo), tapi ada empat celah: tidak ada role selain superuser (Odoo menolak
+jalan sebagai `postgres`), PostgreSQL Rezure hanya jalan kalau di-start manual, `odoo.conf` ada
+di Program Files (butuh admin), dan `pg_path` harus menunjuk ke `bin` PostgreSQL Rezure.
+
+Arahan maintainer: **sebisa mungkin berguna di luar Odoo juga**. Jadi Odoo hanya kasus pertama
+dari fitur yang umum: user database, start otomatis, dan potongan konfigurasi untuk aplikasi apa
+pun.
+
+### Fase A — User PostgreSQL
+
+- [x] `services::postgres_roles`: daftar role (tanpa `pg_*`), buat role (`LOGIN`, opsional
+      `CREATEDB`, password opsional), ganti password, hapus role. Hanya untuk PostgreSQL milik
+      Rezure. `postgres` dan `root` tidak bisa dihapus atau diubah. Nama lewat aturan identifier
+      yang sama dengan nama database, tanpa awalan `pg_`
+- [x] "Buat juga database miliknya": `CREATE DATABASE … OWNER …`. Pola umum hampir semua
+      framework (satu app, satu user, satu database)
+- [x] Preset: **App** (user + database miliknya), **Odoo** (user `odoo`, `CREATEDB`, tanpa
+      database, karena Odoo membuat database sendiri), **Django/Rails** (user + database,
+      `CREATEDB` supaya test runner bisa membuat database test)
+- [x] UI: tombol **Users** di halaman Databases saat target-nya PostgreSQL Rezure, membuka modal
+      daftar user + form tambah (`PostgresUsersModal.vue`). Password opsional, tombol
+      **Generate**, tidak disimpan Rezure. User yang masih punya database tidak bisa dihapus,
+      database-nya disebut
+
+### Fase B — Start otomatis
+
+- [x] Setting per service `startOnLaunch`: service itu di-start begitu Rezure terbuka. Berlaku
+      untuk semua service (PostgreSQL, MariaDB, Nginx, Mailpit, …), bukan khusus PostgreSQL
+- [x] Toggle **Start when Rezure opens** di menu "More actions" tiap baris service (menu jadi
+      selalu ada, Force stop tetap hanya saat jalan)
+- [x] Digabung dengan **Start with Windows** dan **Keep in tray** yang sudah ada, supaya aplikasi
+      seperti Odoo (service Windows yang start saat boot) menemukan database-nya jalan
+- [x] `services::start_on_launch`: start dijalankan di akhir setup `lib.rs` (setelah vhost ditulis
+      dan PHP pool terdaftar, jadi nginx naik dengan konfigurasi terbaru), di thread terpisah
+      supaya jendela tidak menunggu database. Service yang disembunyikan, belum terpasang, atau
+      sudah jalan dilewati. Gagal satu tidak menghentikan yang lain
+- [x] Teks Settings "Start Rezure with Windows" diperbaiki: sebelumnya bilang "Services boot in
+      the background at sign-in", padahal tidak ada yang di-start. Sekarang menyebut service
+      mana yang ikut naik
+
+### Fase C — Hubungkan aplikasi
+
+- [x] **Connect an app** untuk setiap user: potongan siap salin, yaitu URL `postgresql://`,
+      `.env` Laravel, `DATABASE_URL` (Django/Node/Prisma), `database.yml` Rails, JDBC, dan
+      `odoo.conf`
+- [x] Odoo (aplikasi pertama yang bisa dikonfigurasi Rezure sendiri, karena terpasang di Windows
+      dengan file konfigurasi yang diketahui): deteksi instalasi (`Program Files\Odoo*\server\
+      odoo.conf` + service `odoo-server-*`), tampilkan status, lalu satu tombol: buat/perbarui role
+      `odoo`, backup `odoo.conf`, tulis `db_host`/`db_port`/`db_user`/`db_password`/`pg_path`,
+      restart service Odoo, opsional matikan service PostgreSQL bawaan Odoo. Semua lewat **satu
+      UAC** (`utils::elevation`). Bisa dikembalikan ke konfigurasi semula
+- [x] Peringatan untuk yang sudah punya data di PostgreSQL bawaan Odoo: database lama tidak
+      ikut pindah (Fase D, belum dikerjakan)
+- [x] Detail implementasi: `services::odoo` (deteksi, `connect`, `restore`, `open`). Penulisan
+      `odoo.conf` hanya mengubah lima key itu; baris lain (admin password, addons path,
+      komentar, line ending CRLF) dibiarkan. File hasilnya disiapkan di
+      folder data Rezure (`data\odoo\`, biasanya `C:\rezure\data\odoo\`) lalu disalin lewat UAC, dan salinan staging (yang
+      berisi password) dihapus setelahnya. Hasilnya dicek dengan membaca `odoo.conf` lagi.
+      Password `odoo` dibuat acak dan hanya ada di `odoo.conf`. Service PostgreSQL bawaan yang
+      dimatikan dicatat di `data\odoo\state.json`, supaya restore hanya menyalakan yang itu
+- [x] Helper bersama `utils::elevation::run_logged` (script `try`/`catch` + log error, satu UAC).
+      `windows_services::stop` ikut dipindah ke situ. `windows_services::find` sekarang bisa
+      mencari service yang terpasang (jalan maupun mati), bukan hanya yang sedang jalan
+- [x] UI: baris "Odoo 20.0 is installed on this PC" di halaman Databases (saat target-nya
+      PostgreSQL Rezure), membuka `OdooConnectModal.vue`: setting Odoo sekarang, apa yang akan
+      dilakukan, checkbox matikan PostgreSQL bawaan, toggle "After a restart" (Fase B +
+      setting yang sudah ada), saran versi (bawaan Odoo vs versi aktif Rezure), **Connect to
+      Rezure**, **Open Odoo**, **Put back Odoo's own settings**
+- [x] Desain ulang modal Odoo (permintaan maintainer, versi pertama terlalu padat): diagram
+      Odoo → PostgreSQL Rezure (menyebut service bawaan yang digantikan), tabel perubahan
+      `odoo.conf` per baris (nilai lama dicoret, nilai baru disorot), langkah bernomor dengan
+      checkbox "Turn off PostgreSQL_For_Odoo" sebagai langkah terakhir, kolom kanan "After a
+      restart" dengan status "All set / x of N on", catatan versi dan peringatan data sebagai
+      callout. Tombol Connect berikon perisai (tanda minta admin) dan nonaktif kalau PostgreSQL
+      belum terpasang. `OdooInstall` dapat `rezurePgPath` dan `rezurePostgresVersion` dari Rust
+      supaya nilai baru `pg_path` di tabel sama persis dengan yang akan ditulis
+- [x] Kartu **Odoo's Master Password** di modal (kasus nyata setelah Connect berhasil: database
+      manager Odoo menolak dengan "bad admin password"). `OdooInstall.masterPassword` hanya
+      menyebut status `admin_passwd` (`missing` → `admin`, `plainText`, `hashed`), **tidak pernah
+      nilainya**. Untuk `hashed`: ganti nilainya di `odoo.conf` sebagai administrator lalu restart
+      service Odoo. Tombol **Open** membuka `odoo.conf` di Notepad sebagai administrator (UAC,
+      `elevation::open_elevated`, tidak menunggu Notepad ditutup), supaya file di Program Files
+      itu bisa langsung disimpan. Path-nya diambil ulang dari deteksi, bukan dari frontend. Di
+      mesin maintainer terbaca `hashed`
+- [x] **Start / Stop / Restart** service Odoo (permintaan maintainer: user awam tidak tahu
+      `Restart-Service`). Baris sendiri di bawah baris path + **Open** pada kartu Master
+      Password: titik status, nama service, lalu **Stop** + **Restart** saat jalan atau **Start**
+      saat mati. **Start**/**Restart** menyalakan PostgreSQL Rezure dulu kalau Odoo terhubung ke
+      sana. Link Restart di diagram (versi sebelumnya) dihapus supaya kontrolnya hanya di satu
+      tempat
+- [x] **Allow without asking**: modul baru `services::windows_service_control`. Satu UAC
+      menambahkan ACE `(A;;RPWPLCLO;;;<SID akun ini>)` (start, stop, query status, interrogate,
+      tidak ada hak mengubah service) ke security descriptor service itu saja, lewat
+      `sc.exe sdset` (exit code native dicek manual). SID diambil dari token proses
+      (`GetTokenInformation` + `ConvertSidToStringSidW`), SDDL dibaca dengan `sc.exe sdshow`
+      tanpa admin. Setelah itu `control` memanggil SCM langsung (`StartServiceW`,
+      `ControlService`, menunggu status sampai 45 detik) tanpa UAC. Sebelum diizinkan, setiap
+      aksi tetap jalan lewat UAC. `can_control` mengecek dengan membuka service dengan hak
+      start+stop, jadi status "Allow" selalu sesuai kenyataan. **Put back Odoo's own settings**
+      ikut mencabut ACE itu
+- Verifikasi: test unit `windows_service_control` (sisip ACE ke DACL sekali saja dan sebelum
+  SACL, cabut kembali ke SDDL semula, quoting `sdset`, baca SID akun dan SDDL service
+  `EventLog` sungguhan) lolos. **Belum dicoba di app:** klik Allow (UAC), lalu Start/Stop/
+  Restart tanpa UAC
+- [x] Toggle **Keep Rezure in the tray** dihapus dari "After a restart" (keputusan maintainer:
+      Rezure memang dimaksudkan tetap terbuka selama Odoo dipakai). Tinggal dua toggle, dan
+      hitungannya jadi "x of 2 on". Setting-nya sendiri tetap ada di halaman Settings
+- [x] **Bug ditemukan lewat pemakaian nyata:** setelah Connect, Odoo gagal dengan `role "odoo"
+      does not exist`. `odoo.conf` sudah ditulis, tapi role `odoo` tidak ada di PostgreSQL Rezure
+      (hanya `postgres` dan `root`), padahal modal menampilkan "On Rezure's PostgreSQL" karena
+      `uses_rezure` hanya membaca `odoo.conf`. Langkah terakhir Connect (`ensure` role) rupanya
+      gagal tanpa terlihat; log sesi itu sudah tidak ada, jadi penyebab pastinya tidak diketahui.
+      Role dibuat manual di mesin maintainer. Perbaikan di app:
+      - `OdooInstall.loginMissing`: `odoo.conf` menunjuk ke Rezure tapi role `db_user` tidak ada
+        (hanya `true` kalau benar-benar terbukti; PostgreSQL yang mati tidak dianggap hilang)
+      - Banner merah di atas modal + badge "Login missing" + tombol **Recreate it**
+        (`odoo::repair_login`): nyalakan PostgreSQL kalau perlu, lalu `ensure` role dari
+        `db_user`/`db_password` di `odoo.conf` apa adanya. Tidak mengubah file di Program Files,
+        tidak butuh UAC. Baris Odoo di halaman Databases juga merah dengan tombol **Fix**
+      - **Start**/**Restart** Odoo selalu memastikan role-nya ada (idempotent, kegagalannya hanya
+        di-log), jadi kasus ini juga sembuh sendiri lewat tombol yang biasa dipakai
+- [x] **Delete database di PostgreSQL Rezure** (permintaan maintainer, setelah database `odoo`
+      setengah jadi tidak bisa dihapus dari mana pun). `ServerInfo.drop_supported` sekarang
+      `true` juga untuk koneksi PostgreSQL yang `managed` dan tidak read-only, dan
+      `database::drop_database` mengizinkan koneksi itu. Pakai dialog konfirmasi ketik CONFIRM
+      yang sama dengan MariaDB, dan `DROP DATABASE … WITH (FORCE)` yang sudah ada menutup sesi
+      Odoo/PHP yang masih terbuka. Koneksi ke server orang lain dan SQL Server tetap tanpa Delete
+- [x] Pesan hapus user yang masih punya database diperjelas: *"odoo" still owns the database
+      odoo - delete it on the Databases page first, then the user* (sebelumnya "owns odoo -
+      delete it first", ambigu antara user dan database yang namanya sama)
+- [x] Logo asli Odoo di header modal, diagram, dan baris halaman Databases. Dibaca saat runtime
+      dari instalasi Odoo itu sendiri (`server\odoo\addons\web\static\img\odoo-icon-192x192.png`,
+      dicek PNG dan ≤ 256 KB) jadi `data:` URL, pola yang sama dengan ikon klien SQL dari `.exe`.
+      Tidak ada file logo Odoo yang ikut di repo Rezure. Tanpa file itu, ikon generik tetap dipakai
+- [x] Modal dilebarkan (`max-w-4xl`) dan kolomnya diseimbangkan: kartu Master Password
+      (`OdooMasterPasswordCard.vue`) ada di kolom kanan sebelum connect, dan pindah ke bawah
+      tabel `odoo.conf` di kolom kiri setelah connect, saat kolom kiri tinggal tabelnya saja
+- [x] Error baru yang umum (bukan khusus Odoo): `ExternalAppNotFound`,
+      `ExternalAppSetupCancelled`, `ExternalAppSetupFailed`
+- [x] `docs/v1/databases.md` (Users, Connect an app, Odoo) dan `docs/v1/database-profiles.md`
+      (Start when Rezure opens) diperbarui
+
+### Verifikasi
+
+- `cargo fmt --check`, `cargo clippy --all-targets` bersih, seluruh 653 test Rust lolos. Test baru:
+  `postgres_roles` (nama yang ditolak, quoting password, escaping tiap format snippet),
+  `start_on_launch` (hanya yang ditandai, terpasang, tampil, dan berhenti yang di-start),
+  `odoo` (versi dari nama folder, baca/tulis `[options]` tanpa mengubah baris lain),
+  `elevation::run_logged` (bentuk script), dan round-trip `settings`
+- Test sungguhan ke PostgreSQL Rezure yang sedang jalan (`postgres_roles::round_trip…`,
+  `--ignored`): buat user + database miliknya, terdaftar, hapus ditolak sambil menyebut
+  database-nya, `ensure` mengubah `CREATEDB`, lalu bersih lagi. Lolos
+- Deteksi Odoo di mesin maintainer (`odoo::print_detected`, `--ignored`): Odoo 20.0, service
+  `odoo-server-20.0` jalan, `PostgreSQL_For_Odoo` berhenti tapi masih Automatic, versi bawaan
+  16.14, `odoo.conf` masih menunjuk ke PostgreSQL bawaan. Benar semua
+- `npm run type-check`, `npm run lint`, `prettier` bersih
+- **Belum dicoba di app sungguhan:** tombol **Connect to Rezure** (UAC, tulis `odoo.conf`,
+  restart service), **Put back Odoo's own settings**, modal Users, dan toggle Start when Rezure
+  opens setelah Rezure dibuka ulang. Connect sengaja tidak dijalankan dari sini karena mengubah
+  instalasi Odoo milik maintainer
+
+### Fase D — Pindah data (belum dikerjakan)
+
+Dump database dari PostgreSQL bawaan Odoo lalu restore ke Rezure. Hanya untuk yang sudah punya
+data; ditunda.
+
+---
+
 ## Catatan Arsitektur
 
 Fitur ini **tidak membutuhkan sistem plugin dinamis**. Fondasi `Service` trait yang sudah ada di `docs/architecture.md` sudah cukup — menambah service baru cukup dengan mengimplementasikan trait tersebut dan compile ulang. Sama seperti Redis (sekarang v4 Fase 4.6), sistem plugin (dynamic loading tanpa compile ulang) baru relevan jika suatu saat ingin membuka jalur bagi kontributor/komunitas luar menambah service tanpa menyentuh source code inti — itu dipertimbangkan terpisah, bukan prasyarat untuk fase ini.

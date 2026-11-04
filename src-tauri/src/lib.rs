@@ -34,6 +34,7 @@ pub fn run() {
                 commands::services::list_services,
                 commands::services::list_managed_services,
                 commands::services::set_service_shown,
+                commands::services::set_service_starts_on_launch,
                 commands::services::start_service,
                 commands::services::stop_service,
                 commands::services::force_stop_service,
@@ -109,6 +110,19 @@ pub fn run() {
                 commands::postgres::set_active_postgres_version,
                 commands::postgres::list_postgres_catalog,
                 commands::postgres::install_postgres_version,
+                commands::postgres::list_postgres_roles,
+                commands::postgres::create_postgres_role,
+                commands::postgres::set_postgres_role_password,
+                commands::postgres::drop_postgres_role,
+                commands::postgres::postgres_connection_snippets,
+                commands::odoo::detect_odoo,
+                commands::odoo::connect_odoo,
+                commands::odoo::restore_odoo,
+                commands::odoo::open_odoo,
+                commands::odoo::open_odoo_conf,
+                commands::odoo::control_odoo,
+                commands::odoo::allow_odoo_control,
+                commands::odoo::repair_odoo_login,
                 commands::database::list_databases,
                 commands::database::database_server_info,
                 commands::database::list_collations,
@@ -517,6 +531,27 @@ pub fn run() {
                     // local SQLite file problem (disk full, permissions, ...).
                     Err(err) => log::error!("failed to open the project database: {err}"),
                 }
+
+                // Last, once the vhosts above are written and pooled PHP is
+                // registered, so nginx comes up on the current config. Off
+                // the setup thread: a database start waits until it accepts
+                // connections, and the window shouldn't wait with it.
+                let launch_handle = app.handle().clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    let (marked, hidden) = {
+                        let settings = launch_handle.state::<config::settings::SettingsState>();
+                        let current = settings.0.lock().unwrap();
+                        (
+                            current.start_on_launch.clone(),
+                            current.hidden_services.clone(),
+                        )
+                    };
+                    services::start_on_launch::start_marked(
+                        &launch_handle.state::<services::ServiceManager>(),
+                        &marked,
+                        &hidden,
+                    );
+                });
 
                 Ok(())
             })

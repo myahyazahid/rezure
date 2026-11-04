@@ -31,8 +31,9 @@ export interface DatabaseServerInfo {
   /** False where Export can't work — a SQL Server Rezure doesn't run, whose
    *  BACKUP would land on that server's own disk. */
   exportSupported: boolean
-  /** True only for the local MySQL-family server: the one place Delete is
-   *  offered. Every connection — remote, PostgreSQL, SQL Server — is false. */
+  /** True for servers Rezure runs itself — the local MySQL-family one and
+   *  Rezure's own PostgreSQL — the only places Delete is offered. Remote
+   *  connections and SQL Server are false. */
   dropSupported: boolean
   /** What Import accepts, without the dot: `sql`, plus `bak` on LocalDB. */
   importExtensions: string[]
@@ -60,4 +61,81 @@ export interface DbClientInfo {
   /** The client's own icon as a `data:` URL, read out of its `.exe`. `null`
    *  for the consoles, which show the server's mark instead. */
   icon: string | null
+}
+
+/** A user on Rezure's own PostgreSQL — mirrors
+ *  `services::postgres_roles::PostgresRole`. */
+export interface PostgresRole {
+  name: string
+  canLogin: boolean
+  canCreateDb: boolean
+  superuser: boolean
+  /** `postgres` and `root`, which Rezure's server comes with — listed, but
+   *  not editable. */
+  builtin: boolean
+  /** Databases it owns. It can't be deleted while there are any. */
+  ownedDatabases: string[]
+}
+
+/** A user to create — mirrors `services::postgres_roles::NewRole`. */
+export interface NewPostgresRole {
+  name: string
+  password: string | null
+  canCreateDb: boolean
+  /** A database to create, owned by the new user. */
+  database: string | null
+}
+
+/** One way to write an app's database settings — mirrors
+ *  `services::postgres_roles::ConnectionSnippet`. */
+export interface ConnectionSnippet {
+  id: string
+  label: string
+  text: string
+}
+
+/** An installed Windows service — mirrors
+ *  `services::windows_services::ServiceState`. */
+export interface WindowsServiceState {
+  name: string
+  displayName: string
+  running: boolean
+  startsWithWindows: boolean
+}
+
+/** Odoo installed on this PC — mirrors `services::odoo::OdooInstall`. */
+export interface OdooInstall {
+  /** Its folder — also the id the actions take. */
+  dir: string
+  version: string | null
+  confPath: string
+  /** Odoo's own Windows service. */
+  service: WindowsServiceState | null
+  /** The PostgreSQL service Odoo's installer added, if it did. */
+  bundledPostgres: WindowsServiceState | null
+  /** The PostgreSQL version Odoo's installer bundled, if it's on disk. */
+  bundledPostgresVersion: string | null
+  dbHost: string | null
+  dbPort: string | null
+  dbUser: string | null
+  pgPath: string | null
+  httpPort: number
+  /** What connecting sets pg_path to — the active PostgreSQL's bin. */
+  rezurePgPath: string | null
+  rezurePostgresVersion: string | null
+  /** How odoo.conf's `admin_passwd` (Odoo's master password) is set — never
+   *  its value. */
+  masterPassword: 'missing' | 'plainText' | 'hashed'
+  /** Odoo's own icon, read from this install as a data: URL. */
+  icon: string | null
+  /** This Windows account may start and stop Odoo's service without an
+   *  admin prompt. */
+  controlAllowed: boolean
+  /** Its settings point at Rezure's PostgreSQL, but the login they name
+   *  isn't there. */
+  loginMissing: boolean
+  /** Its settings point at Rezure's PostgreSQL. */
+  usesRezure: boolean
+  /** The original odoo.conf is kept and can be put back. */
+  canRestore: boolean
 }

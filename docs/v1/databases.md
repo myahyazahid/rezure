@@ -391,12 +391,92 @@ MariaDB: writable, with the "Used by" column.
   and stops at the first error, naming its line. A `pg_dump` script has no `DROP` statements
   unless it was taken with `--clean`, so importing into a database that already has those tables
   stops at the first one — import into a new name instead.
-- **Drop** (from the backend; there's still no button) closes any open sessions on Rezure's own
-  server first, so a PHP worker holding a connection doesn't block it.
+- **Delete** (the bin icon on a row) asks for CONFIRM to be typed, as on MariaDB. It closes any
+  open sessions first, so a PHP worker or Odoo holding a connection doesn't block it. It's offered
+  on Rezure's own PostgreSQL only, never on a connection to someone else's server.
 
 Every query goes through the `psql` of an installed PostgreSQL build, passing SQL on stdin:
 Windows hands a console program its arguments in the ANSI code page, which turned `é` into an
 invalid byte when passed on the command line.
+
+### Users, and connecting an app
+
+**Users** (next to New database, on Rezure's own PostgreSQL only) lists the logins and adds new
+ones. The server comes with two superusers, `postgres` and `root`. That's enough for Laravel,
+but some apps want a login of their own. Odoo refuses to run as `postgres`, and an app that will
+one day meet a real server is better developed against its own user that owns its own database.
+
+A new user can log in, and optionally:
+
+- **Create a database it owns**. One app, one user, one database, which is how most apps expect
+  to be set up.
+- **May create databases of its own**. Odoo needs this, and so do Django's and Rails' test
+  runners.
+
+The presets (**App**, **Django / Rails**, **Odoo**) only fill these in. A password is optional:
+Rezure's server lets local connections in without checking one. Set one anyway (**Generate**
+makes one), so the app's settings keep working on a real server. Rezure doesn't store it.
+
+**Connect an app** on a user shows its settings in the form each framework reads: a
+`postgresql://` URL, Laravel's `.env`, `DATABASE_URL` for Django, Node and Prisma, Rails'
+`database.yml`, JDBC, and `odoo.conf`. Right after creating a user they include the password
+just typed. Later, Rezure no longer knows it, so the password is left blank.
+
+A user that owns databases can't be deleted until those databases are. Anything finer than
+this (grants, schemas) is a SQL client's job.
+
+### Odoo
+
+Odoo's Windows installer can bundle its own PostgreSQL, but the box isn't always tickable, and
+Odoo then installs with no database server. When Rezure finds Odoo under Program Files, the
+Databases page (on Rezure's PostgreSQL) says so, and **Connect Odoo** points it at Rezure's
+server with one administrator prompt:
+
+1. Creates the `odoo` login, allowed to create databases.
+2. Sets `db_host`, `db_port`, `db_user`, `db_password` and `pg_path` in `odoo.conf`. Without
+   `pg_path`, Odoo's database manager can't find `pg_dump` for backups. The original file is kept
+   as `odoo.conf.rezure-backup`. Every other line is left as it was.
+3. Restarts Odoo's service, if it's running.
+4. Optionally stops Odoo's own PostgreSQL service and sets it to Manual, since both servers use
+   port 5432. If that service is running, this step is required.
+
+Odoo starts with Windows and expects its database straight away, while Rezure's PostgreSQL only
+runs while Rezure does. The dialog therefore puts two settings in one place: **Start
+PostgreSQL when Rezure opens** and **Start Rezure with Windows**. Rezure is meant to stay open
+while Odoo is in use. Keep in tray, under Settings, is what lets its window be closed without
+quitting it. Odoo 20's installer ships PostgreSQL 16, and Rezure's catalog has 16 too. The dialog
+says so when the active version is another major.
+
+**"Database management function blocked, bad admin password"** in Odoo's database manager is
+about Odoo's *Master Password*, not the database login. It's `admin_passwd` in `odoo.conf`, set
+by Odoo's installer, and Rezure leaves it as it is. The dialog says which state it's in, without
+showing the value:
+
+- Not set: it's `admin`.
+- Plain text: open `odoo.conf` to read it.
+- Hashed (`$pbkdf2-sha512$…`): it can't be read back. Replace the value with a new password,
+  editing `odoo.conf` as administrator, then restart Odoo's service.
+
+**Open**, next to the file's path, opens `odoo.conf` in Notepad run as administrator, after a
+UAC prompt. The file is under Program Files, so a Notepad without admin rights couldn't save it.
+Below it, Odoo's Windows service has its own row: **Stop** and **Restart** while it runs,
+**Start** while it doesn't. Restart is what makes Odoo read `odoo.conf` again after an edit.
+Start and Restart bring Rezure's PostgreSQL up first, since Odoo is no use without it.
+
+Controlling a service normally takes admin rights, so each click asks. **Allow without asking**
+asks once, and gives your Windows account permission to start, stop and query that one service.
+It can't change the service. From then on the buttons work without a prompt. **Put back Odoo's
+own settings** takes the permission away again.
+
+**"role "odoo" does not exist"** means `odoo.conf` points at Rezure's PostgreSQL, but the login
+it names isn't there. The Odoo row on the Databases page turns red, and the dialog says so
+first. **Recreate it** makes the login again from the user name and password already in
+`odoo.conf`, with no admin prompt and no change to the file. Starting or restarting Odoo from
+the dialog does the same check every time.
+
+Databases already made in Odoo's own PostgreSQL stay there, and Rezure doesn't move them.
+**Put back Odoo's own settings** restores the original `odoo.conf` and turns Odoo's PostgreSQL
+service back on. Before that, it stops Rezure's PostgreSQL, so the port is free.
 
 ### A PostgreSQL elsewhere
 

@@ -177,6 +177,17 @@ pub enum AppError {
     #[error("couldn't stop the {name} service: {reason}")]
     WindowsServiceStopFailed { name: String, reason: String },
 
+    #[error("{0} isn't installed on this PC anymore - refresh and try again")]
+    ExternalAppNotFound(String),
+
+    #[error(
+        "setting up {0} was cancelled - click Yes on the admin prompt to let Rezure change its settings"
+    )]
+    ExternalAppSetupCancelled(String),
+
+    #[error("couldn't set up {app}: {reason}")]
+    ExternalAppSetupFailed { app: String, reason: String },
+
     #[error("{path} can't be added as a project - {reason}")]
     UnusableProjectPath { path: String, reason: String },
 
@@ -341,6 +352,9 @@ impl AppError {
             Self::PortHolderProtected { .. } => "PortHolderProtected",
             Self::WindowsServiceStopCancelled { .. } => "WindowsServiceStopCancelled",
             Self::WindowsServiceStopFailed { .. } => "WindowsServiceStopFailed",
+            Self::ExternalAppNotFound { .. } => "ExternalAppNotFound",
+            Self::ExternalAppSetupCancelled { .. } => "ExternalAppSetupCancelled",
+            Self::ExternalAppSetupFailed { .. } => "ExternalAppSetupFailed",
             Self::UnusableProjectPath { .. } => "UnusableProjectPath",
             Self::ProjectAlreadyLinked { .. } => "ProjectAlreadyLinked",
             Self::UnknownFramework { .. } => "UnknownFramework",

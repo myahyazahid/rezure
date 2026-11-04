@@ -20,6 +20,11 @@ export const useSettingsStore = defineStore('settings', () => {
   const keepInTrayOnClose = ref(false)
   const notifyOnCrash = ref(false)
   const autoWriteHosts = ref(false)
+  /** Service ids started as soon as Rezure opens. */
+  const startOnLaunch = ref<string[]>([])
+  /** Whether `fetchAll` has run — the Services page reads `startOnLaunch`
+   *  without ever visiting Settings. */
+  const loaded = ref(false)
 
   const storagePaths = ref<StoragePaths | null>(null)
   const error = ref<string | null>(null)
@@ -33,6 +38,8 @@ export const useSettingsStore = defineStore('settings', () => {
     keepInTrayOnClose.value = settings.keepInTrayOnClose
     notifyOnCrash.value = settings.notifyOnCrash
     autoWriteHosts.value = settings.autoWriteHosts
+    startOnLaunch.value = settings.startOnLaunch
+    loaded.value = true
   }
 
   async function fetchAll() {
@@ -67,6 +74,18 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
+  /** Marks a service to start, or not, when Rezure opens. */
+  async function setServiceStartsOnLaunch(id: string, on: boolean) {
+    error.value = null
+    try {
+      apply(await invoke<Settings>('set_service_starts_on_launch', { id, on }))
+      return true
+    } catch (e) {
+      error.value = errorMessage(e)
+      return false
+    }
+  }
+
   const setDefaultPort = (port: number) => update({ defaultPort: port })
   const setStartWithWindows = (enabled: boolean) => update({ startWithWindows: enabled })
   const setKeepInTrayOnClose = (enabled: boolean) => update({ keepInTrayOnClose: enabled })
@@ -81,6 +100,8 @@ export const useSettingsStore = defineStore('settings', () => {
     keepInTrayOnClose,
     notifyOnCrash,
     autoWriteHosts,
+    startOnLaunch,
+    loaded,
     storagePaths,
     error,
     saving,
@@ -91,5 +112,6 @@ export const useSettingsStore = defineStore('settings', () => {
     setKeepInTrayOnClose,
     setNotifyOnCrash,
     setAutoWriteHosts,
+    setServiceStartsOnLaunch,
   }
 })

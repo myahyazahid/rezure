@@ -186,6 +186,11 @@ valuable ones.
 because a hung server would otherwise hold you for the full timeout with no way out. For a
 database it asks first, because the data directory is then left needing crash recovery.
 
+**Start when Rezure opens**, in the same menu, starts that service as soon as Rezure is
+launched. It works for any service, not just databases. Rezure otherwise starts nothing by
+itself. Combined with **Start Rezure with Windows** (Settings), it keeps a server up from boot
+for something outside Rezure that expects it, such as an app installed as a Windows service.
+
 ---
 
 ## What follows the active profile

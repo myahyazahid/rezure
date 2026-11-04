@@ -82,6 +82,86 @@ pub fn run_script(script_path: &Path) -> std::io::Result<Elevated> {
     })
 }
 
+/// Opens `file` in `program` with admin rights, through the UAC prompt, and
+/// returns without waiting for it to close — for a file under Program Files
+/// the user is about to edit by hand (`odoo.conf`). Like [`launcher`], the
+/// path carries its own double quotes inside the argument list.
+pub fn open_elevated(program: &str, file: &Path) -> std::io::Result<Elevated> {
+    let file_arg = quote_ps(&format!("\"{}\"", file.display()));
+    let script = format!(
+        "try {{ Start-Process -FilePath {} -ArgumentList {file_arg} -Verb RunAs; exit 0 }} catch {{ exit {DECLINED_EXIT_CODE} }}",
+        quote_ps(program)
+    );
+    let status = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .hidden()
+        .status()?;
+    Ok(if status.code() == Some(DECLINED_EXIT_CODE) {
+        Elevated::Declined
+    } else {
+        Elevated::Ran
+    })
+}
+
+/// How [`run_logged`] ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Logged {
+    /// Every statement ran without an error.
+    Done,
+    /// The user clicked No on the UAC prompt; nothing ran.
+    Declined,
+    /// A statement failed; its message, as PowerShell put it.
+    Failed(String),
+}
+
+/// The script [`run_logged`] runs: `statements` inside a `try` whose
+/// `catch` writes the first error's message to `error_log`.
+fn logged_script(statements: &str, error_log: &Path) -> String {
+    let body: String = statements
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|line| format!("    {line}\n"))
+        .collect();
+    format!(
+        "try {{\n{body}}} catch {{\n    $_.Exception.Message | Out-File -FilePath {} -Encoding utf8\n    exit 1\n}}\n",
+        quote_ps(&error_log.display().to_string())
+    )
+}
+
+/// Runs `statements` elevated inside a `try`, stopping at the first error
+/// and reporting its message — the shape every multi-step elevated action
+/// needs (stop a service, copy a file, restart another). The script and its
+/// error log are written to `dir` as `<stem>.ps1` and `<stem>.error.log`.
+///
+/// Every cmdlet in `statements` must pass `-ErrorAction Stop`: PowerShell's
+/// errors are non-terminating by default and would otherwise skip the
+/// `catch`, leaving the failure printed to a console that has already
+/// closed. Values inside must go through `quote_ps`.
+///
+/// Like [`run_script`], whether the change took is still for the caller to
+/// check against the thing it changed.
+pub fn run_logged(dir: &Path, stem: &str, statements: &str) -> std::io::Result<Logged> {
+    std::fs::create_dir_all(dir)?;
+    let script_path = dir.join(format!("{stem}.ps1"));
+    let error_log = dir.join(format!("{stem}.error.log"));
+    let _ = std::fs::remove_file(&error_log);
+    std::fs::write(&script_path, logged_script(statements, &error_log))?;
+
+    if run_script(&script_path)? == Elevated::Declined {
+        return Ok(Logged::Declined);
+    }
+    // `Out-File -Encoding utf8` on Windows PowerShell writes a BOM.
+    let detail = std::fs::read_to_string(&error_log)
+        .map(|text| text.trim_start_matches('\u{feff}').trim().to_string())
+        .unwrap_or_default();
+    Ok(if detail.is_empty() {
+        Logged::Done
+    } else {
+        Logged::Failed(detail)
+    })
+}
+
 /// Whether Rezure itself is running elevated ("Run as administrator").
 ///
 /// PostgreSQL refuses to start from an elevated process — "Execution of
@@ -132,6 +212,19 @@ mod tests {
         assert!(
             launcher.contains(r#"'"C:\Users\Jane Doe\app\apply-hosts.ps1"'"#),
             "path must carry its own double quotes inside the argument list: {launcher}"
+        );
+    }
+
+    /// Every statement inside the one `try`, and the log path quoted.
+    #[test]
+    fn a_logged_script_wraps_every_statement_and_logs_the_first_error() {
+        let script = logged_script(
+            "Stop-Service -Name 'a' -ErrorAction Stop\n\n  Start-Service -Name 'b' -ErrorAction Stop  ",
+            Path::new(r"C:\Users\Jane Doe\x.error.log"),
+        );
+        assert_eq!(
+            script,
+            "try {\n    Stop-Service -Name 'a' -ErrorAction Stop\n    Start-Service -Name 'b' -ErrorAction Stop\n} catch {\n    $_.Exception.Message | Out-File -FilePath 'C:\\Users\\Jane Doe\\x.error.log' -Encoding utf8\n    exit 1\n}\n"
         );
     }
 

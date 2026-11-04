@@ -1,9 +1,10 @@
 use tauri::{AppHandle, Manager, State};
 
-use crate::config::settings::SettingsState;
+use crate::config::settings::{Settings, SettingsState};
 use crate::services::dev_servers;
 use crate::services::ports::{self, PortHolder};
 use crate::services::service_visibility::{self, ManagedService};
+use crate::services::start_on_launch;
 use crate::services::telemetry;
 use crate::services::{ServiceInfo, ServiceManager, ServiceStatus};
 use crate::utils::error::AppError;
@@ -50,6 +51,18 @@ pub async fn set_service_shown(
         name: "manage services".to_string(),
         reason: format!("background task panicked: {e}"),
     })?
+}
+
+/// Marks a service to start, or not, as soon as Rezure opens, returning the
+/// settings as they now stand — see `services::start_on_launch`.
+#[tauri::command]
+pub fn set_service_starts_on_launch(
+    id: String,
+    on: bool,
+    manager: State<'_, ServiceManager>,
+    settings: State<'_, SettingsState>,
+) -> Result<Settings, AppError> {
+    start_on_launch::set(&manager, &settings, &id, on)
 }
 
 // Spawning/killing a real process (and, for MariaDB's first run, waiting on

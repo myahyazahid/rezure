@@ -1,12 +1,19 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useServicesStore } from '@/stores/services'
+import { useSettingsStore } from '@/stores/settings'
 import ServiceRow from '@/components/services/ServiceRow.vue'
 import BusyOverlay from '@/components/common/BusyOverlay.vue'
 import LeafLoader from '@/components/common/LeafLoader.vue'
 import ManageServicesModal from '@/components/services/ManageServicesModal.vue'
 
 const store = useServicesStore()
+
+// Each row's "Start when Rezure opens" reads the settings.
+const settings = useSettingsStore()
+onMounted(() => {
+  if (!settings.loaded) settings.fetchAll()
+})
 
 type BulkAction = 'start' | 'restart' | 'stop'
 

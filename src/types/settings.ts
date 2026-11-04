@@ -158,6 +158,8 @@ export interface Settings {
   decorations: Decorations
   /** Ids removed from the Services page with Manage services. */
   hiddenServices: string[]
+  /** Ids started as soon as Rezure opens — see `services::start_on_launch`. */
+  startOnLaunch: string[]
 }
 
 export interface SettingsPatch {

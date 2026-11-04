@@ -222,6 +222,91 @@ impl ConnectionStore {
                 && Some(c.id.as_str()) != excluding_id
         })
     }
+
+    /// Makes sure the store holds `seed` — the connection to a server Rezure
+    /// runs itself — exactly once.
+    ///
+    /// Not a plain "add if missing", because the store can hold a copy that
+    /// no longer reads as Rezure's: `kind` and `managed` are `serde(default)`,
+    /// so a build from before they existed rewrites this file without them
+    /// and the copy comes back as an unmanaged MySQL connection. It can't
+    /// connect (wrong client) and, left alone, sits in the switcher beside a
+    /// freshly seeded one. So:
+    ///
+    /// * the managed entry of `seed.kind` is kept if there is one;
+    /// * otherwise an entry already at `seed`'s endpoint is turned back into
+    ///   Rezure's, keeping its id (an active selection still points at it)
+    ///   and when it was last used;
+    /// * otherwise `seed` is added;
+    ///
+    /// and every other entry at that endpoint — a duplicate by the rule
+    /// [`endpoint_taken_by`](Self::endpoint_taken_by) enforces on add — is
+    /// dropped, with the selection moved to the kept one if it was on it.
+    pub fn settle_managed(&mut self, seed: Connection) -> SettledManaged {
+        let (host, port, user) = (seed.host.clone(), seed.port, seed.user.clone());
+        let mut settled = SettledManaged::default();
+
+        let existing = self
+            .connections
+            .iter()
+            .find(|c| c.managed && c.kind == seed.kind)
+            .map(|c| c.id.clone());
+        let stale = self
+            .endpoint_taken_by(&host, port, &user, None, None)
+            .map(|c| c.id.clone());
+        let kept_id = match (existing, stale) {
+            (Some(id), _) => id,
+            (None, Some(id)) => {
+                if let Some(entry) = self.connections.iter_mut().find(|c| c.id == id) {
+                    *entry = Connection {
+                        id: id.clone(),
+                        last_used_at: entry.last_used_at,
+                        ..seed
+                    };
+                }
+                settled.repaired = Some(id.clone());
+                id
+            }
+            (None, None) => {
+                let id = seed.id.clone();
+                self.connections.push(seed);
+                settled.added = true;
+                id
+            }
+        };
+
+        while let Some(id) = self
+            .endpoint_taken_by(&host, port, &user, None, Some(&kept_id))
+            .map(|c| c.id.clone())
+        {
+            self.connections.retain(|c| c.id != id);
+            if self.active_id.as_deref() == Some(id.as_str()) {
+                self.active_id = Some(kept_id.clone());
+            }
+            settled.dropped.push(id);
+        }
+        settled
+    }
+}
+
+/// What [`ConnectionStore::settle_managed`] changed — the ids it touched, so
+/// the caller can clear what's keyed by them outside this file (passwords in
+/// Credential Manager, SSH tunnels).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct SettledManaged {
+    /// The seed was added as a new entry.
+    pub added: bool,
+    /// An entry at the seed's endpoint that was turned back into Rezure's.
+    pub repaired: Option<String>,
+    /// Duplicates at that endpoint that were removed.
+    pub dropped: Vec<String>,
+}
+
+impl SettledManaged {
+    /// Whether the store changed and needs saving.
+    pub fn changed(&self) -> bool {
+        self.added || self.repaired.is_some() || !self.dropped.is_empty()
+    }
 }
 
 fn store_path() -> Result<std::path::PathBuf, AppError> {
@@ -435,5 +520,100 @@ mod tests {
         assert_eq!(parsed.kind, ServerKind::Sqlserver);
         assert!(parsed.windows_auth && parsed.managed);
         assert_eq!(parsed.host, r"(localdb)\Rezure");
+    }
+
+    /// What `ensure_postgres` seeds: Rezure's own PostgreSQL.
+    fn postgres_seed(id: &str) -> Connection {
+        let mut seed = connection(id, "127.0.0.1", 5432, "postgres");
+        seed.kind = ServerKind::Postgres;
+        seed.managed = true;
+        seed.read_only = false;
+        seed
+    }
+
+    /// The seed after a build that predates `kind`/`managed` rewrote it.
+    fn stripped(mut connection: Connection) -> Connection {
+        connection.kind = ServerKind::Mysql;
+        connection.managed = false;
+        connection
+    }
+
+    #[test]
+    fn settling_into_an_empty_store_adds_the_seed() {
+        let mut store = ConnectionStore::default();
+        let settled = store.settle_managed(postgres_seed("new"));
+        assert!(settled.added && settled.repaired.is_none() && settled.dropped.is_empty());
+        assert_eq!(store.connections.len(), 1);
+        assert!(store.connections[0].managed);
+    }
+
+    #[test]
+    fn settling_again_changes_nothing() {
+        let mut store = ConnectionStore {
+            connections: vec![postgres_seed("kept")],
+            active_id: None,
+        };
+        let settled = store.settle_managed(postgres_seed("new"));
+        assert!(!settled.changed());
+        assert_eq!(store.connections.len(), 1);
+        assert_eq!(store.connections[0].id, "kept");
+    }
+
+    #[test]
+    fn a_stripped_copy_is_repaired_in_place_instead_of_seeded_beside() {
+        let mut old = stripped(postgres_seed("old"));
+        old.last_used_at = Some(42);
+        let mut store = ConnectionStore {
+            connections: vec![old],
+            active_id: Some("old".to_string()),
+        };
+        let settled = store.settle_managed(postgres_seed("new"));
+        assert_eq!(settled.repaired.as_deref(), Some("old"));
+        assert!(!settled.added);
+        assert_eq!(store.connections.len(), 1);
+        let repaired = &store.connections[0];
+        assert_eq!(repaired.id, "old", "the id is kept so the selection holds");
+        assert_eq!(repaired.kind, ServerKind::Postgres);
+        assert!(repaired.managed);
+        assert_eq!(repaired.last_used_at, Some(42));
+        assert_eq!(store.active_id.as_deref(), Some("old"));
+    }
+
+    #[test]
+    fn a_stripped_copy_beside_the_real_one_is_dropped() {
+        let mut store = ConnectionStore {
+            connections: vec![
+                stripped(postgres_seed("stale")),
+                connection("other", "127.0.0.1", 3306, "root"),
+                postgres_seed("kept"),
+            ],
+            active_id: Some("stale".to_string()),
+        };
+        let settled = store.settle_managed(postgres_seed("new"));
+        assert_eq!(settled.dropped, vec!["stale".to_string()]);
+        assert!(!settled.added && settled.repaired.is_none());
+        let ids: Vec<_> = store.connections.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, ["other", "kept"]);
+        assert_eq!(store.active_id.as_deref(), Some("kept"));
+    }
+
+    #[test]
+    fn a_tunnelled_connection_at_the_same_address_is_left_alone() {
+        // 127.0.0.1:5432 on a server reached over SSH is somebody else's
+        // PostgreSQL, not Rezure's.
+        let mut remote = connection("remote", "127.0.0.1", 5432, "postgres");
+        remote.kind = ServerKind::Postgres;
+        remote.ssh = Some(SshTunnel {
+            host: "db.example.com".to_string(),
+            port: 22,
+            user: "deploy".to_string(),
+            auth: SshAuth::Password,
+        });
+        let mut store = ConnectionStore {
+            connections: vec![remote, postgres_seed("kept")],
+            active_id: None,
+        };
+        assert!(!store.settle_managed(postgres_seed("new")).changed());
+        assert_eq!(store.connections.len(), 2);
     }
 }

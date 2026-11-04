@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import type { PortHolder, ServiceInfo } from '@/types/service'
 import { useServicesStore } from '@/stores/services'
 import { useBinariesStore } from '@/stores/binaries'
+import { useSettingsStore } from '@/stores/settings'
 import BasePill from '@/components/common/BasePill.vue'
 import ServiceSparkline from '@/components/services/ServiceSparkline.vue'
 import ServiceLogPanel from '@/components/services/ServiceLogPanel.vue'
@@ -220,6 +221,18 @@ async function onForceStop() {
   }
 }
 
+const settings = useSettingsStore()
+/** Started as soon as Rezure opens — for something outside Rezure that
+ *  expects it from boot. */
+const startsOnLaunch = computed(() => settings.startOnLaunch.includes(props.service.id))
+
+async function toggleStartOnLaunch() {
+  menuOpen.value = false
+  error.value = null
+  const ok = await settings.setServiceStartsOnLaunch(props.service.id, !startsOnLaunch.value)
+  if (!ok) error.value = settings.error
+}
+
 function requestForceStop() {
   // Nothing at stake for a stateless service — kill it without ceremony.
   if (!losesStateOnKill.value) {
@@ -423,8 +436,9 @@ function requestForceStop() {
 
         <!-- Force stop lives behind a menu rather than beside Stop: it's the
              exception, and putting it one click away keeps it from being hit
-             by accident. Only offered while there's a process to kill. -->
-        <div v-if="isRunning" class="relative">
+             by accident. Only offered while there's a process to kill. Start
+             when Rezure opens is always there, for an installed service. -->
+        <div v-if="!needsInstall" class="relative">
           <button
             type="button"
             title="More actions"
@@ -442,11 +456,48 @@ function requestForceStop() {
 
           <div
             v-if="menuOpen"
-            class="glass-strong absolute right-0 z-20 mt-2 w-56 overflow-hidden rounded-xl"
+            class="glass-strong absolute right-0 z-20 mt-2 w-64 overflow-hidden rounded-xl"
           >
             <button
               type="button"
-              class="flex w-full items-start gap-2.5 px-3.5 py-2.5 text-left transition hover:bg-white/50 disabled:opacity-50 dark:hover:bg-white/5"
+              role="menuitemcheckbox"
+              :aria-checked="startsOnLaunch"
+              class="flex w-full items-start gap-2.5 px-3.5 py-2.5 text-left transition hover:bg-white/50 dark:hover:bg-white/5"
+              @click="toggleStartOnLaunch"
+            >
+              <span
+                class="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border"
+                :class="
+                  startsOnLaunch
+                    ? 'border-accent-500 bg-accent-500 text-white'
+                    : 'border-neutral-300 dark:border-neutral-600'
+                "
+                aria-hidden="true"
+              >
+                <svg
+                  v-if="startsOnLaunch"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="3"
+                  class="h-3 w-3"
+                >
+                  <path stroke-linecap="round" stroke-linejoin="round" d="m5 12 5 5L20 7" />
+                </svg>
+              </span>
+              <span>
+                <span class="block text-sm font-semibold text-neutral-800 dark:text-neutral-100">
+                  Start when Rezure opens
+                </span>
+                <span class="block text-xs text-neutral-500">
+                  For apps that expect it running - pair with Start with Windows
+                </span>
+              </span>
+            </button>
+            <button
+              v-if="isRunning"
+              type="button"
+              class="glass-divider flex w-full items-start gap-2.5 border-t px-3.5 py-2.5 text-left transition hover:bg-white/50 disabled:opacity-50 dark:hover:bg-white/5"
               :disabled="isPending"
               @click="requestForceStop"
             >

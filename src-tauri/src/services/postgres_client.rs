@@ -64,12 +64,12 @@ const SYSTEM_DATABASES: [&str; 3] = ["postgres", "template0", "template1"];
 const OFFERED_ENCODINGS: [&str; 1] = ["UTF8"];
 
 /// `"name"`, with any `"` doubled — PostgreSQL's own escape.
-fn quote_ident(name: &str) -> String {
+pub(super) fn quote_ident(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
 
 /// `'text'`, with any `'` doubled.
-fn quote_literal(text: &str) -> String {
+pub(super) fn quote_literal(text: &str) -> String {
     format!("'{}'", text.replace('\'', "''"))
 }
 
@@ -212,7 +212,7 @@ impl Client {
 
     /// Runs `sql` in `database` and returns its rows. Fed on stdin — see the
     /// module docs.
-    fn query(&self, database: &str, sql: &str) -> Result<Vec<Vec<String>>, AppError> {
+    pub(super) fn query(&self, database: &str, sql: &str) -> Result<Vec<Vec<String>>, AppError> {
         let mut child = self
             .command(postgres::CLIENT_EXE, database)?
             .args(["-X", "-w", "-q", "-A", "-t", "-F", "\t"])
@@ -481,7 +481,8 @@ pub fn server_info(connection: &Connection) -> ServerInfo {
         // `pg_dump` runs here and connects out, so unlike SQL Server's
         // BACKUP it works against any server.
         export_supported: true,
-        drop_supported: false,
+        // Rezure's own server only — see `database::drop_database`.
+        drop_supported: connection.managed && !connection.read_only,
         import_extensions: vec!["sql".to_string()],
     }
 }

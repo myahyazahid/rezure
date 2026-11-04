@@ -76,6 +76,13 @@ pub struct Settings {
     /// rather than the kept ones.
     #[serde(default)]
     pub hidden_services: Vec<String>,
+    /// Services started as soon as Rezure opens, by id — see
+    /// `services::start_on_launch`. Together with `start_with_windows` and
+    /// `keep_in_tray_on_close`, what keeps a database up for something
+    /// outside Rezure that expects it from boot (an app installed as a
+    /// Windows service, like Odoo).
+    #[serde(default)]
+    pub start_on_launch: Vec<String>,
 }
 
 /// Light, dark, or whatever Windows is set to. Light is the default on
@@ -264,6 +271,7 @@ impl Default for Settings {
             appearance: None,
             decorations: Decorations::default(),
             hidden_services: Vec::new(),
+            start_on_launch: Vec::new(),
         }
     }
 }
@@ -439,6 +447,7 @@ mod tests {
                 }],
             },
             hidden_services: vec!["sqlserver".to_string()],
+            start_on_launch: vec!["postgres".to_string()],
         };
         save_to(&path, &settings).unwrap();
         let loaded = load_from(&path);
@@ -454,6 +463,7 @@ mod tests {
         assert_eq!(loaded.appearance, settings.appearance);
         assert_eq!(loaded.decorations, settings.decorations);
         assert_eq!(loaded.hidden_services, ["sqlserver"]);
+        assert_eq!(loaded.start_on_launch, ["postgres"]);
         std::fs::remove_file(&path).unwrap();
     }
 

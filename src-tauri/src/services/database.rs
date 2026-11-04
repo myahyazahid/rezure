@@ -153,8 +153,9 @@ pub struct ServerInfo {
     /// Whether Export works here. Always on MySQL; on SQL Server only for
     /// Rezure's own LocalDB — see `mssql::Client::export_database`.
     pub export_supported: bool,
-    /// Whether the Databases page offers Delete. Only for the local
-    /// MySQL-family server — see [`drop_database`].
+    /// Whether the Databases page offers Delete. Only for servers Rezure
+    /// runs itself — the local MySQL-family one and its own PostgreSQL —
+    /// see [`drop_database`].
     pub drop_supported: bool,
     /// The file extensions Import accepts, without the dot.
     pub import_extensions: Vec<String>,
@@ -835,19 +836,23 @@ pub fn create_database(name: &str, collation: &str) -> Result<(), AppError> {
     active_client()?.create_database(name, collation)
 }
 
-/// Drops `name` from the local server.
+/// Drops `name` from a server Rezure runs itself.
 ///
-/// Refused whenever a connection is active — a remote server, and the
-/// PostgreSQL and SQL Server ones too. The Databases page only offers
-/// Delete for the local MySQL-family server ([`ServerInfo::drop_supported`]),
-/// behind a typed confirmation; this keeps that true for any other caller.
+/// The local MySQL-family server, and Rezure's own PostgreSQL — where a
+/// half-made database (an app's setup that was cut short) otherwise has no
+/// way out short of a SQL client. Refused for every other connection: a
+/// remote server, or SQL Server. The Databases page only offers Delete where
+/// [`ServerInfo::drop_supported`] says so, behind a typed confirmation; this
+/// keeps that true for any other caller.
 pub fn drop_database(name: &str) -> Result<(), AppError> {
     validate_identifier(name, "database")?;
     if let Some(connection) = connections::active() {
-        return Err(AppError::DatabaseQueryFailed(format!(
-            "Deleting a database is only available on the local server, not on {}",
-            connection.name
-        )));
+        if !(connection.managed && connection.kind == ServerKind::Postgres) {
+            return Err(AppError::DatabaseQueryFailed(format!(
+                "Deleting a database is only available on servers Rezure runs, not on {}",
+                connection.name
+            )));
+        }
     }
     active_client()?.drop_database(name)
 }

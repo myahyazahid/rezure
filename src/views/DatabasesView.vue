@@ -10,6 +10,10 @@ import NewDatabaseModal from '@/components/databases/NewDatabaseModal.vue'
 import ImportSqlModal from '@/components/databases/ImportSqlModal.vue'
 import DeleteDatabaseModal from '@/components/databases/DeleteDatabaseModal.vue'
 import DbTargetSwitcher from '@/components/databases/DbTargetSwitcher.vue'
+import PostgresUsersModal from '@/components/databases/PostgresUsersModal.vue'
+import OdooConnectModal from '@/components/databases/OdooConnectModal.vue'
+import { useOdooStore } from '@/stores/odoo'
+import type { OdooInstall } from '@/types/database'
 import SearchInput from '@/components/common/SearchInput.vue'
 import ColumnResizeHandle from '@/components/common/ColumnResizeHandle.vue'
 import BusyOverlay from '@/components/common/BusyOverlay.vue'
@@ -33,8 +37,9 @@ const isSqlServer = computed(() => store.server?.kind === 'sqlserver')
  *  half-way, as there is a MySQL dump. */
 const isPostgres = computed(() => store.server?.kind === 'postgres')
 const exportSupported = computed(() => store.server?.exportSupported !== false)
-/** Delete is offered on the local server only — never on a connection — and
- *  sits behind a dialog that wants CONFIRM typed out. */
+/** Delete is offered on servers Rezure runs itself (the local MariaDB, its
+ *  own PostgreSQL) — never on someone else's — and sits behind a dialog
+ *  that wants CONFIRM typed out. */
 const canDrop = computed(() => store.server?.dropSupported === true && !readOnly.value)
 const importExtensions = computed(() => store.server?.importExtensions ?? ['sql'])
 const importLabel = computed(() =>
@@ -42,6 +47,27 @@ const importLabel = computed(() =>
 )
 
 const showNewDatabaseModal = ref(false)
+/** Users are managed on Rezure's own PostgreSQL only — creating logins on
+ *  somebody else's server isn't a local development decision. */
+const showUsersModal = ref(false)
+const canManageUsers = computed(() => isPostgres.value && !remote.value)
+
+/** Apps installed on this PC that Rezure can point at its PostgreSQL —
+ *  Odoo, for now. Offered where that server is the one being read. */
+const odoo = useOdooStore()
+const odooFor = ref<OdooInstall | null>(null)
+const shownOdoo = computed(() => (canManageUsers.value ? odoo.installs : []))
+
+/** Both dialogs can create databases (a user's own, Odoo's), so the list
+ *  is re-read when they close. */
+function closeUsers() {
+  showUsersModal.value = false
+  store.fetchAll()
+}
+function closeOdoo() {
+  odooFor.value = null
+  store.fetchAll()
+}
 const importFile = ref<string | null>(null)
 /** The database the Delete dialog is open for. */
 const deleting = ref<DatabaseInfo | null>(null)
@@ -143,6 +169,7 @@ const ACTION_BUTTON_CLASS =
 // store keeps the existing rows on screen while it refetches.
 onActivated(() => {
   store.fetchAll()
+  odoo.detect()
 })
 
 /** The profile being switched to, by name rather than id. */
@@ -234,6 +261,30 @@ const exporting = computed(
         </button>
 
         <button
+          v-if="canManageUsers"
+          type="button"
+          class="glass-btn flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-neutral-700 transition disabled:cursor-not-allowed disabled:opacity-50 dark:text-neutral-200"
+          :disabled="store.serverDown"
+          title="Logins for your apps, and the settings that connect them"
+          @click="showUsersModal = true"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="h-4 w-4"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M16 19v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1M9.5 10a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM21 19v-1a4 4 0 0 0-3-3.87M16 3.13a3.5 3.5 0 0 1 0 6.75"
+            />
+          </svg>
+          Users
+        </button>
+
+        <button
           type="button"
           class="glass-accent flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
           :disabled="store.serverDown || readOnly"
@@ -317,7 +368,55 @@ const exporting = computed(
       </button>
     </p>
 
+    <!-- An app on this PC that can use this server: one line, and the
+         details in a dialog. -->
+    <div
+      v-for="install in shownOdoo"
+      :key="install.dir"
+      class="glass mt-3 flex shrink-0 items-center gap-3 rounded-2xl px-4 py-2.5"
+    >
+      <span class="relative shrink-0">
+        <img v-if="install.icon" :src="install.icon" alt="" class="h-7 w-7 rounded-lg" />
+        <span
+          class="block rounded-full ring-2 ring-white dark:ring-neutral-900"
+          :class="[
+            install.loginMissing
+              ? 'bg-red-500'
+              : install.usesRezure
+                ? 'bg-emerald-500'
+                : 'bg-neutral-400',
+            install.icon ? 'absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5' : 'h-2 w-2',
+          ]"
+          aria-hidden="true"
+        ></span>
+      </span>
+      <p class="min-w-0 flex-1 truncate text-sm text-neutral-700 dark:text-neutral-200">
+        <span class="font-semibold">Odoo{{ install.version ? ` ${install.version}` : '' }}</span>
+        is installed on this PC
+        <span v-if="install.loginMissing" class="text-red-600 dark:text-red-400">
+          - its login is missing, so it can't connect
+        </span>
+        <span v-else class="text-neutral-500">
+          -
+          {{
+            install.usesRezure
+              ? "using Rezure's PostgreSQL"
+              : 'it can use this PostgreSQL instead of its own'
+          }}
+        </span>
+      </p>
+      <button
+        type="button"
+        class="glass-btn shrink-0 rounded-full px-3.5 py-1.5 text-xs font-semibold text-neutral-700 transition dark:text-neutral-200"
+        @click="odooFor = install"
+      >
+        {{ install.loginMissing ? 'Fix' : install.usesRezure ? 'Details' : 'Connect Odoo' }}
+      </button>
+    </div>
+
     <NewDatabaseModal v-if="showNewDatabaseModal" @close="showNewDatabaseModal = false" />
+    <OdooConnectModal v-if="odooFor" :install="odooFor" @close="closeOdoo" />
+    <PostgresUsersModal v-if="showUsersModal" @close="closeUsers" />
     <ImportSqlModal v-if="importFile" :file="importFile" @close="importFile = null" />
     <DeleteDatabaseModal
       v-if="deleting"

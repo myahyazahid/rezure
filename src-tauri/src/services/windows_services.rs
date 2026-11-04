@@ -8,18 +8,21 @@
 //! which needs admin rights. This module names the service (`ports::holder`
 //! uses it to say *which* one) and stops it through the same one-off UAC
 //! prompt the hosts file uses (`utils::elevation`), only when the user asks.
-
-use std::fs;
+//!
+//! It also answers "is this service installed, and is it running" for apps
+//! Rezure connects to its own servers (`services::odoo`), which come as a
+//! Windows service of their own.
 
 use serde::Serialize;
 use windows_sys::Win32::System::Services::{
     CloseServiceHandle, EnumServicesStatusExW, OpenSCManagerW, OpenServiceW, QueryServiceConfigW,
     ENUM_SERVICE_STATUS_PROCESSW, QUERY_SERVICE_CONFIGW, SC_ENUM_PROCESS_INFO, SC_HANDLE,
     SC_MANAGER_CONNECT, SC_MANAGER_ENUMERATE_SERVICE, SERVICE_ACTIVE, SERVICE_AUTO_START,
-    SERVICE_QUERY_CONFIG, SERVICE_WIN32, SERVICE_WIN32_SHARE_PROCESS,
+    SERVICE_QUERY_CONFIG, SERVICE_RUNNING, SERVICE_STATE_ALL, SERVICE_WIN32,
+    SERVICE_WIN32_SHARE_PROCESS,
 };
 
-use crate::utils::elevation::{self, Elevated};
+use crate::utils::elevation::{self, Logged};
 use crate::utils::error::AppError;
 use crate::utils::paths;
 use crate::utils::powershell::quote_ps;
@@ -37,13 +40,42 @@ pub struct WindowsService {
     pub starts_with_windows: bool,
 }
 
-/// One row of the running-services list.
-struct Running {
+/// An installed Windows service and whether it's up — what an app that
+/// runs as one (Odoo) is shown with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceState {
+    pub name: String,
+    pub display_name: String,
+    pub running: bool,
+    pub starts_with_windows: bool,
+}
+
+/// One row of the SCM's service list.
+struct Listed {
+    /// 0 while it isn't running.
     pid: u32,
     name: String,
     display_name: String,
     /// Hosted in a shared `svchost.exe` alongside other services.
     shared: bool,
+    running: bool,
+}
+
+/// Every Win32 service, running or not, for which `matches(name,
+/// display_name)` holds — with its start type, which is read per service and
+/// so only for the ones asked about.
+pub fn find(matches: impl Fn(&str, &str) -> bool) -> Vec<ServiceState> {
+    listed(SERVICE_STATE_ALL)
+        .into_iter()
+        .filter(|s| matches(&s.name, &s.display_name))
+        .map(|s| ServiceState {
+            starts_with_windows: starts_automatically(&s.name),
+            name: s.name,
+            display_name: s.display_name,
+            running: s.running,
+        })
+        .collect()
 }
 
 /// The service running as `pid`, or as its parent `parent`.
@@ -57,7 +89,7 @@ struct Running {
 /// A process shared by several services (`svchost.exe`) gives no answer:
 /// stopping one of them is a guess that would take the others down with it.
 pub fn owning(pid: u32, parent: Option<u32>) -> Option<WindowsService> {
-    let running = running_services();
+    let running = listed(SERVICE_ACTIVE);
     [Some(pid), parent]
         .into_iter()
         .flatten()
@@ -75,10 +107,11 @@ pub fn owning(pid: u32, parent: Option<u32>) -> Option<WindowsService> {
         })
 }
 
-/// Every active Win32 service with the process it runs in, from the Service
-/// Control Manager. Enumerating needs no admin rights. Empty if the SCM
-/// can't be asked — the holder is then described as before, not wrongly.
-fn running_services() -> Vec<Running> {
+/// Every Win32 service in `state` (`SERVICE_ACTIVE`, `SERVICE_STATE_ALL`)
+/// with the process it runs in, from the Service Control Manager.
+/// Enumerating needs no admin rights. Empty if the SCM can't be asked —
+/// callers then know of no service, rather than a wrong one.
+fn listed(state: u32) -> Vec<Listed> {
     // SAFETY: the SCM handle is closed on every path once opened. The buffer
     // is sized from the first call's `needed` and handed back with that
     // length, so the second call writes only inside it; the entries it
@@ -103,7 +136,7 @@ fn running_services() -> Vec<Running> {
             scm,
             SC_ENUM_PROCESS_INFO,
             SERVICE_WIN32,
-            SERVICE_ACTIVE,
+            state,
             std::ptr::null_mut(),
             0,
             &mut needed,
@@ -120,7 +153,7 @@ fn running_services() -> Vec<Running> {
             scm,
             SC_ENUM_PROCESS_INFO,
             SERVICE_WIN32,
-            SERVICE_ACTIVE,
+            state,
             buffer.as_mut_ptr().cast(),
             (buffer.len() * 8) as u32,
             &mut needed,
@@ -139,12 +172,12 @@ fn running_services() -> Vec<Running> {
         );
         entries
             .iter()
-            .filter(|entry| entry.ServiceStatusProcess.dwProcessId != 0)
-            .map(|entry| Running {
+            .map(|entry| Listed {
                 pid: entry.ServiceStatusProcess.dwProcessId,
                 name: wide_to_string(entry.lpServiceName),
                 display_name: wide_to_string(entry.lpDisplayName),
                 shared: entry.ServiceStatusProcess.dwServiceType & SERVICE_WIN32_SHARE_PROCESS != 0,
+                running: entry.ServiceStatusProcess.dwCurrentState == SERVICE_RUNNING,
             })
             .collect()
     }
@@ -201,23 +234,22 @@ unsafe fn wide_to_string(ptr: *const u16) -> String {
     String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len))
 }
 
-/// The elevated script that stops `name`, and with `disable_autostart` sets
-/// it to start Manually so it doesn't take the port back at the next boot.
+/// The elevated statements that stop `name`, and with `disable_autostart`
+/// set it to start Manually so it doesn't take the port back at the next
+/// boot.
 ///
 /// No `-Force` on `Stop-Service`: that would quietly stop every service that
 /// depends on this one too. Without it, a service with dependents fails with
 /// a message saying so, which is what the user should see.
-fn stop_script(name: &str, disable_autostart: bool, error_log: &str) -> String {
+pub fn stop_statements(name: &str, disable_autostart: bool) -> String {
     let name = quote_ps(name);
-    let manual = if disable_autostart {
-        format!("    Set-Service -Name {name} -StartupType Manual -ErrorAction Stop\n")
-    } else {
-        String::new()
-    };
-    format!(
-        "try {{\n    Stop-Service -Name {name} -ErrorAction Stop\n{manual}}} catch {{\n    $_.Exception.Message | Out-File -FilePath {} -Encoding utf8\n    exit 1\n}}\n",
-        quote_ps(error_log),
-    )
+    let mut statements = format!("Stop-Service -Name {name} -ErrorAction Stop\n");
+    if disable_autostart {
+        statements.push_str(&format!(
+            "Set-Service -Name {name} -StartupType Manual -ErrorAction Stop\n"
+        ));
+    }
+    statements
 }
 
 /// Stops `service` through a UAC prompt.
@@ -231,39 +263,22 @@ pub fn stop(service: &WindowsService, disable_autostart: bool) -> Result<(), App
         name: service.display_name.clone(),
         reason,
     };
-
-    let dir = paths::data()?.join("ports");
-    fs::create_dir_all(&dir)
-        .map_err(|e| AppError::Io(format!("could not create {}: {e}", dir.display())))?;
-    let script_path = dir.join("stop-service.ps1");
-    let error_log_path = dir.join("stop-service.error.log");
-    let _ = fs::remove_file(&error_log_path);
-
-    let script = stop_script(
-        &service.name,
-        disable_autostart,
-        &error_log_path.display().to_string(),
-    );
-    fs::write(&script_path, script)
-        .map_err(|e| AppError::Io(format!("could not write {}: {e}", script_path.display())))?;
-
     log::info!(
         "stopping Windows service {} (disable autostart: {disable_autostart})",
         service.name
     );
-    if elevation::run_script(&script_path).map_err(|e| failed(e.to_string()))? == Elevated::Declined
+    match elevation::run_logged(
+        &paths::data()?.join("ports"),
+        "stop-service",
+        &stop_statements(&service.name, disable_autostart),
+    )
+    .map_err(|e| failed(e.to_string()))?
     {
-        return Err(AppError::WindowsServiceStopCancelled(
+        Logged::Done => Ok(()),
+        Logged::Declined => Err(AppError::WindowsServiceStopCancelled(
             service.display_name.clone(),
-        ));
-    }
-
-    match fs::read_to_string(&error_log_path) {
-        // `Out-File -Encoding utf8` on Windows PowerShell writes a BOM.
-        Ok(detail) if !detail.trim_start_matches('\u{feff}').trim().is_empty() => Err(failed(
-            detail.trim_start_matches('\u{feff}').trim().to_string(),
         )),
-        _ => Ok(()),
+        Logged::Failed(reason) => Err(failed(reason)),
     }
 }
 
@@ -274,7 +289,7 @@ mod tests {
     /// The name reaches PowerShell as one literal, whatever it contains.
     #[test]
     fn the_stop_script_quotes_the_service_name() {
-        let script = stop_script("it's a service", false, r"C:\x\log.txt");
+        let script = stop_statements("it's a service", false);
         assert!(script.contains("Stop-Service -Name 'it''s a service' -ErrorAction Stop"));
         assert!(!script.contains("Set-Service"));
         assert!(!script.contains("-Force"));
@@ -282,7 +297,7 @@ mod tests {
 
     #[test]
     fn the_start_type_is_only_changed_when_asked() {
-        let script = stop_script("pg", true, r"C:\x\log.txt");
+        let script = stop_statements("pg", true);
         assert!(script.contains("Set-Service -Name 'pg' -StartupType Manual -ErrorAction Stop"));
     }
 
@@ -296,7 +311,7 @@ mod tests {
     /// a few services in a process of their own.
     #[test]
     fn running_services_can_be_listed() {
-        let running = running_services();
+        let running = listed(SERVICE_ACTIVE);
         assert!(!running.is_empty());
         assert!(running.iter().all(|s| s.pid != 0 && !s.name.is_empty()));
     }

@@ -378,8 +378,9 @@ pub fn clear_active() {
 /// `(localdb)\Rezure`, Windows Authentication — and nothing to ask.
 ///
 /// Called at startup and right after LocalDB is installed. Returns whether
-/// it added one. Also creates the instance itself if it's missing — see
-/// `mssql_localdb::ensure_created` for why that can't wait for Start.
+/// the store changed — see [`settle_managed`]. Also creates the instance
+/// itself if it's missing — see `mssql_localdb::ensure_created` for why that
+/// can't wait for Start.
 pub fn ensure_localdb() -> bool {
     if !mssql_localdb::is_installed() {
         return false;
@@ -387,15 +388,7 @@ pub fn ensure_localdb() -> bool {
     if let Err(err) = mssql_localdb::ensure_created() {
         log::warn!("could not create the LocalDB instance: {err}");
     }
-    let mut store = store();
-    if store
-        .connections
-        .iter()
-        .any(|c| c.managed && c.kind == ServerKind::Sqlserver)
-    {
-        return false;
-    }
-    store.connections.push(Connection {
+    settle_managed(Connection {
         id: uuid::Uuid::new_v4().to_string(),
         name: mssql_localdb::SERVICE_NAME.to_string(),
         host: mssql_localdb::SERVER_ADDRESS.to_string(),
@@ -415,10 +408,18 @@ pub fn ensure_localdb() -> bool {
         save_password: false,
         ssh: None,
         last_used_at: None,
-    });
-    persist(&store);
-    log::info!("added a connection for Rezure's LocalDB instance");
-    true
+    })
+}
+
+/// The connection to Rezure's own PostgreSQL service, once a version is
+/// installed — what user management and the app-connection helpers act on,
+/// whichever server the Databases page happens to be reading.
+pub fn managed_postgres() -> Option<Connection> {
+    store()
+        .connections
+        .iter()
+        .find(|c| c.managed && c.kind == ServerKind::Postgres)
+        .cloned()
 }
 
 /// Adds the connection to Rezure's own PostgreSQL service, once a version is
@@ -426,21 +427,13 @@ pub fn ensure_localdb() -> bool {
 /// [`ensure_localdb`]: there's one right way to reach it (`127.0.0.1:5432`,
 /// `postgres`, no password) and nothing to ask.
 ///
-/// Called at startup and right after a PostgreSQL install. Returns whether it
-/// added one.
+/// Called at startup and right after a PostgreSQL install. Returns whether
+/// the store changed — see [`settle_managed`].
 pub fn ensure_postgres() -> bool {
     if !postgres::is_installed() {
         return false;
     }
-    let mut store = store();
-    if store
-        .connections
-        .iter()
-        .any(|c| c.managed && c.kind == ServerKind::Postgres)
-    {
-        return false;
-    }
-    store.connections.push(Connection {
+    settle_managed(Connection {
         id: uuid::Uuid::new_v4().to_string(),
         name: postgres::SERVICE_NAME.to_string(),
         host: postgres::HOST.to_string(),
@@ -459,8 +452,37 @@ pub fn ensure_postgres() -> bool {
         save_password: false,
         ssh: None,
         last_used_at: None,
-    });
+    })
+}
+
+/// Puts `seed` — the connection to a server Rezure runs — in the store
+/// exactly once, repairing or dropping copies a build from before `kind` and
+/// `managed` existed left behind (`ConnectionStore::settle_managed` has the
+/// rules), then clears what was keyed by the ids it touched. Returns whether
+/// the store changed.
+fn settle_managed(seed: Connection) -> bool {
+    let name = seed.name.clone();
+    let mut store = store();
+    let settled = store.settle_managed(seed);
+    if !settled.changed() {
+        return false;
+    }
     persist(&store);
-    log::info!("added a connection for Rezure's PostgreSQL service");
+    drop(store);
+
+    if settled.added {
+        log::info!("added a connection for Rezure's {name}");
+    }
+    // Rezure's own servers sign in without a password, so whatever was
+    // filed for a repaired entry while it read as MySQL is now dead weight.
+    if let Some(id) = &settled.repaired {
+        secrets::forget(id);
+        log::info!("repaired the saved connection for Rezure's {name}");
+    }
+    for id in &settled.dropped {
+        secrets::forget(id);
+        tunnel::close(id);
+        log::info!("removed a stale duplicate of the connection for Rezure's {name}");
+    }
     true
 }

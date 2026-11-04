@@ -50,7 +50,12 @@ const PATH_ROWS = [
               Start Rezure with Windows
             </p>
             <p class="mt-0.5 text-xs text-neutral-500">
-              Services boot in the background at sign-in.
+              Opens at sign-in. Services ticked "Start when Rezure opens" (in a service's ⋮ menu)
+              come up with it{{
+                settingsStore.startOnLaunch.length
+                  ? ` - now ${settingsStore.startOnLaunch.join(', ')}`
+                  : ''
+              }}.
             </p>
           </div>
           <button
