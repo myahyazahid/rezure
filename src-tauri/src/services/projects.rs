@@ -171,6 +171,7 @@ fn linked_projects(
             // on PHP version.
             php_version: None,
             node_version: None,
+            stack_info: None,
         });
     }
     projects
@@ -237,6 +238,7 @@ fn scan_www(
             // a bare scan has no way to know this either.
             php_version: None,
             node_version: None,
+            stack_info: None,
         });
     }
 

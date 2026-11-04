@@ -65,6 +65,7 @@ See [`docs/setup-dev.md`](docs/setup-dev.md) for a more detailed walkthrough, in
 - Type everything — avoid `any` in TypeScript unless justified with a comment
 - Keep components focused; if a component exceeds ~200 lines, consider splitting it
 - Surfaces use the glass role classes from `src/assets/main.css` (`glass`, `glass-inset`, `glass-strong`, `glass-btn`, `glass-accent`, …) instead of hand-picked `bg-*`/`border-*`/`dark:` pairs — the header comment there lists each role and when a surface may blur what is behind it
+- Modals don't close on a click outside them. Give every new modal the shared X (`components/common/ModalCloseButton.vue`) and no `@click.self` on its backdrop — see [Modals](docs/v1/architecture.md#5b-modals)
 
 ### General
 

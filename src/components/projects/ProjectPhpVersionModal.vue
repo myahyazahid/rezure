@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useProjectsStore } from '@/stores/projects'
 import { usePhpStore } from '@/stores/php'
 import ModalCloseButton from '@/components/common/ModalCloseButton.vue'
+import { runtimeFix, runtimeMismatch } from '@/composables/projectStack'
 
 const store = useProjectsStore()
 const phpStore = usePhpStore()
+const router = useRouter()
 
 const project = computed(
   () => store.projects.find((p) => p.id === store.phpVersionModalFor) ?? null,
@@ -23,6 +26,24 @@ watch(
 function choose(version: string | null) {
   if (!project.value) return
   store.setPhpVersion(project.value.id, version)
+}
+
+/** What the project asks for, when it says and Rezure could read it. */
+const requirement = computed(() => {
+  const req = project.value?.stackInfo?.php ?? null
+  return req?.readable ? req : null
+})
+const mismatch = computed(() => runtimeMismatch(requirement.value))
+
+/** "Fits" / "Doesn't fit" beside each installed version. */
+function fitsLabel(version: string): 'fits' | 'no' | null {
+  if (!requirement.value) return null
+  return requirement.value.fitting.includes(version) ? 'fits' : 'no'
+}
+
+function openSwitch() {
+  store.closePhpVersionModal()
+  router.push('/switch')
 }
 </script>
 
@@ -44,6 +65,47 @@ function choose(version: string | null) {
         time. A terminal opened from this project's card uses the same version for
         <span class="font-mono">php</span>/<span class="font-mono">composer</span> - a terminal
         already open keeps whatever it started with.
+      </p>
+
+      <!-- What the project asks for. A mismatch gets the explanation and the
+           fix; a fit, one quiet line. Every source is in the stack dialog. -->
+      <div
+        v-if="requirement && mismatch"
+        class="mt-4 rounded-xl bg-amber-100/60 px-4 py-3 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+      >
+        <p class="font-semibold">This project needs PHP {{ requirement.constraint }}</p>
+        <p class="mt-1">
+          {{ requirement.source }} asks for PHP
+          <span class="font-mono">{{ requirement.constraint }}</span
+          >, but it's served by PHP <span class="font-mono">{{ requirement.serving }}</span
+          >. Until it runs on a version that fits, its pages can fail with Composer's "detected
+          issues in your platform" error or with syntax errors.
+        </p>
+        <p class="mt-2">{{ runtimeFix('PHP', requirement) }}</p>
+        <div class="mt-3 flex justify-end">
+          <button
+            v-if="requirement.suggested"
+            type="button"
+            class="glass-accent rounded-full px-4 py-1.5 text-xs font-semibold transition disabled:opacity-50"
+            :disabled="store.settingPhpVersion"
+            @click="choose(requirement.suggested)"
+          >
+            Pin to PHP {{ requirement.suggested }}
+          </button>
+          <button
+            v-else
+            type="button"
+            class="glass-accent rounded-full px-4 py-1.5 text-xs font-semibold transition"
+            @click="openSwitch"
+          >
+            Open Switch
+          </button>
+        </div>
+      </div>
+      <p v-else-if="requirement" class="mt-3 text-xs text-neutral-500">
+        Needs PHP
+        <span class="font-mono">{{ requirement.stated.map((s) => s.constraint).join(', ') }}</span>
+        - versions marked Fits can serve it.
       </p>
 
       <div class="mt-5 space-y-1.5">
@@ -88,6 +150,16 @@ function choose(version: string | null) {
             >
             <span v-if="version.active" class="ml-1.5 text-neutral-400"
               >· currently the global default</span
+            >
+            <span
+              v-if="fitsLabel(version.version) === 'fits'"
+              class="ml-1.5 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300"
+              >Fits</span
+            >
+            <span
+              v-else-if="fitsLabel(version.version) === 'no'"
+              class="ml-1.5 rounded-full bg-neutral-500/10 px-2 py-0.5 text-[10px] font-semibold text-neutral-500"
+              >Doesn't fit</span
             >
           </span>
           <span

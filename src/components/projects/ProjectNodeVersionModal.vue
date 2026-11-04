@@ -24,6 +24,14 @@ function choose(version: string | null) {
   if (!project.value) return
   store.setNodeVersion(project.value.id, version)
 }
+
+/** "Fits" / "Doesn't fit" beside each installed version, when the project
+ *  states what it needs (see the stack dialog for where). */
+function fitsLabel(version: string): 'fits' | 'no' | null {
+  const req = project.value?.stackInfo?.node
+  if (!req?.readable) return null
+  return req.fitting.includes(version) ? 'fits' : 'no'
+}
 </script>
 
 <template>
@@ -94,6 +102,16 @@ function choose(version: string | null) {
             >
             <span v-if="version.active" class="ml-1.5 text-neutral-400"
               >· currently the global default</span
+            >
+            <span
+              v-if="fitsLabel(version.version) === 'fits'"
+              class="ml-1.5 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300"
+              >Fits</span
+            >
+            <span
+              v-else-if="fitsLabel(version.version) === 'no'"
+              class="ml-1.5 rounded-full bg-neutral-500/10 px-2 py-0.5 text-[10px] font-semibold text-neutral-500"
+              >Doesn't fit</span
             >
           </span>
           <span

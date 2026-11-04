@@ -129,6 +129,12 @@ embedded into the app at build time. A pull request adding one has two parts:
    `composer.json` / `package.json` with the relevant package, and the docroot folder with an
    `index.php`. Use `<id>--<variant>` for more than one shape (`codeigniter4--with-sass`).
 
+To have the project's **Stack & requirements** dialog name the framework and its version, and
+count its `engines.node`, add its package to `COMPOSER_FRAMEWORKS` or `NODE_FRAMEWORKS` in
+[`src-tauri/src/services/project_stack.rs`](../../src-tauri/src/services/project_stack.rs). That
+list is separate from `frameworks.json`: detection decides how a project is *served*, the list
+decides what's *shown* about it.
+
 No test code is needed. `cargo test` checks that the built-in file is valid, that every fixture is
 detected as the id in its folder name, and that every built-in id has at least one fixture. When a
 new definition could steal projects from an existing one, add a fixture for that case too —

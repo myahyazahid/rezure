@@ -13,6 +13,8 @@ import LinkProjectModal from '@/components/projects/LinkProjectModal.vue'
 import ProjectDoctorModal from '@/components/projects/ProjectDoctorModal.vue'
 import ProjectShareModal from '@/components/projects/ProjectShareModal.vue'
 import ProjectPhpVersionModal from '@/components/projects/ProjectPhpVersionModal.vue'
+import ProjectStackIcon from '@/components/projects/ProjectStackIcon.vue'
+import ProjectStackModal from '@/components/projects/ProjectStackModal.vue'
 import ProjectNodeVersionModal from '@/components/projects/ProjectNodeVersionModal.vue'
 import ProjectFrameworkModal from '@/components/projects/ProjectFrameworkModal.vue'
 import DevServersModal from '@/components/projects/DevServersModal.vue'
@@ -501,6 +503,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
     <ProjectDoctorModal />
     <ProjectShareModal />
     <ProjectPhpVersionModal />
+    <ProjectStackModal />
     <ProjectNodeVersionModal />
     <ProjectFrameworkModal />
     <DevServersModal v-if="devServers.modalOpen" />
@@ -630,6 +633,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
             >
               Linked
             </span>
+            <ProjectStackIcon :project-id="project.id" :stack="project.stackInfo" />
           </p>
           <button
             type="button"
@@ -788,6 +792,7 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
                 >
                   Linked
                 </span>
+                <ProjectStackIcon :project-id="project.id" :stack="project.stackInfo" />
               </p>
               <!-- Always two lines, so every row is the same height. Leaving
                    this one out for never-opened projects made the list ragged,

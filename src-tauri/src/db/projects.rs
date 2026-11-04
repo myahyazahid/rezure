@@ -14,6 +14,7 @@ use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 
 use crate::services::frameworks::ServeProfile;
+use crate::services::project_stack::ProjectStack;
 use crate::utils::error::AppError;
 
 /// Where a project came from, which decides what can be done to it.
@@ -88,6 +89,11 @@ pub struct ProjectInfo {
     /// project resolves `node`/`npm` as (`services::launcher`), and what its
     /// dev server runs on (`services::dev_servers`); nginx never depends on it.
     pub node_version: Option<String>,
+    /// What the project is built on and needs to run — framework versions,
+    /// PHP, Node.js, package manager, database — against what Rezure has.
+    /// See `services::project_stack`. Filled in by `list_projects` once the
+    /// pins are known; `None` when the project's files say nothing.
+    pub stack_info: Option<ProjectStack>,
 }
 
 fn now() -> i64 {
@@ -317,6 +323,7 @@ mod tests {
             domain_invalid: false,
             php_version: None,
             node_version: None,
+            stack_info: None,
         }
     }
 

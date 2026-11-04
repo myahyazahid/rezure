@@ -156,7 +156,7 @@ pub struct MailSetup {
 /// loader) reads it for the plain cases: the first definition wins, an
 /// optional `export ` prefix is ignored, surrounding quotes are dropped, and
 /// an unquoted value ends at a ` #` comment.
-fn env_value(env: &str, key: &str) -> Option<String> {
+pub(crate) fn env_value(env: &str, key: &str) -> Option<String> {
     env.lines().find_map(|line| {
         let line = line.trim();
         let line = line.strip_prefix("export ").unwrap_or(line);

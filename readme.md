@@ -15,6 +15,7 @@ Rezure lets you spin up local web development environments (Apache/Nginx, PHP, M
 - SQL Server for PHP projects — Microsoft's `pdo_sqlsrv`/`sqlsrv` drivers, the ODBC Driver, and an optional local SQL Server (LocalDB), all installed from inside Rezure; SQL Server connections on the Databases page (see [`docs/v1/databases.md`](docs/v1/databases.md#sql-server))
 - PostgreSQL as a local service — 18, 17 or 16, installed from inside Rezure (EDB's portable builds, nothing installed into Windows), beside MariaDB rather than instead of it; a `pgsql` Laravel project connects as `root` with no `.env` changes (see [`docs/v1/databases.md`](docs/v1/databases.md#postgresql))
 - Local mail catcher (Mailpit) — point a project's `.env` at `127.0.0.1:1025` and every email it sends lands in an inbox at `http://127.0.0.1:8025` instead of anyone's real mailbox
+- Stack & requirements per project — the framework and its version, plus the PHP, Node.js, package manager and database each project needs, read from its own files and checked against what Rezure has, with a one-click pin when a version doesn't fit (see [`docs/v1/projects.md`](docs/v1/projects.md#stack--requirements))
 - Portable bundled binaries — no manual installation required
 - Lightweight footprint thanks to Tauri (native webview, small binary size)
 

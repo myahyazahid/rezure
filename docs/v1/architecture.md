@@ -23,6 +23,31 @@ Managing local services (Apache, Nginx, MySQL/MariaDB, PHP-FPM) is the core resp
 
 ---
 
+## 1c. Project Stack & Requirements
+
+What a project is built on and needs (frameworks, PHP, Node.js, package manager, database) is
+worked out in `services::project_stack` and attached to each project as `ProjectInfo.stack_info`
+by `list_projects`, after the version pins are loaded.
+
+- **Files only.** Nothing is executed: `composer.json`/`composer.lock`,
+  `vendor/composer/platform_check.php`, `package.json`, `node_modules/<pkg>/package.json` or
+  `package-lock.json`, `.nvmrc`/`.node-version`, `.env`, framework config files and Prisma's
+  schema. That keeps it cheap enough to run on every listing.
+- **Constraints are parsed in Rust** (`services::version_constraint`), in two dialects: Composer's
+  for PHP and npm's for Node.js. They differ in what `~` may move and whether a bare partial
+  version (`20`) is a range. A constraint that doesn't parse is reported as unreadable, never as
+  a mismatch.
+- **Compared against what serves the project**: its pin while that version is installed, the
+  global active version otherwise (the same fallback `php_pool` uses). Rust also picks the
+  suggestion: the newest installed version that fits, or the oldest release line to install.
+  The frontend only phrases it (`composables/projectStack.ts`).
+- **Extending it:** framework and tool packages are listed in `COMPOSER_FRAMEWORKS`,
+  `NODE_FRAMEWORKS` and `NODE_TOOLS` at the top of `project_stack.rs`. Only those packages'
+  `engines.node` counts toward a project's Node.js requirement.
+- Full detail in [`projects.md`](projects.md#stack--requirements).
+
+---
+
 ## 2. Error Handling
 
 Because Rezure interacts heavily with the OS (files, ports, processes), failure points are numerous — error handling is treated as a first-class concern, not an afterthought.
@@ -50,6 +75,19 @@ Because Rezure interacts heavily with the OS (files, ports, processes), failure 
 
 - Data types are kept consistent between Rust structs and TypeScript interfaces — ideally auto-generated (e.g. via `tauri-specta`) to prevent the API contract from drifting out of sync.
 - Business logic stays in Rust. The Vue frontend only invokes commands and renders results — it does not duplicate logic like service management or file editing.
+
+---
+
+## 5b. Modals
+
+- A modal never closes on a click outside it: a stray click shouldn't throw away what was typed or
+  interrupt an action. The way out is the **X** in the top-right corner, a Cancel/Close button,
+  or Escape.
+- The X is `components/common/ModalCloseButton.vue`. It's absolutely positioned, so the panel
+  needs `relative` and its header needs room on the right (`pr-8`). Wire `@click` to the modal's
+  own close function, and pass `:disabled` while closing would abandon a running action (the
+  same condition the modal's Cancel button uses).
+- Dropdown menus are different: they still close on an outside click.
 
 ---
 

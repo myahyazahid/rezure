@@ -994,6 +994,7 @@ mod tests {
             domain_invalid: false,
             php_version: None,
             node_version: None,
+            stack_info: None,
         }
     }
 

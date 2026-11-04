@@ -2,6 +2,11 @@
 
 Fase tambahan di antara v3 dan v4, fokus menambah dukungan Node.js version switching serta Mailpit sebagai service baru — memanfaatkan fondasi `Service` trait yang sudah ada, tanpa perlu sistem plugin dinamis. Redis (bekas Fase 3.5.2 di file ini) dipindah ke v4 atas permintaan maintainer — lihat `docs/v4/rezure-app-v4-phases-tasks.md`.
 
+**Versi:** dinaikkan dari 3.3.0 ke **3.5.0** di semua tempat yang menyimpan versi app:
+`package.json`, `package-lock.json` (root dan `packages[""]`), `src-tauri/Cargo.toml`,
+`src-tauri/Cargo.lock` (entri `rezureapp`), dan `src-tauri/tauri.conf.json`. Tidak ada rilis 3.4.0
+terpisah.
+
 ---
 
 ## Fase 3.5.1 — Node.js Version Switching
@@ -360,6 +365,11 @@ pun.
 - [x] **Connect an app** untuk setiap user: potongan siap salin, yaitu URL `postgresql://`,
       `.env` Laravel, `DATABASE_URL` (Django/Node/Prisma), `database.yml` Rails, JDBC, dan
       `odoo.conf`
+- [x] Tombol itu diganti nama jadi **App config** (masukan maintainer: "Connect an app" terbaca
+      seperti aksi yang menyambungkan sesuatu, padahal hanya membuka potongan config). Sekarang
+      berikon `</>` dan chevron yang berputar saat panel terbuka, punya `aria-expanded` dan
+      tooltip, dan panelnya diawali satu kalimat: tempel salah satu potongan ini ke config app
+      supaya login sebagai user itu; tidak ada yang tersambung atau berubah sebelum itu
 - [x] Odoo (aplikasi pertama yang bisa dikonfigurasi Rezure sendiri, karena terpasang di Windows
       dengan file konfigurasi yang diketahui): deteksi instalasi (`Program Files\Odoo*\server\
       odoo.conf` + service `odoo-server-*`), tampilkan status, lalu satu tombol: buat/perbarui role
@@ -496,6 +506,55 @@ pun.
 
 Dump database dari PostgreSQL bawaan Odoo lalu restore ke Rezure. Hanya untuk yang sudah punya
 data; ditunda.
+
+---
+
+## Stack & requirements per project (atas permintaan maintainer)
+
+**Masalah.** Tiap project butuh versi PHP/Node.js dan database tertentu, tapi Rezure tidak
+memberi tahu kalau versi yang melayani project itu tidak cocok. User baru tahu setelah halaman
+error ("Composer detected issues in your platform", Vite menolak Node lama).
+
+- [x] Modul baru `services::version_constraint`: parser constraint Composer dan npm (`^`, `~`,
+      wildcard, perbandingan, hyphen range, `,`/spasi = dan, `|`/`||` = atau). Dua dialek beda
+      di `~` dan versi parsial tanpa operator. Yang tidak terbaca = `None`, dilaporkan
+      "unreadable", bukan mismatch
+- [x] Modul baru `services::project_stack`, hanya membaca file (tanpa menjalankan apa pun):
+  - framework + versi: `composer.lock`, `system/core/CodeIgniter.php` (CI3),
+    `wp-includes/version.php` (WordPress), `node_modules`/`package-lock.json` (Next.js, Nuxt,
+    Astro, Vite, React, Vue, ...)
+  - PHP: `composer.json` `require.php`, `vendor/composer/platform_check.php` (minimum paket yang
+    benar-benar terinstall), `$required_php_version` WordPress
+  - Node.js: `engines.node`, `.nvmrc`/`.node-version`/`volta.node` (dibaca sebagai satu major),
+    dan `engines.node` paket framework/build tool saja (paket lain hanya memicu warning npm)
+  - package manager: `packageManager` atau lockfile; `engines.npm` dicek ke npm bawaan Node.js
+  - database: `.env`/`.env.example` (`DB_CONNECTION`, `DATABASE_URL`, `DBDriver` CI4), config
+    database CI3/CI4, `prisma/schema.prisma`, lalu dependency driver. Versi database hanya dicek
+    kalau project menyatakannya (WordPress); framework lain tidak menyatakan, jadi tidak ditebak
+- [x] Versi yang dibandingkan = pin project kalau masih terinstall, selain itu versi global
+      (fallback yang sama dengan `php_pool`). Kalau tidak cocok: versi terinstall terbaru yang
+      cocok (untuk tombol **Pin to**), atau baris versi tertua yang cocok untuk diinstall
+- [x] `ProjectInfo.stack_info` diisi `list_projects` setelah pin dibaca
+- [x] Ikon **i** di kanan nama project (list dan grid): abu-abu kalau semua cocok, kuning kalau
+      ada yang tidak cocok. Hover = ringkasan, klik = dialog **Stack & requirements** (framework,
+      PHP, Node.js, package manager, database, tiap sumber dengan tanda cocok/tidak, tombol
+      Pin/Open Switch/Open Services, dan **Check PHP extensions** ke dialog Requirements check)
+- [x] Picker versi PHP dan Node.js menandai tiap versi **Fits**/**Doesn't fit**; picker PHP juga
+      menampilkan penjelasan + tombol pin saat tidak cocok
+- [x] `docs/v1/projects.md` bagian "Stack & requirements"
+
+### Verifikasi
+
+- 16 test baru (`version_constraint`, `project_stack`): constraint `engines.node` asli dari
+  Next.js 15, Vite 7, Angular 18; dialek Composer vs npm; requirement yang gagal yang
+  dilaporkan; sumber yang tidak terbaca dibuang, bukan ditandai. Seluruh 682 test Rust lolos,
+  `cargo clippy --all-targets` bersih
+- `print_stacks` (`#[ignore]`) di mesin maintainer: Astro 7.4.2 → Node `>=22.23.4`; Laravel
+  13.39.0 → PHP `^8.5`; Laravel 12 + Vite 6.4.1 → Node `^18 || ^20 || >=22`; Laravel 13 +
+  Filament 5 + Vite 8.2.1 → `composer.json` `^8.3` tapi paket terinstall sudah butuh 8.4; semua
+  database terbaca dari `.env`
+- `npm run type-check`, `eslint`, `prettier`, `vite build` bersih
+- **Belum dicoba di app sungguhan:** tampilan ikon dan dialog, tombol Pin to
 
 ---
 

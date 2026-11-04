@@ -353,6 +353,407 @@ Tidak ada — sepenuhnya perubahan internal `rezureapp`.
 
 ---
 
+## Fase 4.8 — Remote Config dari `rezure-api`
+
+**Status: DRAF, menunggu review maintainer.** Belum ada kode. Ditaruh di v4 atas permintaan
+maintainer. Sama seperti Fase 4.1/4.2/4.7, ini butuh keputusan dulu:
+bagian "Pertanyaan untuk maintainer" di bawah perlu dijawab sebelum Fase 4.8.1 dimulai.
+
+**Tujuan:** `rezure-api` (`laravel-api`) bisa mengatur sebagian isi app tanpa rilis baru:
+mengirim pengumuman, menyembunyikan atau menonaktifkan menu yang sedang bermasalah, mengubah
+label/urutan/badge menu, menambah halaman konten, dan menampilkan satu slot sponsor.
+
+### Latar belakang
+
+Rezure sudah mengambil beberapa hal dari `rezure-api`, tapi tiap fitur punya endpoint dan cache
+sendiri: changelog (`services::changelog`), donate (`services::donate`, `donate_images`), katalog
+sticker, support, telemetry, dan pemberitahuan versi mayor baru (`services::upgrade_notice`).
+Yang belum ada adalah cara umum untuk:
+
+- memberi tahu semua user tentang sesuatu yang mendesak (bug di versi tertentu, masalah
+  keamanan, maintenance), tanpa menunggu user membuka Changelog;
+- mematikan sementara fitur yang rusak dari sisi luar (provider tunnel untuk Share sedang down,
+  URL katalog berubah), supaya user melihat pesan yang jelas, bukan error acak;
+- mengubah tampilan menu ringan (badge "New", urutan) tanpa rilis;
+- menampilkan konten atau sponsor yang bisa diganti dari dashboard.
+
+### Prinsip (batas kendali server)
+
+Rezure adalah tool lokal yang menjalankan proses dan mengubah file di komputer user. Kendali dari
+server dibatasi supaya server yang salah konfigurasi, down, atau diretas tidak bisa merusak
+komputer user atau melumpuhkan app:
+
+| Boleh dari server | Tidak boleh dari server |
+|---|---|
+| Teks, link `https://`, gambar yang diverifikasi checksum | HTML, JS, atau CSS mentah yang dirender di app |
+| Menyembunyikan/menonaktifkan menu **non-inti** | Menonaktifkan Services, Projects, Databases, Settings |
+| Badge, label, urutan, tooltip menu | Menambah menu yang menjalankan fungsi (fitur nyata tetap butuh kode Rust) |
+| Halaman konten dari blok terstruktur | Perintah, path, argumen, atau URL yang dijalankan/diunduh app |
+| Satu slot sponsor berlabel jelas | Ad network pihak ketiga, script tracking, popup iklan |
+
+Tiga aturan wajib di seluruh fitur:
+
+1. **Fail-open.** Server mati, offline, atau payload ditolak berarti app memakai konfigurasi
+   terakhir yang valid, atau default bawaan (semua menu normal, tanpa pengumuman). Kill switch
+   yang kedaluwarsa (`expires_at` lewat) otomatis tidak berlaku lagi.
+2. **Payload ditandatangani.** App hanya menerima konfigurasi yang tanda tangannya cocok dengan
+   public key yang ditanam di app. Domain atau server API yang dibajak tidak cukup untuk
+   mengirim konfigurasi palsu.
+3. **Anonim.** Request hanya membawa versi app, OS, dan channel. Tidak ada install id, tidak ada
+   data project/database.
+
+---
+
+### Fitur
+
+#### F1 — Pengumuman
+
+- Field: `id`, `level` (`info` / `warning` / `critical`), `title`, `body` (teks biasa, paragraf
+  dipisah baris kosong), `link` opsional (`label` + URL `https://`), `starts_at`, `ends_at`,
+  `dismissible`.
+- Target: `min_version` / `max_version` (semver), `os`, `pages` (opsional: tampil hanya di
+  halaman tertentu).
+- Tampilan:
+  - **Ikon lonceng di title bar** dengan titik merah untuk yang belum dibaca. Panelnya berisi
+    semua pengumuman aktif (inbox).
+  - **Banner di atas halaman** untuk `warning` dan `critical`.
+  - `critical` tidak bisa ditutup sampai `ends_at` lewat atau server menariknya.
+- Pengumuman yang ditutup/dibaca dicatat lokal per `id`, jadi tidak muncul lagi setelah restart.
+- `upgrade_notice` yang sudah ada tetap jalan apa adanya. Menggabungkannya ke F1 masuk Backlog.
+
+#### F2 — Status menu (kill switch)
+
+- Per menu id dari daftar tetap di app (`services`, `projects`, `databases`, `switch`,
+  `php-extensions`, `logs`, `support`, `changelog`, `donate`, `appearance`, `decorations`,
+  `settings`, `about`) dan per fitur di dalam halaman (misalnya `projects.share`,
+  `switch.install.mariadb`, `decorations.browse`, `support.feedback`).
+- State: `normal`, `hidden` (tidak tampil di sidebar), `disabled` (tampil abu-abu, klik
+  menampilkan pesan dari server), dengan `message` dan `expires_at` wajib untuk dua yang
+  terakhir.
+- **Menu inti** (`services`, `projects`, `databases`, `settings`) diabaikan kalau di-set
+  `hidden`/`disabled`. Server hanya bisa memberi badge atau pengumuman untuk menu ini.
+- Membuka route menu yang `disabled` secara langsung (misalnya lewat tombol di halaman lain)
+  menampilkan halaman pesan, bukan halaman kosong atau error.
+
+#### F3 — Custom ringan menu
+
+- `label` (maks. 24 karakter), `badge` (`new` / `beta` / `updated`, bukan teks bebas),
+  `tooltip` (maks. 120 karakter), `order` (urutan di dalam grupnya).
+- Id yang tidak dikenal app diabaikan. Ikon menu tidak bisa diganti dari server.
+
+#### F4 — Halaman konten
+
+- Entri sidebar tambahan, maks. 3, di grup terpisah di bawah menu bawaan.
+- Dua jenis:
+  - `external`: membuka URL `https://` di browser (lewat `open_external_link` yang sudah ada).
+  - `page`: halaman generik `ContentPageView.vue` yang merender **blok terstruktur**, bukan
+    HTML: `heading`, `paragraph`, `list`, `image` (diunduh dan diverifikasi seperti
+    `donate_images`), `button` (link `https://`), `callout`.
+- Contoh pemakaian: panduan migrasi, event komunitas, tutorial.
+
+#### F5 — Slot sponsor
+
+- Satu kartu, berlabel **"Sponsor"** dengan jelas, di dua tempat: bawah halaman Services dan
+  halaman About. Bukan popup, bukan di dalam modal atau alur kerja.
+- Field: `id`, `title`, `text` (maks. 140 karakter), `image` (`{ format, size, sha256 }`,
+  aturan sama dengan `donate_images`), `url` (`https://`), `starts_at`, `ends_at`.
+- Kalau ada beberapa sponsor aktif, app merotasi per hari.
+- Bisa dimatikan di Settings ("Show sponsor"). Kalau dimatikan, tidak ada gambar yang diunduh.
+- Tidak ada tracking impresi. Klik langsung ke URL sponsor (lihat pertanyaan 4 soal hitung
+  klik).
+
+---
+
+### Desain teknis
+
+#### Endpoint
+
+`GET /v1/app-config?version=4.0.0&os=windows&channel=stable`
+
+- `200` dengan amplop bertanda tangan, `304` kalau tidak berubah (`If-None-Match`/ETag),
+  `204` kalau tidak ada konfigurasi untuk versi ini.
+- Kontrak lengkap ditulis di `api-documentation/app-config-api.md` (repo sibling), sama seperti
+  `telemetry-api.md`.
+
+Amplop:
+
+```json
+{
+  "key_id": "2026-11",
+  "payload": "<base64 dari JSON payload>",
+  "signature": "<base64 ed25519 atas byte payload>"
+}
+```
+
+Payload:
+
+```json
+{
+  "schema": 1,
+  "issued_at": "2026-11-10T08:00:00Z",
+  "announcements": [
+    {
+      "id": "share-tunnel-down-2026-11",
+      "level": "warning",
+      "title": "Share sedang bermasalah",
+      "body": "Provider tunnel sedang down. Project tetap jalan di .test seperti biasa.",
+      "link": { "label": "Status", "url": "https://rezure.example/status" },
+      "target": { "min_version": "3.4.0", "max_version": null, "os": ["windows"], "pages": [] },
+      "starts_at": "2026-11-10T08:00:00Z",
+      "ends_at": "2026-11-11T08:00:00Z",
+      "dismissible": true
+    }
+  ],
+  "menus": {
+    "projects.share": {
+      "state": "disabled",
+      "message": "Share dimatikan sementara, provider tunnel sedang down.",
+      "expires_at": "2026-11-11T08:00:00Z"
+    },
+    "decorations": { "badge": "new" }
+  },
+  "content_pages": [],
+  "sponsors": []
+}
+```
+
+#### Tanda tangan
+
+- Ed25519. Public key (maks. 2, untuk rotasi) ditanam di `src-tauri/src/config/remote_keys.rs`,
+  dipilih lewat `key_id`.
+- **Key terpisah dari key updater Tauri.** Bocornya satu key tidak boleh membuka yang lain.
+- Private key hanya di server `laravel-api` (env/secret), dipakai saat konfigurasi di-publish
+  dari dashboard.
+- App menolak payload yang: tanda tangannya tidak cocok, `schema` lebih tinggi dari yang
+  didukung, atau `issued_at` lebih lama dari cache yang sudah dipegang (mencegah server
+  "memutar balik" ke konfigurasi lama).
+
+#### Rust: `services::remote_config`
+
+- `fetch` saat app start, lalu tiap 6 jam selama app terbuka. Timeout 10 detik, pola yang sama
+  dengan `changelog`/`upgrade_notice`.
+- Verifikasi tanda tangan, lalu validasi dan bersihkan isi di Rust:
+  - id menu harus dari daftar tetap, menu inti tidak bisa `hidden`/`disabled`;
+  - URL hanya `https://`;
+  - panjang string dibatasi, tanggal harus valid;
+  - entri yang salah dibuang satu per satu, bukan seluruh payload.
+- Cache amplop asli (termasuk tanda tangan) ke `%REZURE_HOME%\etc\remote-config.json`, dan
+  diverifikasi ulang saat dibaca. File yang diedit manual tidak akan lolos.
+- Disimpan di `AppState`. Command `get_remote_config` mengembalikan hasil yang sudah difilter
+  untuk versi, OS, dan waktu sekarang. Event `remote-config-updated` saat ada perubahan.
+- Gambar (F4, F5) lewat aturan `donate_images`: alamat dibangun app, ukuran dan sha256
+  diverifikasi, SVG dicek bebas script.
+- Error memakai `AppError`, tidak ada `unwrap()` di jalur fetch/parse.
+
+#### Frontend
+
+- Store Pinia `remoteConfig`: memegang hasil `get_remote_config` dan mendengarkan
+  `remote-config-updated`.
+- `AppSidebar.vue` membaca state, label, badge, dan urutan dari store. Daftar menu bawaan tetap
+  di kode, store hanya menimpa properti yang diizinkan.
+- Router guard: route menu `disabled` diarahkan ke `FeatureUnavailableView.vue` yang
+  menampilkan pesannya.
+- Komponen baru: `AnnouncementBell.vue` (title bar + panel), `AnnouncementBanner.vue`,
+  `ContentPageView.vue`, `SponsorCard.vue`.
+- Status dibaca/ditutup (F1) dan setting "Show sponsor" (F5) disimpan di `settings.json` lewat
+  Rust, bukan `localStorage`.
+
+#### Privasi
+
+- Request hanya membawa `version`, `os`, `channel`. Tidak ada id, tidak ada data dari
+  telemetry.
+- `docs/telemetry-contract.md` dan README menyebut endpoint ini: apa yang dikirim dan kapan.
+
+---
+
+### Fase 4.8.1 — Fondasi
+
+#### Tasks
+
+- [ ] Kontrak `api-documentation/app-config-api.md`: endpoint, amplop, schema 1, aturan
+      validasi, ETag/`304`/`204`
+- [ ] Endpoint dan penandatanganan di `laravel-api` (repo sibling, di luar repo ini)
+- [ ] `config/remote_keys.rs` (public key + `key_id`), `services::remote_config` (fetch,
+      verifikasi, validasi, cache, timer 6 jam), state di `AppState`
+- [ ] Command `get_remote_config` dan event `remote-config-updated`
+- [ ] Store Pinia `remoteConfig` (belum ada UI)
+
+#### Test
+
+- Tanda tangan salah, `key_id` tidak dikenal, payload diubah satu byte: ditolak
+- `issued_at` lebih lama dari cache: ditolak
+- `schema` 2: ditolak, cache lama tetap dipakai
+- Cache diedit manual: ditolak saat dibaca, jatuh ke default
+- Offline: cache terakhir dipakai. Tanpa cache: default (kosong)
+- Entri dengan URL `http://`/`javascript:`, menu id tidak dikenal, menu inti `disabled`:
+  dibuang satu per satu, sisanya tetap dipakai
+
+#### Verifikasi
+
+- App dengan API dimatikan tetap jalan normal, tanpa error di UI
+
+### Fase 4.8.2 — Pengumuman (F1)
+
+#### Tasks
+
+- [ ] `AnnouncementBell.vue` di title bar + panel inbox
+- [ ] `AnnouncementBanner.vue` untuk `warning`/`critical`
+- [ ] Filter target (versi, OS, halaman, jendela waktu) di Rust
+- [ ] Status dibaca/ditutup per `id` di `settings.json`
+
+#### Test
+
+- Filter semver `min_version`/`max_version`, jendela waktu, OS
+- `critical` tidak bisa ditutup, `dismissible: false` dihormati
+
+#### Verifikasi
+
+- Pengumuman dari dashboard muncul tanpa restart (dalam 6 jam, atau segera saat app dibuka)
+
+### Fase 4.8.3 — Status dan custom menu (F2, F3)
+
+#### Tasks
+
+- [ ] Daftar id menu dan fitur yang tetap, dan daftar menu inti, di Rust
+- [ ] Sidebar membaca `hidden`/`disabled`/label/badge/tooltip/urutan dari store
+- [ ] Router guard + `FeatureUnavailableView.vue`
+- [ ] Fitur di dalam halaman (`projects.share`, `switch.install.*`, `decorations.browse`,
+      `support.feedback`) membaca state yang sama dan menampilkan pesannya di tempat
+
+#### Test
+
+- Menu inti tidak pernah `hidden`/`disabled` apa pun isi payload-nya
+- `expires_at` lewat: kembali `normal`
+
+#### Verifikasi
+
+- Menonaktifkan `projects.share` dari dashboard: tombol Share abu-abu dengan pesannya, project
+  lain tetap jalan
+
+### Fase 4.8.4 — Halaman konten (F4)
+
+#### Tasks
+
+- [ ] Schema blok (`heading`, `paragraph`, `list`, `image`, `button`, `callout`) + validasi Rust
+- [ ] `ContentPageView.vue`, route `/content/:id`, grup sidebar terpisah (maks. 3 entri)
+- [ ] Gambar lewat aturan `donate_images`
+
+#### Test
+
+- Blok tidak dikenal dibuang, teks yang mirip HTML ditampilkan sebagai teks, bukan dirender
+
+### Fase 4.8.5 — Slot sponsor (F5)
+
+#### Tasks
+
+- [ ] `SponsorCard.vue` di Services dan About, label "Sponsor"
+- [ ] Rotasi harian, jendela waktu
+- [ ] Toggle "Show sponsor" di Settings. Kalau mati, gambar tidak diunduh
+
+#### Test
+
+- Toggle mati: tidak ada request gambar sponsor
+- Gambar dengan sha256 salah tidak ditampilkan
+
+### Fase 4.8.6 — Dokumentasi
+
+- [ ] `docs/v1/remote-config.md` (Inggris): apa yang bisa dan tidak bisa diatur server, kenapa
+- [ ] `docs/telemetry-contract.md` dan README: endpoint baru, data yang dikirim
+- [ ] `docs/architecture.md`: modul `remote_config` dan aturan tanda tangan
+
+---
+
+### Keputusan (sudah ditetapkan desain ini)
+
+1. Tidak ada HTML/JS/CSS dari server. `csp` di `tauri.conf.json` sekarang `null`, jadi konten
+   mentah dari luar sama saja dengan menjalankan kode dengan akses `invoke()` ke Rust.
+2. Menu inti tidak bisa dimatikan dari server.
+3. Fail-open di semua kondisi gagal.
+4. Payload wajib bertanda tangan, dengan key yang terpisah dari updater.
+5. Tidak ada ad network. Sponsor adalah data biasa dari API sendiri.
+
+### Pertanyaan untuk maintainer
+
+1. **Notifikasi Windows (toast OS):** perlu untuk `critical`, atau cukup banner di dalam app?
+2. **Menu inti:** setuju `services`, `projects`, `databases`, `settings`? Ada yang mau ditambah
+   (misalnya `switch`)?
+3. **Hitung klik sponsor:** tidak dihitung sama sekali, atau lewat redirect anonim di
+   `rezure-api` (`/v1/sponsor/<id>/go`, tanpa id user)? Yang kedua memberi angka ke sponsor tapi
+   menambah satu hop.
+4. **Opt-out:** apakah user boleh mematikan remote config sepenuhnya? Usulan: tidak untuk
+   pengumuman dan kill switch (dibutuhkan untuk keselamatan), ya untuk sponsor (Fase 4.8.5).
+5. **Interval fetch:** 6 jam cukup, atau perlu lebih cepat untuk kill switch?
+6. **Dashboard:** halaman admin untuk mengisi semua ini di `laravel-api`, siapa yang
+   mengerjakan, dan apakah perlu preview sebelum publish?
+
+### Dependency ke Proyek Lain
+
+Berbeda dari Fase 4.1/4.3–4.7, fase ini **tidak** bisa selesai di `rezureapp` saja:
+
+- `api-documentation` — kontrak `app-config-api.md` (Fase 4.8.1)
+- `laravel-api` — endpoint `GET /v1/app-config`, penandatanganan payload, dan halaman admin
+  di dashboard untuk mengisi pengumuman, status menu, halaman konten, dan sponsor
+
+### Backlog (bukan Fase 4.8)
+
+- Menggabungkan `upgrade_notice` ke pengumuman F1
+- Target pengumuman berdasarkan service yang dipakai (butuh data telemetry, jadi perlu
+  persetujuan dan desain privasi tersendiri)
+- Lebih dari satu slot sponsor atau penempatan lain
+
+---
+
+## Fase 4.9 — MySQL sebagai engine yang bisa di-install (ide, belum dijadwalkan)
+
+**Status: IDE.** Dicatat dari diskusi dengan maintainer ("lain kali aja"). Belum ada task
+checklist; butuh keputusan dulu, sama seperti Fase 4.1/4.7.
+
+**Usulan maintainer:** Rezure menyediakan MySQL sebagai database default, dan MariaDB jadi
+pilihan yang bisa di-switch setelah di-install.
+
+### Kondisi sekarang
+
+- Yang bisa di-install Rezure hanya MariaDB (`mariadb_catalog`, on-demand).
+- MySQL hanya jalan untuk data directory yang **diadopsi** (mis. dari Laragon), memakai binary
+  milik tool itu sendiri.
+- Fondasinya sudah ada: `services::db_engine` membedakan `MySql`/`MariaDb` (family install
+  terpisah, `mysql` dan `mariadb`), cara bootstrap datadir MySQL (`--initialize-insecure`) sudah
+  tercatat di `docs/v1/database-profiles.md`, dan aturan "satu server MySQL-family jalan dalam
+  satu waktu" sudah berlaku.
+
+### Kenapa default tidak langsung diganti
+
+1. **Data tidak bisa pindah antar engine.** Datadir MariaDB tidak bisa dibuka MySQL dan
+   sebaliknya. User lama yang databasenya di MariaDB akan melihat database kosong kalau default
+   berubah. Pindah engine = folder data berbeda, bukan migrasi.
+2. **Checksum.** Katalog MariaDB bisa otomatis karena REST API-nya memberi sha256. Oracle tidak
+   punya index serupa; versi MySQL harus di-pin manual dengan checksum di `MANIFEST` (masalah
+   yang sama dengan Nginx di Fase 4.7). URL patch lama juga pindah ke halaman archive.
+3. **Ukuran.** Zip MySQL untuk Windows jauh lebih besar dari MariaDB, berat untuk download
+   pertama sebuah default.
+4. **Auth.** MySQL 8.4 memakai `caching_sha2_password` secara default dan `mysql_native_password`
+   nonaktif (dihapus di 9.x). Aplikasi atau client lama bisa gagal login.
+
+### Rekomendasi
+
+- Tambah **MySQL 8.4 LTS** di halaman Switch, sejajar MariaDB, sama-sama on-demand (8.0 sudah EOL).
+- Pilihan engine ditanyakan saat setup database pertama ("MySQL 8.4, sama dengan Laragon dan
+  kebanyakan hosting" / "MariaDB, lebih ringan, sama dengan XAMPP"), bukan default yang dipaksa.
+- User lama tetap di MariaDB, tidak ada yang berubah otomatis.
+- Saat pindah engine, beri peringatan bahwa database di engine lama tidak ikut pindah, dan
+  arahkan ke export/import yang sudah ada.
+
+### Pertanyaan untuk maintainer
+
+1. MySQL dipilih otomatis di layar setup untuk install baru, atau user selalu memilih sendiri?
+2. Versi MySQL mana yang di-pin selain 8.4 LTS, kalau ada?
+
+### Dependency ke Proyek Lain
+
+Tidak ada — sepenuhnya perubahan internal `rezureapp`.
+
+---
+
 ## Status
 
 - **Fase 4.1** — belum ada task checklist resmi. Langkah berikutnya: tulis proposal desain
@@ -387,3 +788,9 @@ Tidak ada — sepenuhnya perubahan internal `rezureapp`.
 - **Fase 4.7** — belum ada task checklist resmi, sama seperti Fase 4.1 (dipindah dari open question
   di v3 Fase 3.10). Rekomendasi sudah ada (opsi b: tabel pinned beberapa versi, pola `php_ext.rs`)
   — tinggal dikonfirmasi maintainer, baru ditulis jadi task list.
+- **Fase 4.8** — draf, belum ada kode. Menunggu jawaban maintainer atas 6 pertanyaan di
+  bagiannya (penempatan notifikasi OS, daftar menu inti, hitung klik sponsor, opt-out, interval
+  fetch, pengerjaan dashboard). Butuh pekerjaan di `laravel-api` dan `api-documentation` juga.
+- **Fase 4.9** — ide, belum ada task. Rekomendasi sudah ada (MySQL 8.4 LTS sebagai pilihan
+  setara di Switch, dipilih user saat setup pertama, user lama tetap di MariaDB) — tinggal
+  dijawab dua pertanyaannya.

@@ -8,7 +8,8 @@ use crate::services::dev_servers::{self, DevSpec};
 use crate::services::frameworks::{self, FrameworkCatalog, ServeProfile};
 use crate::services::scaffold::ProjectTemplate;
 use crate::services::{
-    hosts, launcher, projects, scaffold, telemetry, vhosts, ServiceManager, ServiceStatus,
+    hosts, launcher, project_stack, projects, scaffold, telemetry, vhosts, ServiceManager,
+    ServiceStatus,
 };
 use crate::utils::error::AppError;
 
@@ -153,6 +154,12 @@ pub fn list_projects(
         }
         Err(err) => log::warn!("failed to load project Node.js version overrides: {err}"),
     }
+    drop(conn);
+    // After the pins: what serves a project depends on them.
+    project_stack::annotate(
+        &mut detected,
+        &project_stack::Installed::gather(manager.list()),
+    );
 
     Ok(detected)
 }

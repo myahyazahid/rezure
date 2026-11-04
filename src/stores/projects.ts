@@ -425,6 +425,21 @@ export const useProjectsStore = defineStore('projects', () => {
     nodeVersionError.value = null
   }
 
+  /** The project whose stack and requirements dialog is open, or null —
+   *  same shape as `phpVersionModalFor` above. Pinning from it goes through
+   *  `setPhpVersion`/`setNodeVersion`, so their errors show there too. */
+  const stackModalFor = ref<string | null>(null)
+
+  function openStackModal(id: string) {
+    phpVersionError.value = null
+    nodeVersionError.value = null
+    stackModalFor.value = id
+  }
+
+  function closeStackModal() {
+    stackModalFor.value = null
+  }
+
   /**
    * Starts sharing a project publicly via a Cloudflare Quick Tunnel, or
    * reuses one already running for it. The first call for a fresh install
@@ -518,6 +533,9 @@ export const useProjectsStore = defineStore('projects', () => {
     setNodeVersion,
     openNodeVersionModal,
     closeNodeVersionModal,
+    stackModalFor,
+    openStackModal,
+    closeStackModal,
     syncingHosts,
     hostsError,
     openError,

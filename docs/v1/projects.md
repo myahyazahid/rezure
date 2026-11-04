@@ -246,6 +246,38 @@ in your settings folder: see [Configuring PHP](php-versions.md#configuring-php).
 An install reaches new requests only after the PHP service restarts; the copy already serving
 requests read its configuration when it started.
 
+### Stack & requirements
+
+The **i** beside a project's name summarises what the project is built on and what it needs:
+frameworks and their versions, PHP, Node.js, the package manager, and the database. Hover it for
+one line; click it for the full list, with a fix next to anything that doesn't fit. It's grey when
+everything fits and amber when something doesn't. A project whose files say nothing gets no icon.
+
+Only files are read; nothing is run, so this is cheap enough to do on every listing.
+
+| What | Read from |
+|---|---|
+| Frameworks | `composer.lock` (Laravel, CodeIgniter 4, Symfony, Filament, Livewire, …), `system/core/CodeIgniter.php` (CodeIgniter 3), `wp-includes/version.php` (WordPress), and `node_modules` or `package-lock.json` (Next.js, Nuxt, Astro, Vite, React, Vue, …). Before an install, the range from `composer.json`/`package.json`, marked *not installed*. |
+| PHP | `require.php` in `composer.json`; `vendor/composer/platform_check.php`, the minimum Composer computed for the packages actually installed; WordPress's `$required_php_version`. |
+| Node.js | `engines.node`; `.nvmrc`, `.node-version` and `volta.node`, read as "any release of that major"; and `engines.node` of the framework and build-tool packages in use (Next.js, Vite, Angular, `laravel-vite-plugin`, …). Other packages' `engines` aren't counted: npm only warns about them, and an old plugin declaring `^14` shouldn't flag a project that runs fine. |
+| Package manager | `packageManager` in `package.json`, otherwise the lockfile. `engines.npm` is checked against the npm that comes with the Node.js serving the project. |
+| Database | `DB_CONNECTION`, `DATABASE_URL` or CodeIgniter's `database.default.DBDriver` in `.env` (or `.env.example` before one exists), then the framework's database config, Prisma's `datasource`, then driver packages (`pg`, `mysql2`, `mongoose`, …). |
+
+Each requirement is checked against the version that serves the project: its pin while that
+version is installed, the global default otherwise. When it doesn't fit, the dialog offers
+**Pin to** the newest installed version that does, or, when none does, says which line to install
+on the Switch page. The PHP and Node.js version pickers mark every installed version **Fits** or
+**Doesn't fit**.
+
+Constraints follow each tool's own rules: Composer's for PHP (`~8.1` allows 8.x, a bare `8.2`
+means exactly 8.2.0), npm's for Node.js (`~8.1` allows 8.1.x, a bare `20` means any 20.x). One
+Rezure can't parse is shown as unreadable, never as a mismatch.
+
+For databases, only the engine is checked, plus WordPress's stated MySQL minimum. Most
+frameworks don't state a database version, so Rezure doesn't guess one. A stopped database isn't
+a problem; it's started when you need it. MongoDB is reported as something Rezure doesn't
+provide.
+
 ---
 
 ## How it works under the hood
