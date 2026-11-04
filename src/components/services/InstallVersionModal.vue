@@ -103,10 +103,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
-  <div
-    class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
-    @click.self="close"
-  >
+  <div class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4">
     <div class="glass-strong flex max-h-[85vh] w-full max-w-xl flex-col rounded-3xl">
       <div class="flex items-start justify-between gap-4 p-6 pb-4">
         <div class="min-w-0">

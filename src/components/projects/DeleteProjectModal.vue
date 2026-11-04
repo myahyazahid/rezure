@@ -3,6 +3,7 @@ import { onMounted, onUnmounted, watch } from 'vue'
 import { useProjectsStore } from '@/stores/projects'
 import { useTypedConfirm } from '@/composables/useTypedConfirm'
 import type { ProjectInfo } from '@/types/project'
+import ModalCloseButton from '@/components/common/ModalCloseButton.vue'
 
 const props = defineProps<{ project: ProjectInfo }>()
 const emit = defineEmits<{ close: [] }>()
@@ -35,16 +36,14 @@ watch(typed, () => {
 </script>
 
 <template>
-  <div
-    class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
-    @click.self="close"
-  >
+  <div class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4">
     <div
-      class="glass-strong w-full max-w-md rounded-3xl p-6"
+      class="glass-strong relative w-full max-w-md rounded-3xl p-6"
       role="alertdialog"
       aria-labelledby="delete-project-title"
     >
-      <div class="flex items-start gap-3">
+      <ModalCloseButton :disabled="store.deleting" @click="close" />
+      <div class="flex items-start gap-3 pr-8">
         <span
           class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-500/15 text-red-600 dark:text-red-400"
         >

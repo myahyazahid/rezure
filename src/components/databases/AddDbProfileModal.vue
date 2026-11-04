@@ -4,6 +4,7 @@ import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
 import { useDbProfilesStore } from '@/stores/dbProfiles'
 import { ENGINE_LABEL } from '@/types/dbProfile'
 import type { DetectedDatadir } from '@/types/dbProfile'
+import ModalCloseButton from '@/components/common/ModalCloseButton.vue'
 
 const emit = defineEmits<{ close: [] }>()
 const store = useDbProfilesStore()
@@ -54,12 +55,12 @@ async function addManual() {
 </script>
 
 <template>
-  <div
-    class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
-    @click.self="emit('close')"
-  >
-    <div class="glass-strong max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-2xl p-6">
-      <h2 class="text-lg font-bold text-neutral-900 dark:text-neutral-100">Add data directory</h2>
+  <div class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div class="glass-strong relative max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-2xl p-6">
+      <ModalCloseButton @click="emit('close')" />
+      <h2 class="pr-8 text-lg font-bold text-neutral-900 dark:text-neutral-100">
+        Add data directory
+      </h2>
       <p class="mt-1 text-sm text-neutral-500">
         Rezure runs one database server at a time and points it at the directory you pick. Your data
         is never copied, moved or converted.

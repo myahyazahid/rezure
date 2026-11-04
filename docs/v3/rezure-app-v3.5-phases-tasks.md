@@ -452,6 +452,22 @@ pun.
 - [x] Modal dilebarkan (`max-w-4xl`) dan kolomnya diseimbangkan: kartu Master Password
       (`OdooMasterPasswordCard.vue`) ada di kolom kanan sebelum connect, dan pindah ke bawah
       tabel `odoo.conf` di kolom kiri setelah connect, saat kolom kiri tinggal tabelnya saja
+- [x] **Catatan di `odoo.conf`** (permintaan maintainer: user bingung membedakan master password
+      dengan `db_password` saat membuka file-nya). Connect menulis blok komentar `;` berbahasa
+      Indonesia tepat di bawah `[options]` (`odoo::notes`/`set_notes`): arti `db_host`/`db_port`,
+      `db_user`/`db_password`, `pg_path`, dan `admin_passwd` (teks biasa, hash `$pbkdf2`, atau
+      tidak ada → `admin`), URL database manager sesuai `http_port`, nama service untuk
+      restart, dan letak `odoo.conf.rezure-backup`. Ditandai penanda awal/akhir supaya Connect
+      ulang mengganti, bukan menumpuk. Hanya ASCII, karena Odoo membaca file ini dengan code
+      page ANSI Windows. Hilang kalau Odoo sendiri menulis ulang file-nya (ganti master
+      password lewat database manager)
+- [x] **Modal tidak lagi tertutup kalau area di luarnya diklik** (permintaan maintainer: klik
+      nyasar membuang isian). `@click.self` dihapus dari semua scrim modal. Jalan keluarnya
+      sekarang tombol **X** di pojok kanan atas, Cancel/Close, atau Escape. Komponen baru
+      `common/ModalCloseButton.vue` (absolute, panel butuh `relative` dan header `pr-8`), dipakai
+      di 20 modal. Odoo, Install a version, Browse stickers, dan New connection sudah punya X
+      sendiri. X ikut nonaktif selama tombol Close-nya juga menolak (misalnya saat import atau
+      create berjalan). Dropdown menu tetap tertutup kalau diklik di luar
 - [x] Error baru yang umum (bukan khusus Odoo): `ExternalAppNotFound`,
       `ExternalAppSetupCancelled`, `ExternalAppSetupFailed`
 - [x] `docs/v1/databases.md` (Users, Connect an app, Odoo) dan `docs/v1/database-profiles.md`

@@ -20,6 +20,7 @@ import DevServerFailureCard from '@/components/projects/DevServerFailureCard.vue
 import DeleteProjectModal from '@/components/projects/DeleteProjectModal.vue'
 import BusyOverlay from '@/components/common/BusyOverlay.vue'
 import type { ProjectInfo } from '@/types/project'
+import ModalCloseButton from '@/components/common/ModalCloseButton.vue'
 
 const store = useProjectsStore()
 const devServers = useDevServersStore()
@@ -516,10 +517,10 @@ function lastOpenedLabel(project: { lastOpenedAt: number | null; openCount: numb
     <div
       v-if="confirmingUnlink"
       class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
-      @click.self="confirmingUnlink = null"
     >
-      <div class="glass-strong w-full max-w-md rounded-2xl p-6">
-        <h2 class="text-lg font-bold text-neutral-900 dark:text-neutral-100">
+      <div class="glass-strong relative w-full max-w-md rounded-2xl p-6">
+        <ModalCloseButton @click="confirmingUnlink = null" />
+        <h2 class="pr-8 text-lg font-bold text-neutral-900 dark:text-neutral-100">
           Remove this project from Rezure?
         </h2>
         <p class="mt-2 text-sm text-neutral-500">

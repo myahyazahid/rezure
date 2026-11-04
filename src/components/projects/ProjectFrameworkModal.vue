@@ -4,6 +4,7 @@ import { useProjectsStore } from '@/stores/projects'
 import { servedFolder, servedFolderLabel } from '@/composables/servedFolder'
 import FrameworkPicker from '@/components/projects/FrameworkPicker.vue'
 import type { FrameworkChoice, ProjectInfo } from '@/types/project'
+import ModalCloseButton from '@/components/common/ModalCloseButton.vue'
 
 const store = useProjectsStore()
 
@@ -47,10 +48,10 @@ function save() {
   <div
     v-if="store.frameworkModalFor && project"
     class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
-    @click.self="store.closeFrameworkModal()"
   >
-    <div class="glass-strong w-full max-w-lg rounded-2xl p-6">
-      <h2 class="text-lg font-bold text-neutral-900 dark:text-neutral-100">
+    <div class="glass-strong relative w-full max-w-lg rounded-2xl p-6">
+      <ModalCloseButton @click="store.closeFrameworkModal()" />
+      <h2 class="pr-8 text-lg font-bold text-neutral-900 dark:text-neutral-100">
         Framework
         <span class="font-normal text-neutral-400">· {{ project.name }}</span>
       </h2>

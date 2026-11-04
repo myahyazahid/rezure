@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useDatabasesStore } from '@/stores/databases'
+import ModalCloseButton from '@/components/common/ModalCloseButton.vue'
 
 const emit = defineEmits<{ close: [] }>()
 
@@ -90,12 +91,10 @@ watch(name, () => {
 </script>
 
 <template>
-  <div
-    class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
-    @click.self="close"
-  >
-    <div class="glass-strong w-full max-w-md rounded-3xl p-6">
-      <h2 class="text-xl font-bold tracking-tight">New database</h2>
+  <div class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div class="glass-strong relative w-full max-w-md rounded-3xl p-6">
+      <ModalCloseButton :disabled="store.creating" @click="close" />
+      <h2 class="pr-8 text-xl font-bold tracking-tight">New database</h2>
       <p class="mt-0.5 text-sm text-neutral-500">
         Created on {{ store.server?.label || 'the database server' }} - empty, with no tables.
       </p>

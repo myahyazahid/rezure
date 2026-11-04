@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { BinaryStatus } from '@/types/binary'
+import ModalCloseButton from '@/components/common/ModalCloseButton.vue'
 
 /**
  * The step before installing one of Microsoft's packages: what's about to
@@ -36,12 +37,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
-  <div
-    class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
-    @click.self="emit('close')"
-  >
-    <div class="glass-strong w-full max-w-md rounded-3xl p-6">
-      <h2 class="text-xl font-bold tracking-tight">Install {{ pkg.name }}</h2>
+  <div class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div class="glass-strong relative w-full max-w-md rounded-3xl p-6">
+      <ModalCloseButton @click="emit('close')" />
+      <h2 class="pr-8 text-xl font-bold tracking-tight">Install {{ pkg.name }}</h2>
       <p class="mt-1 text-sm text-neutral-500">Version {{ pkg.version }}, from Microsoft.</p>
 
       <ul class="mt-4 flex flex-col gap-2 text-sm text-neutral-600 dark:text-neutral-300">

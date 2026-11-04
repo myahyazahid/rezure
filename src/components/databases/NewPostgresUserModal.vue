@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { usePostgresUsersStore } from '@/stores/postgresUsers'
+import ModalCloseButton from '@/components/common/ModalCloseButton.vue'
 
 /**
  * The "new user" form, stacked over `PostgresUsersModal`. It creates the
@@ -119,15 +120,13 @@ const FIELD_CLASS =
   <!-- Teleported so the users modal's card doesn't clip it; z-55 sits above
        that modal (z-50) and under BusyOverlay (z-60). -->
   <Teleport to="body">
-    <div
-      class="glass-scrim fixed inset-0 z-55 flex items-center justify-center p-4"
-      @click.self="close"
-    >
+    <div class="glass-scrim fixed inset-0 z-55 flex items-center justify-center p-4">
       <form
-        class="glass-strong flex max-h-[88vh] w-full max-w-lg flex-col rounded-3xl p-6"
+        class="glass-strong relative flex max-h-[88vh] w-full max-w-lg flex-col rounded-3xl p-6"
         @submit.prevent="submit"
       >
-        <h2 class="text-xl font-bold tracking-tight">New PostgreSQL user</h2>
+        <ModalCloseButton :disabled="store.busy === 'new'" @click="close" />
+        <h2 class="pr-8 text-xl font-bold tracking-tight">New PostgreSQL user</h2>
         <p class="mt-1 text-sm text-neutral-500">
           Pick what it's for - the options below follow, and stay editable.
         </p>

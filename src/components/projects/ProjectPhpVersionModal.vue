@@ -2,6 +2,7 @@
 import { computed, watch } from 'vue'
 import { useProjectsStore } from '@/stores/projects'
 import { usePhpStore } from '@/stores/php'
+import ModalCloseButton from '@/components/common/ModalCloseButton.vue'
 
 const store = useProjectsStore()
 const phpStore = usePhpStore()
@@ -29,10 +30,10 @@ function choose(version: string | null) {
   <div
     v-if="store.phpVersionModalFor"
     class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
-    @click.self="store.closePhpVersionModal()"
   >
-    <div class="glass-strong w-full max-w-lg rounded-2xl p-6">
-      <h2 class="text-lg font-bold text-neutral-900 dark:text-neutral-100">
+    <div class="glass-strong relative w-full max-w-lg rounded-2xl p-6">
+      <ModalCloseButton @click="store.closePhpVersionModal()" />
+      <h2 class="pr-8 text-lg font-bold text-neutral-900 dark:text-neutral-100">
         PHP version
         <span v-if="project" class="font-normal text-neutral-400">· {{ project.name }}</span>
       </h2>

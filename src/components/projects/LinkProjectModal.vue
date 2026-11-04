@@ -5,6 +5,7 @@ import { useProjectsStore } from '@/stores/projects'
 import { servedFolderLabel } from '@/composables/servedFolder'
 import FrameworkPicker from '@/components/projects/FrameworkPicker.vue'
 import type { FrameworkChoice, LinkPreview } from '@/types/project'
+import ModalCloseButton from '@/components/common/ModalCloseButton.vue'
 
 const emit = defineEmits<{ close: [] }>()
 const store = useProjectsStore()
@@ -81,12 +82,12 @@ async function confirm() {
 </script>
 
 <template>
-  <div
-    class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
-    @click.self="emit('close')"
-  >
-    <div class="glass-strong w-full max-w-lg rounded-2xl p-6">
-      <h2 class="text-lg font-bold text-neutral-900 dark:text-neutral-100">Add existing folder</h2>
+  <div class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div class="glass-strong relative w-full max-w-lg rounded-2xl p-6">
+      <ModalCloseButton @click="emit('close')" />
+      <h2 class="pr-8 text-lg font-bold text-neutral-900 dark:text-neutral-100">
+        Add existing folder
+      </h2>
       <p class="mt-1 text-sm text-neutral-500">
         Serve a project from wherever it already lives. Rezure records the path and nothing else -
         the folder isn't copied, moved, or written to.

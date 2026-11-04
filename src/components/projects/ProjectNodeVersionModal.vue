@@ -2,6 +2,7 @@
 import { computed, watch } from 'vue'
 import { useProjectsStore } from '@/stores/projects'
 import { useNodeStore } from '@/stores/node'
+import ModalCloseButton from '@/components/common/ModalCloseButton.vue'
 
 const store = useProjectsStore()
 const nodeStore = useNodeStore()
@@ -29,10 +30,10 @@ function choose(version: string | null) {
   <div
     v-if="store.nodeVersionModalFor"
     class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
-    @click.self="store.closeNodeVersionModal()"
   >
-    <div class="glass-strong w-full max-w-lg rounded-2xl p-6">
-      <h2 class="text-lg font-bold text-neutral-900 dark:text-neutral-100">
+    <div class="glass-strong relative w-full max-w-lg rounded-2xl p-6">
+      <ModalCloseButton @click="store.closeNodeVersionModal()" />
+      <h2 class="pr-8 text-lg font-bold text-neutral-900 dark:text-neutral-100">
         Node.js version
         <span v-if="project" class="font-normal text-neutral-400">· {{ project.name }}</span>
       </h2>

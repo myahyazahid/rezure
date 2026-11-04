@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { useDbConnectionsStore } from '@/stores/dbConnections'
 import type { DbConnectionStatus } from '@/types/dbConnection'
+import ModalCloseButton from '@/components/common/ModalCloseButton.vue'
 
 const props = defineProps<{ connection: DbConnectionStatus }>()
 const emit = defineEmits<{ close: []; unlocked: [] }>()
@@ -26,12 +27,10 @@ async function submit() {
 </script>
 
 <template>
-  <div
-    class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
-    @click.self="emit('close')"
-  >
-    <div class="glass-strong w-full max-w-sm rounded-2xl p-6">
-      <h2 class="text-lg font-bold text-neutral-900 dark:text-neutral-100">
+  <div class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div class="glass-strong relative w-full max-w-sm rounded-2xl p-6">
+      <ModalCloseButton @click="emit('close')" />
+      <h2 class="pr-8 text-lg font-bold text-neutral-900 dark:text-neutral-100">
         Password for {{ props.connection.name }}
       </h2>
       <p class="mt-1 font-mono text-xs text-neutral-500">

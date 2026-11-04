@@ -5,6 +5,7 @@ import { useServicesStore } from '@/stores/services'
 import BasePill from '@/components/common/BasePill.vue'
 import LeafLoader from '@/components/common/LeafLoader.vue'
 import TechIcon from '@/components/common/TechIcon.vue'
+import ModalCloseButton from '@/components/common/ModalCloseButton.vue'
 
 /**
  * Picks which services the Services page shows. Someone on MySQL has no use
@@ -91,12 +92,10 @@ const ROW_BUTTON_CLASS =
 </script>
 
 <template>
-  <div
-    class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
-    @click.self="close"
-  >
-    <div class="glass-strong flex max-h-[85vh] w-full max-w-lg flex-col rounded-3xl p-6">
-      <h2 class="text-xl font-bold tracking-tight">Manage services</h2>
+  <div class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div class="glass-strong relative flex max-h-[85vh] w-full max-w-lg flex-col rounded-3xl p-6">
+      <ModalCloseButton :disabled="busyId !== null" @click="close" />
+      <h2 class="pr-8 text-xl font-bold tracking-tight">Manage services</h2>
       <p class="mt-1 text-sm text-neutral-500">
         Choose what the Services page shows. Removing a service doesn't uninstall it or touch its
         data - add it back any time.

@@ -417,7 +417,8 @@ The presets (**App**, **Django / Rails**, **Odoo**) only fill these in. A passwo
 Rezure's server lets local connections in without checking one. Set one anyway (**Generate**
 makes one), so the app's settings keep working on a real server. Rezure doesn't store it.
 
-**Connect an app** on a user shows its settings in the form each framework reads: a
+**App config** on a user shows the settings to paste into an app so it logs in as that user. It
+doesn't connect or change anything by itself. The settings come in the form each framework reads: a
 `postgresql://` URL, Laravel's `.env`, `DATABASE_URL` for Django, Node and Prisma, Rails'
 `database.yml`, JDBC, and `odoo.conf`. Right after creating a user they include the password
 just typed. Later, Rezure no longer knows it, so the password is left blank.
@@ -435,7 +436,12 @@ server with one administrator prompt:
 1. Creates the `odoo` login, allowed to create databases.
 2. Sets `db_host`, `db_port`, `db_user`, `db_password` and `pg_path` in `odoo.conf`. Without
    `pg_path`, Odoo's database manager can't find `pg_dump` for backups. The original file is kept
-   as `odoo.conf.rezure-backup`. Every other line is left as it was.
+   as `odoo.conf.rezure-backup`. Every other line is left as it was. A block of `;` comments
+   (in Indonesian) goes right under `[options]`. It explains what each of those lines is for,
+   where the master password is (`admin_passwd`), and that changes need an Odoo restart.
+   Connecting again replaces the block instead of adding a second copy. Odoo drops it when it
+   rewrites the file itself, for example after the master password is changed in its database
+   manager.
 3. Restarts Odoo's service, if it's running.
 4. Optionally stops Odoo's own PostgreSQL service and sets it to Manual, since both servers use
    port 5432. If that service is running, this step is required.

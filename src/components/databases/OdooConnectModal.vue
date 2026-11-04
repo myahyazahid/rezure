@@ -124,10 +124,7 @@ const SECTION_TITLE = 'text-[11px] font-semibold tracking-wide text-neutral-500 
 </script>
 
 <template>
-  <div
-    class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
-    @click.self="close"
-  >
+  <div class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4">
     <div class="glass-strong flex max-h-[90vh] w-full max-w-4xl flex-col rounded-3xl">
       <!-- Header -->
       <div class="flex items-start gap-3.5 px-6 pt-6">

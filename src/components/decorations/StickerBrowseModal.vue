@@ -115,10 +115,7 @@ const CHIP_BASE = 'rounded-full px-2.5 py-0.5 text-[11px] font-semibold capitali
 </script>
 
 <template>
-  <div
-    class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
-    @click.self="emit('close')"
-  >
+  <div class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4">
     <div
       role="dialog"
       aria-modal="true"

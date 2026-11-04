@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import QRCode from 'qrcode'
 import type { CryptoWallet } from '@/types/donate'
+import ModalCloseButton from '@/components/common/ModalCloseButton.vue'
 
 /**
  * One wallet's QR code, large enough to scan from across a desk.
@@ -36,17 +37,15 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
-  <div
-    class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
-    @click.self="emit('close')"
-  >
+  <div class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4">
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="wallet-qr-title"
-      class="glass-strong max-h-[92vh] w-full max-w-sm overflow-y-auto rounded-2xl p-6 text-center"
+      class="glass-strong relative max-h-[92vh] w-full max-w-sm overflow-y-auto rounded-2xl p-6 text-center"
     >
-      <div class="flex items-center justify-center gap-2">
+      <ModalCloseButton @click="emit('close')" />
+      <div class="flex items-center justify-center gap-2 px-8">
         <img
           v-if="wallet.icon"
           :src="wallet.icon.dataUrl"

@@ -276,10 +276,7 @@ function switchClass(on: boolean) {
 </script>
 
 <template>
-  <div
-    class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-6"
-    @click.self="emit('close')"
-  >
+  <div class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-6">
     <div
       role="dialog"
       aria-modal="true"

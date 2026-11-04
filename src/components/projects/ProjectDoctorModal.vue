@@ -6,6 +6,7 @@ import { useServicesStore } from '@/stores/services'
 import { useBinariesStore } from '@/stores/binaries'
 import LicenseConsentModal from '@/components/common/LicenseConsentModal.vue'
 import { useLicensedInstall } from '@/composables/useLicensedInstall'
+import ModalCloseButton from '@/components/common/ModalCloseButton.vue'
 
 const store = useProjectsStore()
 const phpStore = usePhpStore()
@@ -206,10 +207,10 @@ async function install(name: string) {
   <div
     v-if="store.doctorFor"
     class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
-    @click.self="store.closeDoctor()"
   >
-    <div class="glass-strong w-full max-w-lg rounded-2xl p-6">
-      <h2 class="text-lg font-bold text-neutral-900 dark:text-neutral-100">
+    <div class="glass-strong relative w-full max-w-lg rounded-2xl p-6">
+      <ModalCloseButton @click="store.closeDoctor()" />
+      <h2 class="pr-8 text-lg font-bold text-neutral-900 dark:text-neutral-100">
         Requirements check
         <span v-if="project" class="font-normal text-neutral-400">· {{ project.name }}</span>
       </h2>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useDatabasesStore } from '@/stores/databases'
+import ModalCloseButton from '@/components/common/ModalCloseButton.vue'
 
 const props = defineProps<{ file: string }>()
 const emit = defineEmits<{ close: [] }>()
@@ -88,15 +89,13 @@ watch(name, () => {
 </script>
 
 <template>
-  <div
-    class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
-    @click.self="close"
-  >
-    <div class="glass-strong w-full max-w-md rounded-3xl p-6">
-      <h2 class="text-xl font-bold tracking-tight">
+  <div class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div class="glass-strong relative w-full max-w-md rounded-3xl p-6">
+      <ModalCloseButton :disabled="store.importing" @click="close" />
+      <h2 class="pr-8 text-xl font-bold tracking-tight">
         {{ isBackup ? 'Restore .bak' : 'Import .sql' }}
       </h2>
-      <p class="mt-0.5 truncate font-mono text-xs text-neutral-500" :title="props.file">
+      <p class="mt-0.5 truncate pr-8 font-mono text-xs text-neutral-500" :title="props.file">
         {{ props.file }}
       </p>
 

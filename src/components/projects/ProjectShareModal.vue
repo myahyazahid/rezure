@@ -2,6 +2,7 @@
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { useProjectsStore } from '@/stores/projects'
 import LeafLoader from '@/components/common/LeafLoader.vue'
+import ModalCloseButton from '@/components/common/ModalCloseButton.vue'
 
 const store = useProjectsStore()
 
@@ -59,10 +60,10 @@ onUnmounted(() => {
   <div
     v-if="store.shareModalFor"
     class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
-    @click.self="store.closeShareModal()"
   >
-    <div class="glass-strong w-full max-w-lg rounded-2xl p-6">
-      <h2 class="text-lg font-bold text-neutral-900 dark:text-neutral-100">
+    <div class="glass-strong relative w-full max-w-lg rounded-2xl p-6">
+      <ModalCloseButton @click="store.closeShareModal()" />
+      <h2 class="pr-8 text-lg font-bold text-neutral-900 dark:text-neutral-100">
         Sharing this project
         <span v-if="project" class="font-normal text-neutral-400">· {{ project.name }}</span>
       </h2>

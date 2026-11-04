@@ -10,6 +10,7 @@ import BasePill from '@/components/common/BasePill.vue'
 import LeafLoader from '@/components/common/LeafLoader.vue'
 import ServiceLogPanel from '@/components/services/ServiceLogPanel.vue'
 import DevServerFailureCard from '@/components/projects/DevServerFailureCard.vue'
+import ModalCloseButton from '@/components/common/ModalCloseButton.vue'
 
 /**
  * Every `proxy` project's dev server: the port nginx sends its domain to,
@@ -218,12 +219,10 @@ const ROW_BUTTON_CLASS =
 </script>
 
 <template>
-  <div
-    class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
-    @click.self="close"
-  >
-    <div class="glass-strong flex max-h-[88vh] w-full max-w-3xl flex-col rounded-3xl p-6">
-      <div class="flex items-start justify-between gap-4">
+  <div class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div class="glass-strong relative flex max-h-[88vh] w-full max-w-3xl flex-col rounded-3xl p-6">
+      <ModalCloseButton @click="close" />
+      <div class="flex items-start justify-between gap-4 pr-8">
         <div>
           <h2 class="text-xl font-bold tracking-tight">Dev servers</h2>
           <p class="mt-1 text-sm text-neutral-500">

@@ -170,16 +170,21 @@ fn parse_options(content: &str) -> HashMap<String, String> {
     options
 }
 
+/// The line ending `content` already uses.
+fn newline_of(content: &str) -> &'static str {
+    if content.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    }
+}
+
 /// `content` with each of `values` set in `[options]`: an existing line
 /// rewritten in place, a missing key added at the end of the section, every
 /// other line — comments, addons paths, the admin password — untouched.
 /// Keeps the file's own line endings.
 fn set_options(content: &str, values: &[(&str, String)]) -> String {
-    let newline = if content.contains("\r\n") {
-        "\r\n"
-    } else {
-        "\n"
-    };
+    let newline = newline_of(content);
     let mut lines: Vec<String> = content.lines().map(str::to_string).collect();
     let mut section: Option<(usize, usize)> = None; // [options] header, last line
     let mut in_options = false;
@@ -226,6 +231,95 @@ fn set_options(content: &str, values: &[(&str, String)]) -> String {
     let mut out = lines.join(newline);
     out.push_str(newline);
     out
+}
+
+const NOTES_BEGIN: &str = "; ===== Catatan Rezure";
+const NOTES_END: &str = "; ===== Akhir catatan Rezure";
+
+/// What each line Rezure touches in `odoo.conf` is for, and where the master
+/// password is: users opening the file to find it kept mixing it up with
+/// `db_password`. Indonesian, at the maintainer's request. ASCII only: Odoo
+/// reads the file in Windows' ANSI code page, where some UTF-8 bytes fail.
+fn notes(http_port: u16, service: Option<&str>) -> Vec<String> {
+    let service = service.unwrap_or("odoo-server-...");
+    [
+        format!("{NOTES_BEGIN}: penjelasan isi file ini ====="),
+        "; Ditulis Rezure saat Odoo disambungkan ke PostgreSQL Rezure, dan ditulis ulang".into(),
+        "; setiap kali disambungkan lagi. Baris yang diawali ; hanya catatan, Odoo tidak".into(),
+        "; membacanya.".into(),
+        ";".into(),
+        "; db_host, db_port".into(),
+        ";   Alamat PostgreSQL Rezure. Nyalakan PostgreSQL di Rezure sebelum membuka Odoo.".into(),
+        "; db_user, db_password".into(),
+        ";   Login PostgreSQL khusus Odoo (Odoo menolak jalan sebagai \"postgres\"), dibuat".into(),
+        ";   Rezure dengan password acak. BUKAN password masuk ke Odoo dan BUKAN master".into(),
+        ";   password. Jangan diubah sendiri: login di PostgreSQL tidak ikut berubah.".into(),
+        "; pg_path".into(),
+        ";   Folder pg_dump/pg_restore Rezure, dipakai Odoo untuk backup dan restore database."
+            .into(),
+        "; admin_passwd".into(),
+        ";   MASTER PASSWORD Odoo: yang diminta halaman Manage Databases".into(),
+        format!(
+            ";   (http://localhost:{http_port}/web/database/manager) saat membuat, menduplikat,"
+        ),
+        ";   backup, restore, atau menghapus database.".into(),
+        ";   - Isinya teks biasa: itulah master password-nya, ketik persis seperti tertulis."
+            .into(),
+        ";   - Diawali $pbkdf2-sha512$: sudah di-hash Odoo, aslinya tidak bisa dibaca lagi.".into(),
+        ";     Ganti dengan teks biasa, misalnya  admin_passwd = PasswordBaru123".into(),
+        ";   - Barisnya tidak ada: master password-nya \"admin\".".into(),
+        ";   Ini juga bukan password login user Odoo (yang di halaman /web/login).".into(),
+        ";".into(),
+        "; Perubahan di file ini baru dipakai setelah service Odoo di-restart: tombol Restart"
+            .into(),
+        format!("; di Rezure, atau services.msc -> {service} -> Restart."),
+        "; File ini ada di Program Files, jadi simpan dengan Notepad yang dibuka sebagai".into(),
+        "; Administrator (tombol Open di Rezure sudah begitu).".into(),
+        "; Kalau master password diganti lewat halaman Manage Databases, Odoo menulis ulang".into(),
+        "; file ini dan catatan ini hilang. Isi asli sebelum diubah Rezure ada di".into(),
+        "; odoo.conf.rezure-backup, di folder yang sama.".into(),
+        format!("{NOTES_END} ====="),
+    ]
+    .into()
+}
+
+/// `content` with `notes` right under `[options]`, in place of the ones an
+/// earlier connect wrote. A begin marker without its end is left alone
+/// rather than guessing where the notes stop.
+fn set_notes(content: &str, notes: &[String]) -> String {
+    let newline = newline_of(content);
+    let mut lines: Vec<&str> = content.lines().collect();
+    let begin = lines
+        .iter()
+        .position(|line| line.trim().starts_with(NOTES_BEGIN));
+    if let Some(begin) = begin {
+        if let Some(offset) = lines[begin..]
+            .iter()
+            .position(|line| line.trim().starts_with(NOTES_END))
+        {
+            lines.drain(begin..=begin + offset);
+        }
+    }
+
+    let header = lines
+        .iter()
+        .position(|line| line.trim().eq_ignore_ascii_case("[options]"));
+    let mut out: Vec<&str> = Vec::with_capacity(lines.len() + notes.len() + 1);
+    match header {
+        Some(index) => {
+            out.extend_from_slice(&lines[..=index]);
+            out.extend(notes.iter().map(String::as_str));
+            out.extend_from_slice(&lines[index + 1..]);
+        }
+        None => {
+            out.push("[options]");
+            out.extend(notes.iter().map(String::as_str));
+            out.extend_from_slice(&lines);
+        }
+    }
+    let mut text = out.join(newline);
+    text.push_str(newline);
+    text
 }
 
 /// The version `postgres.exe --version` reports, `16.14` from
@@ -489,6 +583,13 @@ pub fn connect(
             ("db_password", password.clone()),
             ("pg_path", pg_bin.display().to_string()),
         ],
+    );
+    let next = set_notes(
+        &next,
+        &notes(
+            install.http_port,
+            install.service.as_ref().map(|s| s.name.as_str()),
+        ),
     );
 
     let staging = staging_dir()?;
@@ -796,6 +897,41 @@ mod tests {
         let next = set_options("", &[("db_port", "5432".to_string())]);
         assert_eq!(parse_options(&next)["db_port"], "5432");
         assert!(next.starts_with("[options]\n"));
+    }
+
+    /// Right under `[options]`, replaced rather than stacked on a second
+    /// connect, and invisible to what Odoo reads.
+    #[test]
+    fn notes_sit_under_options_once() {
+        let notes = notes(8069, Some("odoo-server-20.0"));
+        let once = set_notes(CONF, &notes);
+        let twice = set_notes(&once, &notes);
+        assert_eq!(once, twice);
+        assert!(once.starts_with(&format!("[options]\r\n{NOTES_BEGIN}")));
+        assert!(once.contains("services.msc -> odoo-server-20.0"));
+        assert_eq!(parse_options(&once), parse_options(CONF));
+        assert_eq!(
+            once.replace(&format!("{}\r\n", notes.join("\r\n")), ""),
+            CONF
+        );
+    }
+
+    /// Odoo reads `odoo.conf` in the ANSI code page, and only `;` lines are
+    /// skipped as comments.
+    #[test]
+    fn notes_are_ascii_comment_lines() {
+        for line in notes(8069, None) {
+            assert!(line.is_ascii(), "{line}");
+            assert!(line.starts_with(';'), "{line}");
+        }
+    }
+
+    #[test]
+    fn a_begin_marker_without_its_end_is_left_alone() {
+        let content = format!("[options]\n{NOTES_BEGIN}\ndb_user = odoo\n");
+        let next = set_notes(&content, &notes(8069, None));
+        assert_eq!(parse_options(&next)["db_user"], "odoo");
+        assert!(next.ends_with(&format!("{NOTES_BEGIN}\ndb_user = odoo\n")));
     }
 
     #[test]

@@ -4,6 +4,7 @@ import { usePostgresUsersStore } from '@/stores/postgresUsers'
 import ConnectionSnippets from '@/components/databases/ConnectionSnippets.vue'
 import NewPostgresUserModal from '@/components/databases/NewPostgresUserModal.vue'
 import LeafLoader from '@/components/common/LeafLoader.vue'
+import ModalCloseButton from '@/components/common/ModalCloseButton.vue'
 
 /**
  * Users on Rezure's own PostgreSQL: who exists, a new one (in its own modal,
@@ -78,12 +79,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
-  <div
-    class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
-    @click.self="close"
-  >
-    <div class="glass-strong flex max-h-[88vh] w-full max-w-2xl flex-col rounded-3xl p-6">
-      <div class="flex items-start justify-between gap-4">
+  <div class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div class="glass-strong relative flex max-h-[88vh] w-full max-w-2xl flex-col rounded-3xl p-6">
+      <ModalCloseButton :disabled="store.busy !== null" @click="close" />
+      <div class="flex items-start justify-between gap-4 pr-8">
         <div>
           <h2 class="text-xl font-bold tracking-tight">PostgreSQL users</h2>
           <p class="mt-1 text-sm text-neutral-500">
@@ -153,11 +152,36 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
               </div>
               <button
                 type="button"
-                class="glass-btn shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold text-neutral-700 transition dark:text-neutral-200"
+                class="glass-btn flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold text-neutral-700 transition dark:text-neutral-200"
                 :class="connecting?.user === role.name ? 'glass-raised' : ''"
+                :aria-expanded="connecting?.user === role.name"
+                :title="`Settings to paste into an app so it logs in as ${role.name}`"
                 @click="showConnect(role.name, role.ownedDatabases)"
               >
-                Connect an app
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.25"
+                  class="h-3.5 w-3.5"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="m8 8-4 4 4 4m8-8 4 4-4 4"
+                  />
+                </svg>
+                App config
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.5"
+                  class="h-3 w-3 transition-transform"
+                  :class="connecting?.user === role.name ? 'rotate-180' : ''"
+                >
+                  <path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6" />
+                </svg>
               </button>
               <button
                 v-if="!role.builtin"
@@ -186,6 +210,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
               v-if="connecting?.user === role.name"
               class="glass-divider border-t px-4 pt-3 pb-4"
             >
+              <p class="mb-2 text-xs text-neutral-500">
+                Paste one of these into your app's config so it logs in as
+                <span class="font-mono font-semibold">{{ role.name }}</span
+                >. Nothing is connected or changed until you do.
+              </p>
               <ConnectionSnippets
                 :user="connecting.user"
                 :password="connecting.password"

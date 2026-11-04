@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useProjectsStore } from '@/stores/projects'
 import BasePill from '@/components/common/BasePill.vue'
+import ModalCloseButton from '@/components/common/ModalCloseButton.vue'
 
 const emit = defineEmits<{ close: [] }>()
 
@@ -74,12 +75,10 @@ watch(name, () => {
 </script>
 
 <template>
-  <div
-    class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4"
-    @click.self="close"
-  >
-    <div class="glass-strong w-full max-w-md rounded-3xl p-6">
-      <div class="flex items-start justify-between gap-4">
+  <div class="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div class="glass-strong relative w-full max-w-md rounded-3xl p-6">
+      <ModalCloseButton :disabled="store.creating" @click="close" />
+      <div class="flex items-start justify-between gap-4 pr-8">
         <div>
           <h2 class="text-xl font-bold tracking-tight">New project</h2>
           <p class="mt-0.5 text-sm text-neutral-500">
