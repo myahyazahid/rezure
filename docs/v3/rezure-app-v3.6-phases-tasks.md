@@ -7,6 +7,10 @@ terminal, dan MariaDB dari katalog tidak bisa di-start.
 `package.json`, `package-lock.json` (root dan `packages[""]`), `src-tauri/Cargo.toml`,
 `src-tauri/Cargo.lock` (entri `rezureapp`), dan `src-tauri/tauri.conf.json`.
 
+**3.6.1:** dinaikkan dari 3.6.0 di tempat yang sama, berisi dua bagian setelah Fase 3.6.3:
+"Perbaikan setelah rilis 3.6.0 — Service yatim setelah update" dan "Node.js bisa dipanggil dari
+terminal".
+
 ---
 
 ## Fase 3.6.1 — Composer bisa dipanggil dari terminal
