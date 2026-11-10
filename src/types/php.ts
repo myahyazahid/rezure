@@ -45,6 +45,8 @@ export interface PhpPathStatus {
   conflicts: string[]
   /** Where the `composer` link points; null while no Composer is installed. */
   composerTarget: string | null
+  /** Where the `node` link points; null while no Node.js is installed. */
+  nodeTarget: string | null
 }
 
 /** One `ext-*` requirement from a project's composer.json, checked against

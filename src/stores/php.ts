@@ -136,10 +136,16 @@ export const usePhpStore = defineStore('php', () => {
     }
   }
 
+  /** Refetches the PATH card's status after a Composer or Node.js install or
+   *  switch, which re-points that runtime's link when the switch is on. */
+  function refreshPathStatusIfOn() {
+    if (pathStatus.value?.onPath) void fetchPathStatus()
+  }
+
   /**
-   * Turns the system-wide PATH link on or off. This is the one action that
-   * changes something outside Rezure, so it only ever runs from an explicit
-   * click — never as a side effect of switching versions.
+   * Turns the system-wide PATH link on or off from the toggle. Startup turns
+   * it on once by itself (see `Settings::php_path_auto_enabled`); switching
+   * versions only re-points it, never turns it on.
    */
   async function setPathLink(enabled: boolean) {
     pathBusy.value = true
@@ -155,7 +161,7 @@ export const usePhpStore = defineStore('php', () => {
       // on a later switch that open terminals follow, since the entry is
       // already in their PATH by then.
       notice.value = enabled
-        ? "Rezure's PHP is on your PATH. Open a new terminal to pick it up - ones already open keep the PATH they started with."
+        ? "Rezure's PHP, Composer, and Node.js are on your PATH. Open a new terminal to pick them up - ones already open keep the PATH they started with."
         : 'Removed from your PATH. Whatever was there before takes over again in new terminals.'
     } catch (e) {
       error.value = errorMessage(e)
@@ -409,6 +415,7 @@ export const usePhpStore = defineStore('php', () => {
     fetchBundledExtensions,
     setBundledExtension,
     fetchPathStatus,
+    refreshPathStatusIfOn,
     setPathLink,
     fetchCatalog,
     setActive,

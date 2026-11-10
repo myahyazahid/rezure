@@ -72,6 +72,25 @@ stop.
   `taskkill` dari user menjawab *Access is denied*, berarti proses lama jalan dengan hak admin, dan
   itu kasus lain.
 
+## Node.js bisa dipanggil dari terminal
+
+**Masalah:** Node.js yang di-install dari Switch hanya tampil versinya. `node`/`npm` cuma jalan di
+terminal project Rezure, karena tidak ada link PATH global untuk Node (sama seperti kasus
+Composer di Fase 3.6.1).
+
+- [x] Junction `current\node` → folder `node.exe` versi aktif, plus entri PATH-nya setelah PHP dan
+      Composer, satu paket dengan "Use Rezure's PHP everywhere". `php_path` sekarang punya enum
+      `Tool` (Composer, Node) untuk link selain PHP. Fungsinya digeneralisasi: `sync_tool`,
+      `refresh_tool_link`, `ensure_tool_entries`, `with_entries_first(&[..])`.
+- [x] Install atau switch Node.js ikut menggeser link-nya (`commands::node`).
+- [x] Install yang toggle-nya sudah nyala di 3.6.0 (PATH berisi PHP + Composer) mendapat entri Node
+      saat startup lewat `ensure_tool_entries`.
+- [x] Kartu PATH di Switch menampilkan baris `node → <versi>`.
+- `npm install -g` dari zip Node.js menaruh paketnya di folder versi itu sendiri, jadi CLI global
+  ikut jalan lewat junction, tapi terpisah per versi.
+- Node dari installer nodejs.org/nvm-windows biasanya ada di PATH *sistem*, jadi tetap menang
+  atas milik Rezure.
+
 ---
 
 ## Ditunda — Ketergantungan pada PowerShell

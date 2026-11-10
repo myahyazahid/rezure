@@ -241,7 +241,10 @@ async fn ensure_composer() -> Result<PathBuf, AppError> {
         })?;
         let phar = composer::install_silent(&newest.version).await?;
         // Gives an already-enabled global `composer` link its first target.
-        let _ = tokio::task::spawn_blocking(super::php_path::refresh_composer_link).await;
+        let _ = tokio::task::spawn_blocking(|| {
+            super::php_path::refresh_tool_link(super::php_path::Tool::Composer)
+        })
+        .await;
         return Ok(phar);
     }
     composer::active_exe()

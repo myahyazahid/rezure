@@ -227,15 +227,19 @@ Currently installable: **redis 6.3.0**, for PHP 7.4 through 8.5 (NTS x64).
 
 ## Making it system-wide (on by default)
 
-**Switch → "Use Rezure's PHP everywhere"** puts the active PHP and Composer on your user PATH, so
-`php` and `composer` resolve to Rezure's in every terminal, the same as a Composer-Setup install.
-Composer gets its own junction, `C:\rezure\current\composer`, placed right after PHP's.
+**Switch → "Use Rezure's PHP everywhere"** puts the active PHP, Composer, and Node.js on your user
+PATH, so `php`, `composer`, `node`, `npm`, and `npx` resolve to Rezure's in every terminal, the same
+as installing them yourself. Composer and Node.js get junctions of their own,
+`C:\rezure\current\composer` and `C:\rezure\current\node`, placed right after PHP's. Switching the
+active Composer or Node.js version re-points its junction, the same way a PHP switch does. A
+Node.js you installed yourself (nodejs.org installer, nvm-windows) is usually on the *system*
+PATH, so it keeps winning; see below.
 
 Rezure turns this on by itself the first time it starts, including on an upgraded install and
 even when Laragon or XAMPP is already on PATH. Most users never found the switch and ended up
 with Laragon's `php` in the terminal and Rezure's on their sites. Turning it off is remembered,
 so it stays off. No UAC prompt is involved, because only the *user* PATH is written. That is also
-why a PHP or Composer on the *system* PATH still comes first.
+why a PHP, Composer, or Node.js on the *system* PATH still comes first.
 
 It also sets `PHP_INI_SCAN_DIR` to `C:\rezure\etc\php\conf.d`, so that `php` reads the same
 settings your sites do. An existing value is kept and Rezure's folder appended after it; turning

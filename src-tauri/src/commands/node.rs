@@ -6,6 +6,7 @@ use tauri::State;
 use crate::config::settings::{self, SettingsState};
 use crate::services::node::{self, NodeVersionStatus};
 use crate::services::node_catalog::{self, NodeRelease};
+use crate::services::php_path::{self, Tool};
 use crate::utils::error::AppError;
 
 /// The Node.js versions currently on disk, and which one is active.
@@ -17,11 +18,10 @@ pub fn list_node_versions() -> Vec<NodeVersionStatus> {
 /// Switches the global active Node.js version.
 ///
 /// Unlike `commands::php::set_active_php_version`, there's no running
-/// service to restart and (for now) no system-wide PATH link to re-point —
-/// see `services::node`'s module doc for why. The switch only changes what
-/// `services::launcher::open_terminal` resolves `node`/`npm`/`npx` as the
-/// next time a terminal is opened for a project that hasn't pinned its own
-/// version.
+/// service to restart. What changes is what a project terminal that hasn't
+/// pinned its own version resolves `node`/`npm`/`npx` as, and, when "Use
+/// Rezure's PHP everywhere" is on, the `current\node` link every other
+/// terminal goes through (`services::php_path::Tool::Node`).
 #[tauri::command]
 pub async fn set_active_node_version(
     id: String,
@@ -31,12 +31,18 @@ pub async fn set_active_node_version(
 
     // Best-effort, same reasoning as the PHP equivalent: the switch itself
     // already succeeded, so a settings-write failure shouldn't fail the
-    // command, just leave the choice unpersisted for next launch.
-    let mut current = settings.0.lock().unwrap();
-    current.active_node_version = Some(id);
-    if let Err(err) = settings::save(&current) {
-        log::warn!("failed to persist the active Node.js version: {err}");
+    // command, just leave the choice unpersisted for next launch. Scoped so
+    // the lock is released before the await below.
+    {
+        let mut current = settings.0.lock().unwrap();
+        current.active_node_version = Some(id);
+        if let Err(err) = settings::save(&current) {
+            log::warn!("failed to persist the active Node.js version: {err}");
+        }
     }
+
+    // Reads the registry and may create a junction, both through PowerShell.
+    let _ = tokio::task::spawn_blocking(|| php_path::refresh_tool_link(Tool::Node)).await;
 
     Ok(versions)
 }
@@ -49,7 +55,11 @@ pub async fn list_node_catalog(refresh: bool) -> Result<Vec<NodeRelease>, AppErr
     node_catalog::list(refresh).await
 }
 
+/// Also points the global `node` link at the active version when it's on —
+/// the first install is what gives it anything to point at.
 #[tauri::command]
 pub async fn install_node_version(app: AppHandle, version: String) -> Result<(), AppError> {
-    node_catalog::install(&app, &version).await
+    node_catalog::install(&app, &version).await?;
+    let _ = tokio::task::spawn_blocking(|| php_path::refresh_tool_link(Tool::Node)).await;
+    Ok(())
 }

@@ -26,9 +26,10 @@
 //!
 //! Same relationship as PHP: the global active version (this module) is what
 //! a project uses when it hasn't pinned its own (`ProjectInfo::node_version`,
-//! `NULL` in SQLite). Unlike PHP's PATH junction, there's no "Node
-//! Everywhere" system-wide link yet — the active version only reaches
-//! processes Rezure itself spawns for a project.
+//! `NULL` in SQLite). Processes Rezure spawns for a project get the right
+//! version through their own `PATH`; every other terminal gets the active
+//! one through the `current\node` link, which rides on "Use Rezure's PHP
+//! everywhere" (`services::php_path::Tool::Node`).
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};

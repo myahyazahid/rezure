@@ -1,5 +1,5 @@
-//! Optional: makes Rezure's active PHP the `php` every terminal on the
-//! machine resolves.
+//! Makes Rezure's active PHP — and Composer and Node.js with it — the `php`,
+//! `composer` and `node` every terminal on the machine resolves.
 //!
 //! # Why a junction rather than rewriting PATH
 //!
@@ -39,10 +39,10 @@
 //! off, and [`disable`] still puts everything back. No UAC either way: only
 //! the *user* PATH and junctions under Rezure's own folder are written.
 //!
-//! It carries Composer along: a second junction, `current\composer`, points
-//! at the active Composer's folder and its `composer.bat` shim, and goes on
-//! PATH right after PHP's — see [`composer_link_dir`] for why it shares this
-//! switch instead of having its own.
+//! It carries Composer and Node.js along: `current\composer` and
+//! `current\node` are junctions of their own, pointed at the active
+//! versions, with PATH entries right after PHP's — see [`Tool`] for why they
+//! share this switch instead of having their own.
 //!
 //! Besides the PATH entries, one more thing is written: `PHP_INI_SCAN_DIR`
 //! pointing at [`php_ini::conf_d`] so the exposed `php` reads the same user
@@ -69,16 +69,65 @@ pub fn link_dir() -> Result<PathBuf, AppError> {
     Ok(current_root()?.join("php"))
 }
 
-/// `current\composer` — the same kind of junction, pointed at the active
-/// Composer's folder, whose `composer.bat` shim (see `composer::bin_dir`)
-/// makes `composer` a command in every terminal.
+/// A runtime that rides on this switch besides PHP itself, each through its
+/// own junction under `current\` and its own PATH entry right after PHP's.
 ///
-/// Rides on the PHP switch rather than having a toggle of its own: the shim
-/// runs `php` from PATH, so a global `composer` without a global `php` would
-/// be a command that exists and then fails. This is what Composer-Setup does
-/// too — it puts both on PATH.
-pub fn composer_link_dir() -> Result<PathBuf, AppError> {
-    Ok(current_root()?.join("composer"))
+/// - **Composer** (`current\composer`): its `composer.bat` shim (see
+///   `composer::bin_dir`) runs `php` from PATH, so a global `composer`
+///   without a global `php` would be a command that exists and then fails.
+///   Composer-Setup puts both on PATH for the same reason.
+/// - **Node.js** (`current\node`): the active version's folder, which holds
+///   `node`, `npm` and `npx`, and also whatever `npm install -g` adds,
+///   since a zip install's global prefix is that same folder.
+///
+/// One switch rather than one per runtime: what users needed was "what I
+/// installed in Switch works in my terminal", and three toggles to find is
+/// how the PHP one went unnoticed in the first place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tool {
+    Composer,
+    Node,
+}
+
+impl Tool {
+    /// In the order their entries go on PATH, after PHP's.
+    pub const ALL: [Tool; 2] = [Tool::Composer, Tool::Node];
+
+    fn folder(self) -> &'static str {
+        match self {
+            Tool::Composer => "composer",
+            Tool::Node => "node",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Tool::Composer => "Composer",
+            Tool::Node => "Node.js",
+        }
+    }
+
+    /// The folder this tool's link should point at right now, or `None`
+    /// when no version of it is installed.
+    fn target(self) -> Option<PathBuf> {
+        match self {
+            Tool::Composer => super::composer::bin_dir(),
+            Tool::Node => super::node::terminal_bin_dir(None),
+        }
+    }
+
+    /// `current\<folder>`, the directory that goes on PATH.
+    pub fn link_dir(self) -> Result<PathBuf, AppError> {
+        Ok(current_root()?.join(self.folder()))
+    }
+}
+
+/// Every tool's link directory, as PATH spells it, in [`Tool::ALL`] order.
+fn tool_link_strings() -> Result<Vec<String>, AppError> {
+    Tool::ALL
+        .iter()
+        .map(|tool| tool.link_dir().map(|dir| dir.display().to_string()))
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -100,6 +149,8 @@ pub struct PhpPathStatus {
     /// Where `current\composer` points, if it exists — `None` while no
     /// Composer is installed, even with the feature on.
     pub composer_target: Option<String>,
+    /// Where `current\node` points, the same way.
+    pub node_target: Option<String>,
 }
 
 /// Reads the *raw* user PATH from the registry, without expanding
@@ -333,7 +384,8 @@ pub fn status() -> Result<PhpPathStatus, AppError> {
         conflicts: conflicts_on_path(&user_path, &link),
         target,
         link_dir: link_str,
-        composer_target: junction_target(&composer_link_dir()?),
+        composer_target: junction_target(&Tool::Composer.link_dir()?),
+        node_target: junction_target(&Tool::Node.link_dir()?),
     })
 }
 
@@ -387,25 +439,29 @@ fn remove_junction(link: &Path, what: &str) -> Result<(), AppError> {
     run(&script, what).map(|_| ())
 }
 
-/// Points `current\composer` at the active Composer, or removes it when
-/// none is installed — a dangling link would make `composer` resolve to a
-/// shim that's no longer there.
-pub fn sync_composer() -> Result<(), AppError> {
-    let link = composer_link_dir()?;
-    match super::composer::bin_dir() {
-        Some(target) => point_junction(&link, &target, "pointing the Composer link"),
-        None => remove_junction(&link, "removing the Composer link"),
+/// Points `tool`'s link at its active version, or removes it when none is
+/// installed — a dangling link would make the command resolve to a folder
+/// that's no longer there.
+pub fn sync_tool(tool: Tool) -> Result<(), AppError> {
+    let link = tool.link_dir()?;
+    match tool.target() {
+        Some(target) => point_junction(
+            &link,
+            &target,
+            &format!("pointing the {} link", tool.label()),
+        ),
+        None => remove_junction(&link, &format!("removing the {} link", tool.label())),
     }
 }
 
-/// Re-points the Composer link after a Composer install or switch, only when
-/// the feature is on. Best-effort by design: callers are installs and
-/// switches that already succeeded, and must not report failure over this.
-pub fn refresh_composer_link() {
+/// Re-points `tool`'s link after an install or switch of it, only when the
+/// feature is on. Best-effort by design: callers are installs and switches
+/// that already succeeded, and must not report failure over this.
+pub fn refresh_tool_link(tool: Tool) {
     match enabled() {
         Ok(true) => {
-            if let Err(err) = sync_composer() {
-                log::warn!("could not re-point the Composer link: {err}");
+            if let Err(err) = sync_tool(tool) {
+                log::warn!("could not re-point the {} link: {err}", tool.label());
             }
         }
         Ok(false) => {}
@@ -413,29 +469,38 @@ pub fn refresh_composer_link() {
     }
 }
 
-/// Inserts the Composer entry right after PHP's, for an install that turned
-/// the feature on before it carried Composer. No-op when it's off or the
-/// entry is already there. Returns `true` if PATH was rewritten.
-pub fn ensure_composer_entry() -> Result<bool, AppError> {
+/// Inserts any missing tool entry right after PHP's, for an install that
+/// turned the feature on before it carried that tool. No-op when it's off or
+/// every entry is already there. Returns `true` if PATH was rewritten.
+pub fn ensure_tool_entries() -> Result<bool, AppError> {
     let link = link_dir()?.display().to_string();
-    let composer = composer_link_dir()?.display().to_string();
+    let tools = tool_link_strings()?;
     let raw = read_user_path()?;
 
-    match with_composer_entry(&raw, &link, &composer) {
+    match with_tool_entries(&raw, &link, &tools) {
         Some(updated) => {
             write_user_path(&updated)?;
-            log::info!("added the Composer link to PATH: {composer}");
+            log::info!("added Rezure's tool links to PATH after {link}");
             Ok(true)
         }
         None => Ok(false),
     }
 }
 
-/// The pure half of [`ensure_composer_entry`]: `raw` with `composer`
-/// inserted right after `link`, or `None` when there's nothing to do.
-fn with_composer_entry(raw: &str, link: &str, composer: &str) -> Option<String> {
+/// The pure half of [`ensure_tool_entries`]: `raw` with whichever of `tools`
+/// it lacks inserted right after `link`, in order, or `None` when there's
+/// nothing to do. Entries already present stay where they are.
+fn with_tool_entries(raw: &str, link: &str, tools: &[String]) -> Option<String> {
     let present = entries(raw);
-    if !present.iter().any(|e| same_dir(e, link)) || present.iter().any(|e| same_dir(e, composer)) {
+    if !present.iter().any(|e| same_dir(e, link)) {
+        return None;
+    }
+    let missing: Vec<&str> = tools
+        .iter()
+        .map(String::as_str)
+        .filter(|tool| !present.iter().any(|e| same_dir(e, tool)))
+        .collect();
+    if missing.is_empty() {
         return None;
     }
     let mut inserted = false;
@@ -443,7 +508,7 @@ fn with_composer_entry(raw: &str, link: &str, composer: &str) -> Option<String> 
     for segment in raw.split(';') {
         out.push(segment);
         if !inserted && same_dir(segment, link) {
-            out.push(composer);
+            out.extend(missing.iter().copied());
             inserted = true;
         }
     }
@@ -503,7 +568,7 @@ fn remove_scan_dir_env() -> Result<(), AppError> {
 }
 
 /// Points the junction at the active version, creating it if needed (see
-/// [`point_junction`]), and the Composer link at the active Composer.
+/// [`point_junction`]), and every [`Tool`] link at its active version.
 pub fn sync() -> Result<(), AppError> {
     let link = link_dir()?;
     let target = php::active_exe()?
@@ -529,9 +594,12 @@ pub fn sync() -> Result<(), AppError> {
         log::warn!("could not set {}: {err}", php_ini::SCAN_DIR_ENV);
     }
 
-    // Best-effort: a Composer problem must not take `php` down with it.
-    if let Err(err) = sync_composer() {
-        log::warn!("could not point the Composer link: {err}");
+    // Best-effort: a Composer or Node problem must not take `php` down
+    // with it.
+    for tool in Tool::ALL {
+        if let Err(err) = sync_tool(tool) {
+            log::warn!("could not point the {} link: {err}", tool.label());
+        }
     }
 
     point_junction(
@@ -541,48 +609,54 @@ pub fn sync() -> Result<(), AppError> {
     )
 }
 
-/// `raw` with Rezure's two entries moved to the front — PHP, then Composer —
-/// and any earlier copies of them dropped.
-fn with_entries_first(raw: &str, link: &str, composer: &str) -> String {
-    let rest = without_entry(&without_entry(raw, link), composer);
+/// `raw` with Rezure's entries moved to the front — `ours` in order, PHP's
+/// first — and any earlier copies of them dropped.
+fn with_entries_first(raw: &str, ours: &[String]) -> String {
+    let rest = without_entries(raw, ours);
+    let front = ours.join(";");
     if rest.is_empty() {
-        format!("{link};{composer}")
+        front
     } else {
-        format!("{link};{composer};{rest}")
+        format!("{front};{rest}")
     }
 }
 
-/// Points both junctions at the active versions and puts them first on PATH.
+/// `raw` with every one of `ours` removed, every other byte kept — see
+/// [`without_entry`].
+fn without_entries(raw: &str, ours: &[String]) -> String {
+    ours.iter()
+        .fold(raw.to_string(), |path, entry| without_entry(&path, entry))
+}
+
+/// PHP's link directory followed by every tool's, as PATH spells them.
+fn all_link_strings() -> Result<Vec<String>, AppError> {
+    let mut ours = vec![link_dir()?.display().to_string()];
+    ours.extend(tool_link_strings()?);
+    Ok(ours)
+}
+
+/// Points every junction at its active version and puts them first on PATH.
 ///
 /// First, so they win over a Laragon, XAMPP or Composer-Setup entry already
 /// there — which is the whole point, and exactly what the UI has to have
-/// warned about. The Composer entry goes on even with no Composer installed
+/// warned about. A tool's entry goes on even with nothing of it installed
 /// yet: installing one later re-points the link, and PATH is never touched
 /// again.
 pub fn enable() -> Result<PhpPathStatus, AppError> {
     sync()?;
 
-    let link = link_dir()?.display().to_string();
-    let composer = composer_link_dir()?.display().to_string();
     let user_path = read_user_path()?;
-    write_user_path(&with_entries_first(&user_path, &link, &composer))?;
+    write_user_path(&with_entries_first(&user_path, &all_link_strings()?))?;
 
     status()
 }
 
-/// Removes both entries from PATH, drops Rezure's folder from
-/// `PHP_INI_SCAN_DIR`, and deletes both junctions, leaving the machine as it
+/// Removes every entry from PATH, drops Rezure's folder from
+/// `PHP_INI_SCAN_DIR`, and deletes every junction, leaving the machine as it
 /// was.
 pub fn disable() -> Result<PhpPathStatus, AppError> {
-    let link = link_dir()?;
-    let composer = composer_link_dir()?;
-
     let user_path = read_user_path()?;
-    let rest = without_entry(
-        &without_entry(&user_path, &link.display().to_string()),
-        &composer.display().to_string(),
-    );
-    write_user_path(&rest)?;
+    write_user_path(&without_entries(&user_path, &all_link_strings()?))?;
 
     // The folder itself stays — it holds the user's settings, and Rezure's
     // own processes keep reading it. Only the machine-wide pointer goes.
@@ -590,8 +664,13 @@ pub fn disable() -> Result<PhpPathStatus, AppError> {
         log::warn!("could not clear {}: {err}", php_ini::SCAN_DIR_ENV);
     }
 
-    remove_junction(&composer, "removing the Composer link")?;
-    remove_junction(&link, "removing the PHP link")?;
+    for tool in Tool::ALL {
+        remove_junction(
+            &tool.link_dir()?,
+            &format!("removing the {} link", tool.label()),
+        )?;
+    }
+    remove_junction(&link_dir()?, "removing the PHP link")?;
 
     status()
 }
@@ -716,40 +795,53 @@ mod tests {
         }
     }
 
-    #[test]
-    fn enabling_puts_php_then_composer_first_and_round_trips() {
-        let link = r"C:\rezure\current\php";
-        let composer = r"C:\rezure\current\composer";
+    const PHP: &str = r"C:\rezure\current\php";
+    const COMPOSER: &str = r"C:\rezure\current\composer";
+    const NODE: &str = r"C:\rezure\current\node";
 
+    fn ours() -> Vec<String> {
+        vec![PHP.to_string(), COMPOSER.to_string(), NODE.to_string()]
+    }
+
+    #[test]
+    fn enabling_puts_php_composer_and_node_first_and_round_trips() {
         for original in [r"C:\a;C:\b;", r"C:\a", ""] {
-            let enabled = with_entries_first(original, link, composer);
-            assert!(enabled.starts_with(&format!("{link};{composer}")));
-            let disabled = without_entry(&without_entry(&enabled, link), composer);
-            assert_eq!(disabled, original, "disabling must restore {original:?}");
+            let enabled = with_entries_first(original, &ours());
+            assert!(enabled.starts_with(&format!("{PHP};{COMPOSER};{NODE}")));
+            assert_eq!(
+                without_entries(&enabled, &ours()),
+                original,
+                "disabling must restore {original:?}"
+            );
         }
 
         // Re-enabling moves stale copies to the front instead of duplicating.
-        let stale = format!(r"C:\x;{composer};{link};C:\y");
+        let stale = format!(r"C:\x;{NODE};{COMPOSER};{PHP};C:\y");
         assert_eq!(
-            with_entries_first(&stale, link, composer),
-            format!(r"{link};{composer};C:\x;C:\y")
+            with_entries_first(&stale, &ours()),
+            format!(r"{PHP};{COMPOSER};{NODE};C:\x;C:\y")
         );
     }
 
     #[test]
-    fn an_older_enabled_path_gains_composer_right_after_php() {
-        let link = r"C:\rezure\current\php";
-        let composer = r"C:\rezure\current\composer";
+    fn an_older_enabled_path_gains_the_missing_tools_right_after_php() {
+        let tools = vec![COMPOSER.to_string(), NODE.to_string()];
 
+        // Enabled before either tool rode along.
         assert_eq!(
-            with_composer_entry(&format!(r"C:\a;{link};C:\b;"), link, composer),
-            Some(format!(r"C:\a;{link};{composer};C:\b;"))
+            with_tool_entries(&format!(r"C:\a;{PHP};C:\b;"), PHP, &tools),
+            Some(format!(r"C:\a;{PHP};{COMPOSER};{NODE};C:\b;"))
+        );
+        // Enabled on 3.6.0, which already had Composer: only Node is added.
+        assert_eq!(
+            with_tool_entries(&format!(r"{PHP};{COMPOSER};C:\b"), PHP, &tools),
+            Some(format!(r"{PHP};{NODE};{COMPOSER};C:\b"))
         );
         // Feature off: nothing to add.
-        assert_eq!(with_composer_entry(r"C:\a;C:\b", link, composer), None);
+        assert_eq!(with_tool_entries(r"C:\a;C:\b", PHP, &tools), None);
         // Already there: nothing to add.
         assert_eq!(
-            with_composer_entry(&format!("{link};{composer}"), link, composer),
+            with_tool_entries(&format!("{PHP};{COMPOSER};{NODE}"), PHP, &tools),
             None
         );
     }

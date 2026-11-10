@@ -42,8 +42,7 @@ export const useComposerStore = defineStore('composer', () => {
   /** An install or switch re-points the global `composer` link when it's
    *  on, so the PATH card's status is stale until refetched. */
   function refreshPathLink() {
-    const php = usePhpStore()
-    if (php.pathStatus?.onPath) void php.fetchPathStatus()
+    usePhpStore().refreshPathStatusIfOn()
   }
 
   async function fetchStatus() {

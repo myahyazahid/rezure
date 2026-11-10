@@ -359,9 +359,9 @@ pub fn run() {
                         log::warn!("failed to re-point the PHP PATH link on startup: {err}");
                     }
                     // An install that turned the switch on before it carried
-                    // Composer has only PHP's entry; give it Composer's too.
-                    if let Err(err) = services::php_path::ensure_composer_entry() {
-                        log::warn!("failed to add the Composer link to PATH: {err}");
+                    // Composer and Node.js is missing their entries; add them.
+                    if let Err(err) = services::php_path::ensure_tool_entries() {
+                        log::warn!("failed to add the Composer/Node.js links to PATH: {err}");
                     }
                 }
                 // Reconciles the persisted flag against the OS's actual autostart

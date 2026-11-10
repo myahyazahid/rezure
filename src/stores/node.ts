@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type { NodeRelease, NodeVersion } from '@/types/runtime'
 import type { InstallProgress } from '@/types/binary'
+import { usePhpStore } from '@/stores/php'
 
 // Keep in sync with `PROGRESS_EVENT` in src-tauri/src/services/binaries.rs
 const PROGRESS_EVENT = 'binary://install-progress'
@@ -50,6 +51,8 @@ export const useNodeStore = defineStore('node', () => {
     switching.value = id
     try {
       versions.value = await invoke<NodeVersion[]>('set_active_node_version', { id })
+      // The switch re-points the global `node` link when it's on.
+      usePhpStore().refreshPathStatusIfOn()
       return true
     } catch (e) {
       error.value = errorMessage(e)
@@ -80,6 +83,7 @@ export const useNodeStore = defineStore('node', () => {
       const entry = catalog.value.find((r) => r.version === version)
       if (entry) entry.installed = true
       await fetchVersions()
+      usePhpStore().refreshPathStatusIfOn()
       return true
     } catch (e) {
       catalogError.value = errorMessage(e)

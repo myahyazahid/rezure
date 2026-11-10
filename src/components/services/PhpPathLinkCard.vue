@@ -2,12 +2,31 @@
 import { computed, onMounted } from 'vue'
 import { usePhpStore } from '@/stores/php'
 import { useComposerStore } from '@/stores/composer'
+import { useNodeStore } from '@/stores/node'
 
 const store = usePhpStore()
 const composer = useComposerStore()
+const node = useNodeStore()
 
 const status = computed(() => store.pathStatus)
 const enabled = computed(() => status.value?.onPath === true)
+
+/** The runtimes that ride on this switch besides PHP, one row each. A
+ *  `null` target means nothing of it is installed yet. */
+const toolRows = computed(() => [
+  {
+    command: 'composer',
+    target: status.value?.composerTarget ?? null,
+    version: composer.active?.version,
+    missing: 'install a Composer version to use it',
+  },
+  {
+    command: 'node',
+    target: status.value?.nodeTarget ?? null,
+    version: node.active?.version,
+    missing: 'install a Node.js version to use it',
+  },
+])
 
 /** Just the tool's folder name, so the warning can say "Laragon" instead of
  *  making the user parse a path. */
@@ -29,6 +48,7 @@ const conflictSummary = computed(() => {
 onMounted(() => {
   if (!store.pathStatus) store.fetchPathStatus()
   if (composer.versions.length === 0) void composer.fetchVersions()
+  if (node.versions.length === 0) void node.fetchVersions()
 })
 </script>
 
@@ -40,9 +60,10 @@ onMounted(() => {
           Use Rezure's PHP everywhere
         </p>
         <p class="mt-0.5 text-xs text-neutral-500">
-          Puts the active PHP and Composer on your PATH, so <code class="font-mono">php</code> and
-          <code class="font-mono">composer</code> work in every terminal - not only the ones Rezure
-          opens.
+          Puts the active PHP, Composer, and Node.js on your PATH, so
+          <code class="font-mono">php</code>, <code class="font-mono">composer</code>,
+          <code class="font-mono">node</code>, and <code class="font-mono">npm</code> work in every
+          terminal - not only the ones Rezure opens.
         </p>
       </div>
 
@@ -78,21 +99,22 @@ onMounted(() => {
           {{ status.target }}
         </span>
       </div>
-      <div class="glass-inset flex items-center gap-2 rounded-lg px-2.5 py-1.5 font-mono text-xs">
-        <span class="shrink-0 text-neutral-500">composer</span>
+      <div
+        v-for="row in toolRows"
+        :key="row.command"
+        class="glass-inset flex items-center gap-2 rounded-lg px-2.5 py-1.5 font-mono text-xs"
+      >
+        <span class="shrink-0 text-neutral-500">{{ row.command }}</span>
         <span class="shrink-0 text-neutral-400">→</span>
-        <template v-if="status.composerTarget">
+        <template v-if="row.target">
           <span class="shrink-0 font-semibold text-emerald-600 dark:text-emerald-400">
-            {{ composer.active?.version ?? 'the active version' }}
+            {{ row.version ?? 'the active version' }}
           </span>
-          <span
-            class="ml-auto min-w-0 truncate text-neutral-400"
-            :title="status.composerTarget"
-          >
-            {{ status.composerTarget }}
+          <span class="ml-auto min-w-0 truncate text-neutral-400" :title="row.target">
+            {{ row.target }}
           </span>
         </template>
-        <span v-else class="text-neutral-400">install a Composer version to use it</span>
+        <span v-else class="text-neutral-400">{{ row.missing }}</span>
       </div>
 
       <!-- The distinction that actually trips people up: adding the entry
