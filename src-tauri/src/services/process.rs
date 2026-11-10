@@ -1649,8 +1649,31 @@ impl ProcessService {
 
         if is_ours {
             kill_process_tree(pid);
+            self.wait_for_ports_released(worker);
         }
         Ok(())
+    }
+
+    /// Waits, briefly, until every port `worker` binds can be bound again.
+    ///
+    /// `taskkill` returns before Windows has torn down a killed process's
+    /// sockets. Checking straight after it, the port still refuses a bind
+    /// while `netstat` already lists no listener, so the start failed with a
+    /// bare `PortInUse` naming nobody and offering nothing to stop. That is
+    /// what a start after an update hit, with the old services orphaned.
+    /// Bounded like `ports::reclaim`'s wait; a port still taken after it is
+    /// left to `ensure_port_available` to report.
+    fn wait_for_ports_released(&self, worker: u16) {
+        let ports = self.ports_for(worker);
+        for _ in 0..25 {
+            if ports
+                .iter()
+                .all(|&port| TcpListener::bind((self.bind_addr(), port)).is_ok())
+            {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
     }
 }
 

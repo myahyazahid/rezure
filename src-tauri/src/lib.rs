@@ -38,6 +38,7 @@ pub fn run() {
                 commands::services::start_service,
                 commands::services::stop_service,
                 commands::services::force_stop_service,
+                commands::services::stop_services_for_update,
                 commands::services::port_holder,
                 commands::services::free_port,
                 commands::services::restart_service,

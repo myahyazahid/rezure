@@ -51,10 +51,16 @@ export const useUpdateStore = defineStore('update', () => {
     }
   }
 
-  /** One click drives the whole sequence: download with progress, then
-   *  install. On Windows `downloadAndInstall` exits the app itself once the
-   *  installer has launched (it restarts the app after installing by
-   *  default), so there's no separate relaunch step to call here. */
+  /** One click drives the whole sequence: download with progress, stop
+   *  every service, then install. On Windows `install` exits the app itself
+   *  once the installer has launched (it restarts the app after installing
+   *  by default), so there's no separate relaunch step to call here.
+   *
+   *  Download and install are separate calls so services keep running while
+   *  the download is in progress, and are stopped only right before the
+   *  installer starts. That exit skips Rezure's normal quit handler, so
+   *  without `stop_services_for_update` nginx, PHP and the database outlive
+   *  the old app and still hold their ports when the new one opens. */
   async function downloadAndApply() {
     if (!available.value) return
     downloading.value = true
@@ -62,10 +68,12 @@ export const useUpdateStore = defineStore('update', () => {
     downloadedBytes.value = 0
     totalBytes.value = null
     try {
-      await available.value.downloadAndInstall((event) => {
+      await available.value.download((event) => {
         if (event.event === 'Started') totalBytes.value = event.data.contentLength ?? null
         else if (event.event === 'Progress') downloadedBytes.value += event.data.chunkLength
       })
+      await invoke('stop_services_for_update')
+      await available.value.install()
     } catch (e) {
       downloadError.value = errorMessage(e)
     } finally {

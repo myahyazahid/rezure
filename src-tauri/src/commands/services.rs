@@ -125,6 +125,24 @@ pub async fn stop_service(
     result
 }
 
+/// Stops every running service, the same way quitting Rezure does — called
+/// by the frontend between downloading an update and installing it.
+///
+/// Needed because on Windows the updater plugin ends the app with
+/// `std::process::exit` once the installer has launched, which skips
+/// `RunEvent::ExitRequested` (where a normal quit runs `stop_all`). Without
+/// this, nginx, php-cgi and the database outlive the old Rezure and are
+/// still holding their ports when the new one starts.
+#[tauri::command]
+pub async fn stop_services_for_update(app: AppHandle) -> Result<(), AppError> {
+    tokio::task::spawn_blocking(move || app.state::<ServiceManager>().stop_all())
+        .await
+        .map_err(|e| AppError::ProcessSpawnFailed {
+            name: "services".to_string(),
+            reason: format!("background task panicked: {e}"),
+        })
+}
+
 /// Kills the service outright, skipping the clean shutdown `stop_service`
 /// attempts.
 ///
