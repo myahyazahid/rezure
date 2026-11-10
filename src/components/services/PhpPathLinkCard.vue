@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { usePhpStore } from '@/stores/php'
+import { useComposerStore } from '@/stores/composer'
 
 const store = usePhpStore()
+const composer = useComposerStore()
 
 const status = computed(() => store.pathStatus)
 const enabled = computed(() => status.value?.onPath === true)
@@ -26,6 +28,7 @@ const conflictSummary = computed(() => {
 
 onMounted(() => {
   if (!store.pathStatus) store.fetchPathStatus()
+  if (composer.versions.length === 0) void composer.fetchVersions()
 })
 </script>
 
@@ -37,8 +40,9 @@ onMounted(() => {
           Use Rezure's PHP everywhere
         </p>
         <p class="mt-0.5 text-xs text-neutral-500">
-          Puts the active version on your PATH, so <code class="font-mono">php</code> works in every
-          terminal - not only the ones Rezure opens.
+          Puts the active PHP and Composer on your PATH, so <code class="font-mono">php</code> and
+          <code class="font-mono">composer</code> work in every terminal - not only the ones Rezure
+          opens.
         </p>
       </div>
 
@@ -73,6 +77,22 @@ onMounted(() => {
         >
           {{ status.target }}
         </span>
+      </div>
+      <div class="glass-inset flex items-center gap-2 rounded-lg px-2.5 py-1.5 font-mono text-xs">
+        <span class="shrink-0 text-neutral-500">composer</span>
+        <span class="shrink-0 text-neutral-400">→</span>
+        <template v-if="status.composerTarget">
+          <span class="shrink-0 font-semibold text-emerald-600 dark:text-emerald-400">
+            {{ composer.active?.version ?? 'the active version' }}
+          </span>
+          <span
+            class="ml-auto min-w-0 truncate text-neutral-400"
+            :title="status.composerTarget"
+          >
+            {{ status.composerTarget }}
+          </span>
+        </template>
+        <span v-else class="text-neutral-400">install a Composer version to use it</span>
       </div>
 
       <!-- The distinction that actually trips people up: adding the entry

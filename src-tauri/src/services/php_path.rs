@@ -24,15 +24,27 @@
 //! be created without administrator rights, while symlinks can't. (That's
 //! why nvm-windows, which uses a symlink, ships an `elevate.cmd`.)
 //!
-//! # Why it stays opt-in
+//! # Why it's on by default
 //!
 //! This is the one feature that changes something outside Rezure. On a
 //! machine that already has Laragon or XAMPP on PATH, enabling it means
-//! `php` system-wide stops being theirs and becomes Rezure's. That's a
-//! decision to be taken deliberately, so nothing here runs unless the user
-//! turns it on, and [`disable`] puts everything back.
+//! `php` system-wide stops being theirs and becomes Rezure's.
 //!
-//! Two things are written, not one: the PATH entry, and `PHP_INI_SCAN_DIR`
+//! It used to be opt-in for that reason, but in practice most users never
+//! found the switch. They then ran `php`/`composer` from Laragon in the
+//! terminal while their sites ran on Rezure's PHP, and got version
+//! mismatches they couldn't explain. So startup now turns it on once,
+//! even when another PHP is present (see `Settings::php_path_auto_enabled`
+//! in `config::settings`). The toggle stays, a user who turns it off stays
+//! off, and [`disable`] still puts everything back. No UAC either way: only
+//! the *user* PATH and junctions under Rezure's own folder are written.
+//!
+//! It carries Composer along: a second junction, `current\composer`, points
+//! at the active Composer's folder and its `composer.bat` shim, and goes on
+//! PATH right after PHP's — see [`composer_link_dir`] for why it shares this
+//! switch instead of having its own.
+//!
+//! Besides the PATH entries, one more thing is written: `PHP_INI_SCAN_DIR`
 //! pointing at [`php_ini::conf_d`] so the exposed `php` reads the same user
 //! settings the web server does. Both are undone by [`disable`], and both
 //! leave anything they didn't put there alone.
@@ -57,6 +69,18 @@ pub fn link_dir() -> Result<PathBuf, AppError> {
     Ok(current_root()?.join("php"))
 }
 
+/// `current\composer` — the same kind of junction, pointed at the active
+/// Composer's folder, whose `composer.bat` shim (see `composer::bin_dir`)
+/// makes `composer` a command in every terminal.
+///
+/// Rides on the PHP switch rather than having a toggle of its own: the shim
+/// runs `php` from PATH, so a global `composer` without a global `php` would
+/// be a command that exists and then fails. This is what Composer-Setup does
+/// too — it puts both on PATH.
+pub fn composer_link_dir() -> Result<PathBuf, AppError> {
+    Ok(current_root()?.join("composer"))
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PhpPathStatus {
@@ -73,6 +97,9 @@ pub struct PhpPathStatus {
     /// install). Surfaced so the UI can say exactly whose `php` is being
     /// taken over instead of leaving the user to find out.
     pub conflicts: Vec<String>,
+    /// Where `current\composer` points, if it exists — `None` while no
+    /// Composer is installed, even with the feature on.
+    pub composer_target: Option<String>,
 }
 
 /// Reads the *raw* user PATH from the registry, without expanding
@@ -306,7 +333,121 @@ pub fn status() -> Result<PhpPathStatus, AppError> {
         conflicts: conflicts_on_path(&user_path, &link),
         target,
         link_dir: link_str,
+        composer_target: junction_target(&composer_link_dir()?),
     })
+}
+
+/// Whether the feature is on, read straight from PATH — cheaper than a full
+/// [`status`], which also resolves both junctions.
+fn enabled() -> Result<bool, AppError> {
+    let link = link_dir()?.display().to_string();
+    Ok(entries(&read_user_path()?)
+        .iter()
+        .any(|entry| same_dir(entry, &link)))
+}
+
+/// Points `link` at `target`, creating it if needed; a no-op when it
+/// already points there.
+///
+/// Re-pointing is delete-then-create: `New-Item -Force` refuses to replace a
+/// junction that has content behind it. The delete uses
+/// `[IO.Directory]::Delete($link, $false)`, which removes only the reparse
+/// point — `Remove-Item -Recurse` would follow the link and delete the real
+/// install on the other side.
+fn point_junction(link: &Path, target: &Path, what: &str) -> Result<(), AppError> {
+    if junction_target(link)
+        .is_some_and(|current| same_dir(&current, &target.display().to_string()))
+    {
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(current_root()?)
+        .map_err(|e| AppError::Io(format!("could not create the link directory: {e}")))?;
+
+    let script = format!(
+        "if (Test-Path -LiteralPath {link}) {{ [System.IO.Directory]::Delete({link}, $false) }}; \
+         [void](New-Item -ItemType Junction -Path {link} -Target {target})",
+        link = quote_ps(&link.display().to_string()),
+        target = quote_ps(&target.display().to_string()),
+    );
+    run(&script, what).map(|_| ())
+}
+
+/// Removes only the junction itself, never what it points at.
+fn remove_junction(link: &Path, what: &str) -> Result<(), AppError> {
+    // `exists()` follows the link, so a junction whose target was deleted
+    // reads as absent; `symlink_metadata` sees the reparse point itself.
+    if std::fs::symlink_metadata(link).is_err() {
+        return Ok(());
+    }
+    let script = format!(
+        "[System.IO.Directory]::Delete({}, $false)",
+        quote_ps(&link.display().to_string())
+    );
+    run(&script, what).map(|_| ())
+}
+
+/// Points `current\composer` at the active Composer, or removes it when
+/// none is installed — a dangling link would make `composer` resolve to a
+/// shim that's no longer there.
+pub fn sync_composer() -> Result<(), AppError> {
+    let link = composer_link_dir()?;
+    match super::composer::bin_dir() {
+        Some(target) => point_junction(&link, &target, "pointing the Composer link"),
+        None => remove_junction(&link, "removing the Composer link"),
+    }
+}
+
+/// Re-points the Composer link after a Composer install or switch, only when
+/// the feature is on. Best-effort by design: callers are installs and
+/// switches that already succeeded, and must not report failure over this.
+pub fn refresh_composer_link() {
+    match enabled() {
+        Ok(true) => {
+            if let Err(err) = sync_composer() {
+                log::warn!("could not re-point the Composer link: {err}");
+            }
+        }
+        Ok(false) => {}
+        Err(err) => log::warn!("could not read whether the PHP link is on: {err}"),
+    }
+}
+
+/// Inserts the Composer entry right after PHP's, for an install that turned
+/// the feature on before it carried Composer. No-op when it's off or the
+/// entry is already there. Returns `true` if PATH was rewritten.
+pub fn ensure_composer_entry() -> Result<bool, AppError> {
+    let link = link_dir()?.display().to_string();
+    let composer = composer_link_dir()?.display().to_string();
+    let raw = read_user_path()?;
+
+    match with_composer_entry(&raw, &link, &composer) {
+        Some(updated) => {
+            write_user_path(&updated)?;
+            log::info!("added the Composer link to PATH: {composer}");
+            Ok(true)
+        }
+        None => Ok(false),
+    }
+}
+
+/// The pure half of [`ensure_composer_entry`]: `raw` with `composer`
+/// inserted right after `link`, or `None` when there's nothing to do.
+fn with_composer_entry(raw: &str, link: &str, composer: &str) -> Option<String> {
+    let present = entries(raw);
+    if !present.iter().any(|e| same_dir(e, link)) || present.iter().any(|e| same_dir(e, composer)) {
+        return None;
+    }
+    let mut inserted = false;
+    let mut out = Vec::new();
+    for segment in raw.split(';') {
+        out.push(segment);
+        if !inserted && same_dir(segment, link) {
+            out.push(composer);
+            inserted = true;
+        }
+    }
+    Some(out.join(";"))
 }
 
 /// Puts Rezure's `conf.d` on the machine-wide `PHP_INI_SCAN_DIR`, so the
@@ -361,13 +502,8 @@ fn remove_scan_dir_env() -> Result<(), AppError> {
     )
 }
 
-/// Points the junction at the active version, creating it if needed.
-///
-/// Re-pointing is delete-then-create: `New-Item -Force` refuses to replace a
-/// junction that has content behind it. The delete uses
-/// `[IO.Directory]::Delete($link, $false)`, which removes only the reparse
-/// point — `Remove-Item -Recurse` would follow the link and delete the real
-/// PHP install on the other side.
+/// Points the junction at the active version, creating it if needed (see
+/// [`point_junction`]), and the Composer link at the active Composer.
 pub fn sync() -> Result<(), AppError> {
     let link = link_dir()?;
     let target = php::active_exe()?
@@ -393,54 +529,60 @@ pub fn sync() -> Result<(), AppError> {
         log::warn!("could not set {}: {err}", php_ini::SCAN_DIR_ENV);
     }
 
-    if junction_target(&link)
-        .is_some_and(|current| same_dir(&current, &target.display().to_string()))
-    {
-        return Ok(());
+    // Best-effort: a Composer problem must not take `php` down with it.
+    if let Err(err) = sync_composer() {
+        log::warn!("could not point the Composer link: {err}");
     }
 
-    std::fs::create_dir_all(current_root()?)
-        .map_err(|e| AppError::Io(format!("could not create the link directory: {e}")))?;
-
-    let script = format!(
-        "if (Test-Path -LiteralPath {link}) {{ [System.IO.Directory]::Delete({link}, $false) }}; \
-         [void](New-Item -ItemType Junction -Path {link} -Target {target})",
-        link = quote_ps(&link.display().to_string()),
-        target = quote_ps(&target.display().to_string()),
-    );
-    run(&script, "pointing the PHP link at the active version").map(|_| ())
+    point_junction(
+        &link,
+        &target,
+        "pointing the PHP link at the active version",
+    )
 }
 
-/// Points the junction at the active version and puts it first on PATH.
+/// `raw` with Rezure's two entries moved to the front — PHP, then Composer —
+/// and any earlier copies of them dropped.
+fn with_entries_first(raw: &str, link: &str, composer: &str) -> String {
+    let rest = without_entry(&without_entry(raw, link), composer);
+    if rest.is_empty() {
+        format!("{link};{composer}")
+    } else {
+        format!("{link};{composer};{rest}")
+    }
+}
+
+/// Points both junctions at the active versions and puts them first on PATH.
 ///
-/// First, so it wins over a Laragon or XAMPP entry already there — which is
-/// the whole point, and exactly what the UI has to have warned about.
+/// First, so they win over a Laragon, XAMPP or Composer-Setup entry already
+/// there — which is the whole point, and exactly what the UI has to have
+/// warned about. The Composer entry goes on even with no Composer installed
+/// yet: installing one later re-points the link, and PATH is never touched
+/// again.
 pub fn enable() -> Result<PhpPathStatus, AppError> {
     sync()?;
 
     let link = link_dir()?.display().to_string();
+    let composer = composer_link_dir()?.display().to_string();
     let user_path = read_user_path()?;
-    let rest = without_entry(&user_path, &link);
-
-    let updated = if rest.is_empty() {
-        link
-    } else {
-        format!("{link};{rest}")
-    };
-    write_user_path(&updated)?;
+    write_user_path(&with_entries_first(&user_path, &link, &composer))?;
 
     status()
 }
 
-/// Removes the entry from PATH, drops Rezure's folder from
-/// `PHP_INI_SCAN_DIR`, and deletes the junction, leaving the machine as it
+/// Removes both entries from PATH, drops Rezure's folder from
+/// `PHP_INI_SCAN_DIR`, and deletes both junctions, leaving the machine as it
 /// was.
 pub fn disable() -> Result<PhpPathStatus, AppError> {
     let link = link_dir()?;
-    let link_str = link.display().to_string();
+    let composer = composer_link_dir()?;
 
     let user_path = read_user_path()?;
-    write_user_path(&without_entry(&user_path, &link_str))?;
+    let rest = without_entry(
+        &without_entry(&user_path, &link.display().to_string()),
+        &composer.display().to_string(),
+    );
+    write_user_path(&rest)?;
 
     // The folder itself stays — it holds the user's settings, and Rezure's
     // own processes keep reading it. Only the machine-wide pointer goes.
@@ -448,13 +590,8 @@ pub fn disable() -> Result<PhpPathStatus, AppError> {
         log::warn!("could not clear {}: {err}", php_ini::SCAN_DIR_ENV);
     }
 
-    if link.exists() {
-        let script = format!(
-            "[System.IO.Directory]::Delete({}, $false)",
-            quote_ps(&link_str)
-        );
-        run(&script, "removing the PHP link")?;
-    }
+    remove_junction(&composer, "removing the Composer link")?;
+    remove_junction(&link, "removing the PHP link")?;
 
     status()
 }
@@ -577,6 +714,44 @@ mod tests {
                 "round-tripping {original:?} must give it back unchanged"
             );
         }
+    }
+
+    #[test]
+    fn enabling_puts_php_then_composer_first_and_round_trips() {
+        let link = r"C:\rezure\current\php";
+        let composer = r"C:\rezure\current\composer";
+
+        for original in [r"C:\a;C:\b;", r"C:\a", ""] {
+            let enabled = with_entries_first(original, link, composer);
+            assert!(enabled.starts_with(&format!("{link};{composer}")));
+            let disabled = without_entry(&without_entry(&enabled, link), composer);
+            assert_eq!(disabled, original, "disabling must restore {original:?}");
+        }
+
+        // Re-enabling moves stale copies to the front instead of duplicating.
+        let stale = format!(r"C:\x;{composer};{link};C:\y");
+        assert_eq!(
+            with_entries_first(&stale, link, composer),
+            format!(r"{link};{composer};C:\x;C:\y")
+        );
+    }
+
+    #[test]
+    fn an_older_enabled_path_gains_composer_right_after_php() {
+        let link = r"C:\rezure\current\php";
+        let composer = r"C:\rezure\current\composer";
+
+        assert_eq!(
+            with_composer_entry(&format!(r"C:\a;{link};C:\b;"), link, composer),
+            Some(format!(r"C:\a;{link};{composer};C:\b;"))
+        );
+        // Feature off: nothing to add.
+        assert_eq!(with_composer_entry(r"C:\a;C:\b", link, composer), None);
+        // Already there: nothing to add.
+        assert_eq!(
+            with_composer_entry(&format!("{link};{composer}"), link, composer),
+            None
+        );
     }
 
     #[test]

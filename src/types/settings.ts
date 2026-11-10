@@ -160,6 +160,8 @@ export interface Settings {
   hiddenServices: string[]
   /** Ids started as soon as Rezure opens — see `services::start_on_launch`. */
   startOnLaunch: string[]
+  /** Whether startup already turned "Use Rezure's PHP everywhere" on once. */
+  phpPathAutoEnabled: boolean
 }
 
 export interface SettingsPatch {

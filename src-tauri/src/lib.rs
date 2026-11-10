@@ -303,7 +303,7 @@ pub fn run() {
                 // see `services::supervisor`.
                 services::supervisor::spawn(app.handle().clone());
 
-                let settings = config::settings::load();
+                let mut settings = config::settings::load();
                 // Best-effort: the version may no longer be installed, in which
                 // case `services::php`'s own fallback picks the newest one —
                 // nothing here needs to treat that as an error.
@@ -330,10 +330,37 @@ pub fn run() {
                 // by unzipping it into the drop-in folder). Re-pointing here
                 // also gives the restored version the `php.ini` a terminal's
                 // `php` needs — see `services::php_ini`. Best-effort, and
-                // skipped entirely when the user never opted into the switch.
-                if services::php_path::status().is_ok_and(|s| s.on_path) {
+                // skipped when the user has turned the switch off.
+                //
+                // Switched on once, unconditionally — see
+                // `Settings::php_path_auto_enabled`. Only marked done when
+                // `enable` succeeded, so a failure is retried next launch.
+                // `enable` already syncs both links, so this launch skips the
+                // re-point below.
+                let mut just_enabled = false;
+                if !settings.php_path_auto_enabled {
+                    match services::php_path::enable() {
+                        Ok(_) => {
+                            log::info!("turned on Rezure's PHP and Composer on PATH");
+                            just_enabled = true;
+                            settings.php_path_auto_enabled = true;
+                            if let Err(err) = config::settings::save(&settings) {
+                                log::warn!("could not record the PATH switch-on: {err}");
+                            }
+                        }
+                        Err(err) => {
+                            log::warn!("could not put Rezure's PHP on PATH: {err}")
+                        }
+                    }
+                }
+                if !just_enabled && services::php_path::status().is_ok_and(|s| s.on_path) {
                     if let Err(err) = services::php_path::sync() {
                         log::warn!("failed to re-point the PHP PATH link on startup: {err}");
+                    }
+                    // An install that turned the switch on before it carried
+                    // Composer has only PHP's entry; give it Composer's too.
+                    if let Err(err) = services::php_path::ensure_composer_entry() {
+                        log::warn!("failed to add the Composer link to PATH: {err}");
                     }
                 }
                 // Reconciles the persisted flag against the OS's actual autostart

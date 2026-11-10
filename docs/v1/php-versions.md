@@ -225,10 +225,17 @@ Currently installable: **redis 6.3.0**, for PHP 7.4 through 8.5 (NTS x64).
 
 ---
 
-## Making it system-wide (optional)
+## Making it system-wide (on by default)
 
-**Switch → "Use Rezure's PHP everywhere"** puts the active version on your user PATH, so `php`
-resolves to it in every terminal.
+**Switch → "Use Rezure's PHP everywhere"** puts the active PHP and Composer on your user PATH, so
+`php` and `composer` resolve to Rezure's in every terminal, the same as a Composer-Setup install.
+Composer gets its own junction, `C:\rezure\current\composer`, placed right after PHP's.
+
+Rezure turns this on by itself the first time it starts, including on an upgraded install and
+even when Laragon or XAMPP is already on PATH. Most users never found the switch and ended up
+with Laragon's `php` in the terminal and Rezure's on their sites. Turning it off is remembered,
+so it stays off. No UAC prompt is involved, because only the *user* PATH is written. That is also
+why a PHP or Composer on the *system* PATH still comes first.
 
 It also sets `PHP_INI_SCAN_DIR` to `C:\rezure\etc\php\conf.d`, so that `php` reads the same
 settings your sites do. An existing value is kept and Rezure's folder appended after it; turning

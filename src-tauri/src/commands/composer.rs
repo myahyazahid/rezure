@@ -5,6 +5,7 @@ use tauri::AppHandle;
 
 use crate::services::composer::{self, ComposerVersionStatus};
 use crate::services::composer_catalog::{self, ComposerRelease};
+use crate::services::php_path;
 use crate::services::scaffold;
 use crate::utils::error::AppError;
 
@@ -30,9 +31,16 @@ pub fn list_composer_versions() -> Vec<ComposerVersionStatus> {
     composer::list()
 }
 
+/// Also re-points the global `composer` link when it's on, the same way a
+/// PHP switch re-points `php`'s.
 #[tauri::command]
-pub fn set_active_composer_version(id: String) -> Result<Vec<ComposerVersionStatus>, AppError> {
-    composer::set_active(&id)
+pub async fn set_active_composer_version(
+    id: String,
+) -> Result<Vec<ComposerVersionStatus>, AppError> {
+    let versions = composer::set_active(&id)?;
+    // Reads the registry and may create a junction, both through PowerShell.
+    let _ = tokio::task::spawn_blocking(php_path::refresh_composer_link).await;
+    Ok(versions)
 }
 
 /// The versions Composer currently publishes as stable. Hits the network on
@@ -47,5 +55,9 @@ pub async fn install_composer_version(
     app: AppHandle,
     version: String,
 ) -> Result<Vec<ComposerVersionStatus>, AppError> {
-    composer::install(&app, &version).await
+    let versions = composer::install(&app, &version).await?;
+    // The first install is what gives an already-enabled global link
+    // something to point at.
+    let _ = tokio::task::spawn_blocking(php_path::refresh_composer_link).await;
+    Ok(versions)
 }

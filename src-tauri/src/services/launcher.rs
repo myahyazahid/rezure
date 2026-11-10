@@ -10,7 +10,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::{node, php, php_ini, projects};
+use super::{composer, node, php, php_ini, projects};
 use crate::db::projects::ProjectInfo;
 use crate::utils::error::AppError;
 
@@ -77,6 +77,8 @@ impl TerminalEnv {
 /// runtime's own rules for pin-vs-active live in [`php::terminal_bin_dir`]
 /// and [`node::terminal_bin_dir`]. PHP also gets `conf.d` on its scan dir
 /// ([`php_ini::terminal_scan_dir`]), so `php -m` there matches the site.
+/// The active Composer's folder ([`composer::bin_dir`]) comes last, so
+/// `composer` works by name too.
 ///
 /// Deliberately not `OPENSSL_CONF`, even though Rezure's own PHP processes
 /// get it: this is a shell the user also runs Git from, which reads the same
@@ -92,6 +94,11 @@ fn terminal_env(php_pin: Option<&str>, node_pin: Option<&str>) -> TerminalEnv {
         }
     }
     if let Some(dir) = node::terminal_bin_dir(node_pin) {
+        env.path_first.push(dir);
+    }
+    // After PHP, which its shim resolves `php` through — so `composer` here
+    // runs on the project's PHP, not whatever else is on PATH.
+    if let Some(dir) = composer::bin_dir() {
         env.path_first.push(dir);
     }
 

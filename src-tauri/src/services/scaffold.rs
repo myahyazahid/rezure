@@ -239,7 +239,10 @@ async fn ensure_composer() -> Result<PathBuf, AppError> {
         let newest = releases.first().ok_or_else(|| {
             AppError::Download("Composer's version index listed nothing to install".to_string())
         })?;
-        return composer::install_silent(&newest.version).await;
+        let phar = composer::install_silent(&newest.version).await?;
+        // Gives an already-enabled global `composer` link its first target.
+        let _ = tokio::task::spawn_blocking(super::php_path::refresh_composer_link).await;
+        return Ok(phar);
     }
     composer::active_exe()
 }

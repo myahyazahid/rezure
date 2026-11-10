@@ -83,6 +83,15 @@ pub struct Settings {
     /// Windows service, like Odoo).
     #[serde(default)]
     pub start_on_launch: Vec<String>,
+    /// Whether startup has already turned "Use Rezure's PHP everywhere" on
+    /// once (see `lib.rs`). On by default, regardless of other PHP installs:
+    /// a user who never found the switch got Laragon's `php` in their
+    /// terminal and Rezure's on their sites, which is the version mix-up the
+    /// feature exists to prevent. Recorded so a user who turns it off
+    /// afterwards stays off. `#[serde(default)]` makes an upgraded install
+    /// read `false`, so it gets the same one-time switch-on.
+    #[serde(default)]
+    pub php_path_auto_enabled: bool,
 }
 
 /// Light, dark, or whatever Windows is set to. Light is the default on
@@ -272,6 +281,7 @@ impl Default for Settings {
             decorations: Decorations::default(),
             hidden_services: Vec::new(),
             start_on_launch: Vec::new(),
+            php_path_auto_enabled: false,
         }
     }
 }
@@ -423,6 +433,7 @@ mod tests {
             keep_in_tray_on_close: true,
             notify_on_crash: true,
             auto_write_hosts: true,
+            php_path_auto_enabled: true,
             appearance: Some(AppearanceSettings {
                 mode: ThemeMode::System,
                 theme: ThemePreset::Blossom,

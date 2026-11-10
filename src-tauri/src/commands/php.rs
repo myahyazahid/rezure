@@ -315,8 +315,8 @@ pub async fn php_path_status() -> Result<PhpPathStatus, AppError> {
 
 /// Puts Rezure's PHP first on the user's PATH.
 ///
-/// The one action in Rezure that changes something outside the app, so it
-/// only ever runs from an explicit toggle — never as a side effect.
+/// The one action in Rezure that changes something outside the app. Besides
+/// this toggle, startup runs it once on its own (see `lib.rs`).
 #[tauri::command]
 pub async fn enable_php_path() -> Result<PhpPathStatus, AppError> {
     tokio::task::spawn_blocking(php_path::enable)

@@ -43,6 +43,8 @@ export interface PhpPathStatus {
   inSync: boolean
   /** Other PHP installs already on PATH that enabling would override. */
   conflicts: string[]
+  /** Where the `composer` link points; null while no Composer is installed. */
+  composerTarget: string | null
 }
 
 /** One `ext-*` requirement from a project's composer.json, checked against

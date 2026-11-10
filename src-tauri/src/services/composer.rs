@@ -1,7 +1,13 @@
 //! Which Composer versions are installed, which one is active, and how new
-//! ones get there — the same shape as [`super::php`], minus PHP's PATH-link
-//! and pooled-instance concerns, since nothing spawns Composer as a running
-//! service: it's a `.phar` invoked once per scaffold.
+//! ones get there — the same shape as [`super::php`], minus the
+//! pooled-instance concerns, since nothing spawns Composer as a running
+//! service.
+//!
+//! Each version folder also carries `composer.bat` / `composer` shims (see
+//! [`ensure_shims`]), so `composer …` works by name in a project terminal
+//! ([`bin_dir`] goes on its `PATH`) and, when "Use Rezure's PHP everywhere"
+//! is on, in every terminal through `super::php_path`'s `current\composer`
+//! link — the same experience as a Composer-Setup install.
 //!
 //! Before this module existed, `services::scaffold::ensure_composer` cached
 //! exactly one `composer.phar` at a fixed path, always the current stable
@@ -10,7 +16,7 @@
 //! can sit on disk under `bin/composer/<version>/`, one is active, and
 //! installing one is checksum-verified through [`super::composer_catalog`].
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 use serde::Serialize;
@@ -119,7 +125,60 @@ fn write_version(version: &str, bytes: &[u8]) -> Result<PathBuf, AppError> {
     let phar_path = dir.join(PHAR);
     std::fs::write(&phar_path, bytes)
         .map_err(|e| AppError::Io(format!("could not write {}: {e}", phar_path.display())))?;
+    // Best-effort: the phar is installed and usable from Rezure either way,
+    // and `bin_dir` heals the shims again before any terminal is handed one.
+    if let Err(err) = ensure_shims(&dir) {
+        log::warn!(
+            "could not write the composer shims in {}: {err}",
+            dir.display()
+        );
+    }
     Ok(phar_path)
+}
+
+/// What `composer` runs in `cmd`/PowerShell — the same one-liner
+/// Composer-Setup installs. `%~dp0` is the folder the `.bat` was found in,
+/// so it keeps working when reached through the `current\composer` junction.
+/// `php` is resolved from `PATH` on purpose: a project terminal puts that
+/// project's PHP first, and the global link puts the active one there.
+const BAT_SHIM: &str = "@php \"%~dp0composer.phar\" %*\r\n";
+
+/// The extensionless twin Git Bash resolves `composer` to, since it doesn't
+/// run `.bat` files by bare name.
+const SH_SHIM: &str = "#!/usr/bin/env sh\nphp \"$(dirname \"$0\")/composer.phar\" \"$@\"\n";
+
+/// Writes `composer.bat` and `composer` beside `composer.phar`, so the
+/// folder can go on `PATH` and `composer …` works like a regular install.
+/// Only rewrites a shim whose contents differ, so this is cheap to call on
+/// every terminal launch — which is how versions installed before shims
+/// existed (or dropped into the custom folder by hand) get them.
+fn ensure_shims(dir: &Path) -> Result<(), AppError> {
+    for (name, body) in [("composer.bat", BAT_SHIM), ("composer", SH_SHIM)] {
+        let path = dir.join(name);
+        if std::fs::read_to_string(&path).is_ok_and(|current| current == body) {
+            continue;
+        }
+        std::fs::write(&path, body)
+            .map_err(|e| AppError::Io(format!("could not write {}: {e}", path.display())))?;
+    }
+    Ok(())
+}
+
+/// The folder holding the active `composer.phar`, with its shims healed —
+/// what goes on a project terminal's `PATH` and what the global
+/// `current\composer` link points at. `None` when no Composer is installed.
+///
+/// The phar's own parent rather than the version folder: a hand-dropped
+/// version may keep it one level down.
+pub fn bin_dir() -> Option<PathBuf> {
+    let dir = active_exe().ok()?.parent()?.to_path_buf();
+    if let Err(err) = ensure_shims(&dir) {
+        log::warn!(
+            "could not write the composer shims in {}: {err}",
+            dir.display()
+        );
+    }
+    Some(dir)
 }
 
 /// Downloads, verifies and installs one Composer version, reporting
@@ -189,6 +248,28 @@ mod tests {
         } else {
             assert_eq!(active, 1, "installed versions: {versions:?}");
         }
+    }
+
+    #[test]
+    fn shims_are_written_beside_the_phar_and_healed_when_edited() {
+        let dir = std::env::temp_dir().join(format!("rezure-composer-shim-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        ensure_shims(&dir).unwrap();
+        let bat = std::fs::read_to_string(dir.join("composer.bat")).unwrap();
+        assert!(bat.contains("%~dp0composer.phar"), "{bat}");
+        assert!(std::fs::read_to_string(dir.join("composer"))
+            .unwrap()
+            .contains("composer.phar"));
+
+        std::fs::write(dir.join("composer.bat"), "stale").unwrap();
+        ensure_shims(&dir).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("composer.bat")).unwrap(),
+            BAT_SHIM
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

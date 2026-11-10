@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type { ComposerRelease, ComposerVersion } from '@/types/runtime'
 import type { InstallProgress } from '@/types/binary'
+import { usePhpStore } from '@/stores/php'
 
 // Keep in sync with `PROGRESS_EVENT` in src-tauri/src/services/binaries.rs
 const PROGRESS_EVENT = 'binary://install-progress'
@@ -38,6 +39,13 @@ export const useComposerStore = defineStore('composer', () => {
     progress.value[event.payload.id] = event.payload
   })
 
+  /** An install or switch re-points the global `composer` link when it's
+   *  on, so the PATH card's status is stale until refetched. */
+  function refreshPathLink() {
+    const php = usePhpStore()
+    if (php.pathStatus?.onPath) void php.fetchPathStatus()
+  }
+
   async function fetchStatus() {
     installed.value = await invoke<boolean>('composer_installed')
   }
@@ -66,6 +74,7 @@ export const useComposerStore = defineStore('composer', () => {
     switching.value = id
     try {
       versions.value = await invoke<ComposerVersion[]>('set_active_composer_version', { id })
+      refreshPathLink()
     } catch (e) {
       error.value = errorMessage(e)
     } finally {
@@ -94,6 +103,7 @@ export const useComposerStore = defineStore('composer', () => {
       installed.value = true
       const entry = catalog.value.find((r) => r.version === version)
       if (entry) entry.installed = true
+      refreshPathLink()
       return true
     } catch (e) {
       catalogError.value = errorMessage(e)
