@@ -626,6 +626,10 @@ impl ProcessService {
                 // datadir already holds someone's data and is opened as-is.
                 if db_engine::needs_bootstrap(&data_dir) {
                     profile.engine.bootstrap(&exe, &data_dir)?;
+                    // The datadir is now this binary's version, whatever
+                    // the profile was seeded with — see
+                    // `db_profiles::resolve_server_exe`.
+                    db_profiles::record_version(&profile.id, &exe);
                 }
 
                 let mut cmd = Command::new(&exe);
@@ -1265,8 +1269,16 @@ impl ProcessService {
 
         // Resolving the exe *is* the installed check now: for PHP there's no
         // manifest entry to look up, just whatever the disk scan found.
-        if !self.resolved_exe().is_ok_and(|exe| exe.is_file()) {
-            return Err(AppError::BinaryNotInstalled(self.name.to_string()));
+        //
+        // The resolver's own error is passed through, not flattened into
+        // "not installed": for the database it says *which* version the
+        // profile needs, and "binary not installed" right after the user
+        // installed one from the catalog sends them looking in the wrong
+        // place.
+        match self.resolved_exe() {
+            Ok(exe) if exe.is_file() => {}
+            Ok(_) => return Err(AppError::BinaryNotInstalled(self.name.to_string())),
+            Err(err) => return Err(err),
         }
 
         // Only the workers about to be spawned are checked: the ones already

@@ -149,7 +149,7 @@ pub enum AppError {
     NotADatadir { path: String, engine: String },
 
     #[error(
-        "no {engine} {version} binary is installed - add one before switching to this profile"
+        "no {engine} {version} binary is installed - this profile's data needs that version, so install a matching one from the Switch page"
     )]
     EngineBinaryMissing { engine: String, version: String },
 

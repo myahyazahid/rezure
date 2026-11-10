@@ -205,6 +205,13 @@ pub fn installed_binaries(engine: Engine) -> Vec<InstalledRuntime> {
 /// A profile with no recorded version falls back to the newest installed
 /// build of its engine — the honest choice when there's nothing to match
 /// against, and the reason the add-profile flow tries hard to detect one.
+///
+/// So does a profile whose datadir is still empty: the version match exists
+/// to protect data a server already wrote, and there is none yet. Without
+/// this, the seeded "Rezure" profile — stamped with the manifest's MariaDB
+/// version (11.2.2), a branch the catalog doesn't offer — could never start
+/// on a fresh machine, whatever version the user installed. The version it
+/// actually got bootstrapped with is then recorded by [`record_version`].
 pub fn resolve_server_exe(profile: &Profile) -> Result<PathBuf, AppError> {
     // A profile that names its own build wins outright — that's the whole
     // point of adopting one, and silently falling back to a different
@@ -228,7 +235,7 @@ pub fn resolve_server_exe(profile: &Profile) -> Result<PathBuf, AppError> {
         });
     }
 
-    if profile.version.is_empty() {
+    if profile.version.is_empty() || db_engine::needs_bootstrap(Path::new(&profile.datadir_path)) {
         return Ok(installed[0].exe.clone());
     }
 
@@ -242,6 +249,36 @@ pub fn resolve_server_exe(profile: &Profile) -> Result<PathBuf, AppError> {
             engine: profile.engine.label().to_string(),
             version: profile.version.clone(),
         })
+}
+
+/// Records the version of the binary at `exe` as profile `id`'s, after that
+/// binary bootstrapped the profile's datadir. From then on
+/// [`resolve_server_exe`] matches against what the data really is, not the
+/// version the profile was seeded with. A no-op when the binary isn't one
+/// Rezure can name a version for, or the version is already right.
+pub fn record_version(id: &str, exe: &Path) {
+    let mut store = store();
+    let Some(profile) = store.profiles.iter_mut().find(|p| p.id == id) else {
+        return;
+    };
+    let Some(version) = installed_binaries(profile.engine)
+        .into_iter()
+        .find(|runtime| runtime.exe == exe)
+        .map(|runtime| runtime.version)
+    else {
+        return;
+    };
+    if profile.version == version {
+        return;
+    }
+    log::info!(
+        "profile \"{}\" was bootstrapped by {} {version}; recording that over {:?}",
+        profile.name,
+        profile.engine.label(),
+        profile.version
+    );
+    profile.version = version;
+    persist(&store);
 }
 
 /// `mysqld.exe` inside `dir`, or inside its `bin` — the two shapes a
@@ -699,6 +736,54 @@ mod tests {
                 "got: {err}"
             );
         }
+    }
+
+    /// The fresh-machine regression: the seeded profile says 11.2.2, the
+    /// catalog has no 11.2, so whatever got installed must still be picked
+    /// while the datadir is empty — and only then.
+    #[test]
+    fn an_empty_datadir_takes_any_installed_version_but_real_data_does_not() {
+        let Ok(root) = binaries::user_bin_root() else {
+            return;
+        };
+        let folder = root.join("mariadb").join("9.9.4");
+        let bin = folder.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let fake = bin.join(SERVER_EXE);
+        std::fs::write(&fake, b"not a real binary").unwrap();
+
+        let datadir = std::env::temp_dir().join(format!("rezure-datadir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&datadir);
+        let mut profile = Profile {
+            id: "test".to_string(),
+            name: "Rezure".to_string(),
+            datadir_path: datadir.display().to_string(),
+            engine: Engine::MariaDb,
+            version: "11.2.2".to_string(),
+            port: 3306,
+            source: ProfileSource::Rezure,
+            binary_dir: None,
+            defaults_file: None,
+            is_default: true,
+            last_used_at: None,
+        };
+
+        let fresh = resolve_server_exe(&profile);
+
+        // Data written by 11.2 must not be opened by 9.9.
+        std::fs::create_dir_all(&datadir).unwrap();
+        std::fs::write(datadir.join("ibdata1"), b"x").unwrap();
+        profile.version = "11.2.2".to_string();
+        let with_data = resolve_server_exe(&profile);
+
+        let _ = std::fs::remove_dir_all(&folder);
+        let _ = std::fs::remove_dir_all(&datadir);
+
+        assert!(fresh.is_ok(), "an empty datadir must start: {fresh:?}");
+        assert!(
+            with_data.map_or(true, |exe| exe != fake),
+            "real 11.2 data must never be handed a 9.9 binary"
+        );
     }
 
     /// Refusing to open a MariaDB datadir with MySQL (or vice versa) is the
