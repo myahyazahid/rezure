@@ -149,8 +149,19 @@ pub fn assign_ports(projects: &[ProjectInfo]) -> HashMap<String, u16> {
         .map(|project| project.id.as_str())
         .collect();
 
+    // A bind on 127.0.0.1 alone misses a dev server listening on `::1` only
+    // (Node 17+'s `localhost`), and on Windows even coexists with one on
+    // 0.0.0.0 — so what `netstat` lists counts too. Read once, and only if a
+    // port actually has to be picked.
+    let listening: std::cell::OnceCell<HashSet<u16>> = std::cell::OnceCell::new();
     if allocate(&mut store, &wanted, |port| {
-        TcpListener::bind(("127.0.0.1", port)).is_ok()
+        let taken = listening.get_or_init(|| {
+            ports::listening_sockets()
+                .into_iter()
+                .map(|(port, _)| port)
+                .collect()
+        });
+        !taken.contains(&port) && TcpListener::bind(("127.0.0.1", port)).is_ok()
     }) {
         if let Err(err) = config::save(&store) {
             log::warn!("couldn't save the dev server ports just picked: {err}");

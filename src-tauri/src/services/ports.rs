@@ -290,38 +290,58 @@ fn label_for(path: Option<&str>) -> Option<&'static str> {
 /// caller passed in — the process may have exited on its own between being
 /// shown and being killed, and a recycled pid would mean killing something
 /// unrelated.
+///
+/// A port can have more than one holder — one process on `127.0.0.1` and
+/// another on `::1` — so this goes round again for the next one, a few
+/// times at most.
 pub fn reclaim(port: u16, disable_autostart: bool) -> Result<(), AppError> {
-    let Some(holder) = holder(port) else {
-        // Already free — the thing the caller wanted is true.
-        return Ok(());
-    };
-
-    if !holder.reclaimable() {
-        return Err(AppError::PortHolderProtected {
-            port,
-            reason: holder.description,
-        });
-    }
-
-    match &holder.service {
-        Some(service) => windows_services::stop(service, disable_autostart)?,
-        None => super::process::kill_process_tree(tree_root(holder.pid)),
-    }
-
-    // Confirm rather than assume: `taskkill` reporting success doesn't mean
-    // the socket is released yet, and a still-held port would otherwise show
-    // up as a confusing second failure on the retry.
-    for _ in 0..25 {
-        if listening_pid(port).is_none() {
+    let mut stopped: Vec<u32> = Vec::new();
+    for _ in 0..3 {
+        let Some(holder) = holder(port) else {
+            // Free — the thing the caller wanted is true.
             return Ok(());
+        };
+        if stopped.contains(&holder.pid) {
+            // Killed once already and still there: waiting longer won't help.
+            return Err(AppError::PortHolderProtected {
+                port,
+                reason: format!("{} did not release port {port}", holder.name),
+            });
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        if !holder.reclaimable() {
+            return Err(AppError::PortHolderProtected {
+                port,
+                reason: holder.description,
+            });
+        }
+
+        match &holder.service {
+            Some(service) => windows_services::stop(service, disable_autostart)?,
+            None => super::process::kill_process_tree(tree_root(holder.pid)),
+        }
+        stopped.push(holder.pid);
+
+        // Confirm rather than assume: `taskkill` reporting success doesn't
+        // mean the socket is released yet, and a still-held port would
+        // otherwise show up as a confusing second failure on the retry.
+        for _ in 0..25 {
+            let still_held = listening_sockets()
+                .into_iter()
+                .any(|(bound, pid)| bound == port && pid == holder.pid);
+            if !still_held {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
     }
 
-    Err(AppError::PortHolderProtected {
-        port,
-        reason: format!("{} did not release port {port}", holder.name),
-    })
+    match holder(port) {
+        None => Ok(()),
+        Some(holder) => Err(AppError::PortHolderProtected {
+            port,
+            reason: format!("{} did not release port {port}", holder.name),
+        }),
+    }
 }
 
 /// The process to kill so that `pid` stays gone: the topmost ancestor still
@@ -335,6 +355,10 @@ pub fn reclaim(port: u16, disable_autostart: bool) -> Result<(), AppError> {
 /// binary matches stops at whatever launched the server (Rezure, a shell,
 /// Laragon), and it also skips a recycled parent pid that now belongs to
 /// something unrelated.
+///
+/// One exception to "the binary must match": a `cmd.exe` between two
+/// processes of the same binary is npm/npx's script shim (`node → cmd /d /s
+/// /c → node`), not the user's terminal, so the climb goes through it.
 fn tree_root(pid: u32) -> u32 {
     let mut sys = System::new();
     sys.refresh_processes_specifics(
@@ -353,9 +377,22 @@ fn tree_root(pid: u32) -> u32 {
         let Some(parent) = process.parent().and_then(|ppid| sys.process(ppid)) else {
             break;
         };
-        match (process.exe(), parent.exe()) {
-            (Some(exe), Some(parent_exe)) if exe == parent_exe => current = parent.pid(),
-            _ => break,
+        let Some(exe) = process.exe() else { break };
+        if parent.exe() == Some(exe) {
+            current = parent.pid();
+            continue;
+        }
+        let parent_is_shell = parent
+            .exe()
+            .and_then(|path| path.file_name())
+            .is_some_and(|name| name.eq_ignore_ascii_case("cmd.exe"));
+        let above_shim = parent
+            .parent()
+            .and_then(|ppid| sys.process(ppid))
+            .filter(|grandparent| parent_is_shell && grandparent.exe() == Some(exe));
+        match above_shim {
+            Some(grandparent) => current = grandparent.pid(),
+            None => break,
         }
     }
     current.as_u32()

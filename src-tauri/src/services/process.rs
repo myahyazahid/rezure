@@ -1663,13 +1663,19 @@ impl ProcessService {
     /// what a start after an update hit, with the old services orphaned.
     /// Bounded like `ports::reclaim`'s wait; a port still taken after it is
     /// left to `ensure_port_available` to report.
+    ///
+    /// A dev server also waits for `netstat` to list nobody: one on `::1`
+    /// only doesn't block the IPv4 bind, but the start's own holder check
+    /// would still see it while its socket is torn down.
     fn wait_for_ports_released(&self, worker: u16) {
         let ports = self.ports_for(worker);
+        let dev_server = matches!(self.launch, Launch::DevServer(_));
         for _ in 0..25 {
-            if ports
-                .iter()
-                .all(|&port| TcpListener::bind((self.bind_addr(), port)).is_ok())
-            {
+            let released = ports.iter().all(|&port| {
+                TcpListener::bind((self.bind_addr(), port)).is_ok()
+                    && (!dev_server || ports::holder(port).is_none())
+            });
+            if released {
                 return;
             }
             std::thread::sleep(Duration::from_millis(100));
