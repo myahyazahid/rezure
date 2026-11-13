@@ -74,17 +74,18 @@ impl PortHolder {
     }
 }
 
-/// Every listening TCP socket, as `(port, pid)`, via `netstat -ano`.
+/// Every listening TCP socket, IPv4 and IPv6, as `(port, pid)`, via
+/// `netstat -ano`. A port bound on both stacks appears twice.
+///
+/// No `-p TCP`: that lists IPv4 only, and Node 17+ resolves `localhost` to
+/// `::1` first — so Vite, Astro and friends often listen on IPv6 alone and
+/// would look like they hold no port at all.
 ///
 /// `netstat` rather than a Windows API call: it needs no new dependency,
 /// and it's the same "shell out to a tool that ships with Windows" approach
 /// `process::kill_process_tree` already takes with `taskkill`.
 pub(crate) fn listening_sockets() -> Vec<(u16, u32)> {
-    let Ok(output) = Command::new("netstat")
-        .args(["-ano", "-p", "TCP"])
-        .hidden()
-        .output()
-    else {
+    let Ok(output) = Command::new("netstat").args(["-ano"]).hidden().output() else {
         return Vec::new();
     };
     parse_listening(&String::from_utf8_lossy(&output.stdout))
@@ -97,11 +98,12 @@ fn parse_listening(text: &str) -> Vec<(u16, u32)> {
         // connection row" — `netstat` opens with a blank line and a header.
         // These must `continue`, never `?`: returning on the first short
         // line would abandon the scan before reaching any data at all.
+        // UDP rows have no state column, so they never match the pattern.
         let fields: Vec<&str> = line.split_whitespace().collect();
-        let [_proto, local, _foreign, state, pid] = fields[..] else {
+        let [proto, local, _foreign, state, pid] = fields[..] else {
             continue;
         };
-        if !state.eq_ignore_ascii_case("LISTENING") {
+        if !proto.eq_ignore_ascii_case("TCP") || !state.eq_ignore_ascii_case("LISTENING") {
             continue;
         }
         // `local` is `0.0.0.0:80`, `127.0.0.1:80` or `[::]:80` — the port is
@@ -380,6 +382,8 @@ Active Connections
   TCP    0.0.0.0:80             0.0.0.0:0              LISTENING       4120
   TCP    [::1]:5173             [::]:0                 LISTENING       912
   TCP    127.0.0.1:51000        127.0.0.1:80           ESTABLISHED     77
+  UDP    0.0.0.0:5353           *:*                                    1500
+  UDP    [::]:5353              *:*                                    1500
 ";
         assert_eq!(parse_listening(text), vec![(80, 4120), (5173, 912)]);
     }

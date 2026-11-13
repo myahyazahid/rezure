@@ -444,6 +444,9 @@ pub struct OutsideServer {
 
 impl OutsideServer {
     fn describe(&self) -> String {
+        if self.ports.is_empty() {
+            return format!("{}, pid {}, not listening", self.name, self.pid);
+        }
         let ports: Vec<String> = self.ports.iter().map(|port| format!(":{port}")).collect();
         format!("{}, pid {}, on {}", self.name, self.pid, ports.join(" "))
     }
@@ -467,6 +470,13 @@ fn in_dir(cwd: &Path, dir: &Path) -> bool {
 /// left alone. Anything descended from this Rezure is its own dev server; a
 /// leftover from a Rezure that crashed isn't, and is reported like any other.
 pub fn outside_servers(specs: &[DevSpec]) -> HashMap<String, Vec<OutsideServer>> {
+    scan_outside(specs, true)
+}
+
+/// [`outside_servers`], or with `require_port` off every outside runtime
+/// tree in the project, listening or not — for when the user has asked to
+/// stop "the other copy" and none of them is listening (yet, or any more).
+fn scan_outside(specs: &[DevSpec], require_port: bool) -> HashMap<String, Vec<OutsideServer>> {
     if specs.is_empty() {
         return HashMap::new();
     }
@@ -482,7 +492,7 @@ pub fn outside_servers(specs: &[DevSpec]) -> HashMap<String, Vec<OutsideServer>>
     for (port, pid) in ports::listening_sockets() {
         listening.entry(pid).or_default().push(port);
     }
-    find_outside(&sys, &listening, specs, std::process::id())
+    find_outside(&sys, &listening, specs, std::process::id(), require_port)
 }
 
 fn find_outside(
@@ -490,6 +500,7 @@ fn find_outside(
     listening: &HashMap<u32, Vec<u16>>,
     specs: &[DevSpec],
     rezure: u32,
+    require_port: bool,
 ) -> HashMap<String, Vec<OutsideServer>> {
     let name_of = |pid: Pid| {
         sys.process(pid)
@@ -526,20 +537,32 @@ fn find_outside(
             }
             // Up to the topmost runtime still in the project — `npm`'s own
             // node, above the one actually serving — but never into the
-            // shell it was typed in: that's the user's terminal.
+            // shell it was typed in: that's the user's terminal. npm and npx
+            // run a script through `cmd.exe /d /s /c`; a `cmd.exe` between
+            // two runtimes of the project is that shim, not a terminal.
+            let runtime_in_project = |pid: Pid| {
+                is_runtime(pid)
+                    && sys
+                        .process(pid)
+                        .and_then(|p| p.cwd())
+                        .is_some_and(|cwd| in_dir(cwd, &spec.dir))
+            };
+            let parent_of = |pid: Pid| sys.process(pid).and_then(|p| p.parent());
             let mut root = *pid;
             for _ in 0..16 {
-                let Some(parent) = sys.process(root).and_then(|p| p.parent()) else {
-                    break;
-                };
-                let parent_in_project = sys
-                    .process(parent)
-                    .and_then(|p| p.cwd())
-                    .is_some_and(|cwd| in_dir(cwd, &spec.dir));
-                if !is_runtime(parent) || !parent_in_project {
-                    break;
+                let Some(parent) = parent_of(root) else { break };
+                if runtime_in_project(parent) {
+                    root = parent;
+                    continue;
                 }
-                root = parent;
+                let shim_above = (name_of(parent) == "cmd.exe")
+                    .then(|| parent_of(parent))
+                    .flatten()
+                    .filter(|grandparent| runtime_in_project(*grandparent));
+                match shim_above {
+                    Some(grandparent) => root = grandparent,
+                    None => break,
+                }
             }
             roots.insert(root);
         }
@@ -559,7 +582,7 @@ fn find_outside(
                 }
                 ports.sort_unstable();
                 ports.dedup();
-                (!ports.is_empty()).then(|| OutsideServer {
+                (!require_port || !ports.is_empty()).then(|| OutsideServer {
                     pid: root.as_u32(),
                     name: name_of(root),
                     ports,
@@ -578,16 +601,49 @@ fn find_outside(
 /// waits for their ports to be let go. Re-reads them rather than trusting a
 /// list the dialog showed: one may have exited since, and its pid been reused
 /// by something unrelated.
+///
+/// Listening ones first; when none listens — a copy still starting, or one
+/// that only holds its lock file — every outside runtime in the project
+/// goes, since the user asked for "the other copy" to stop. Finding nothing
+/// at all is an error, not a silent success: the start that follows would
+/// only fail the same way again.
 pub fn stop_outside(spec: &DevSpec) -> Result<(), AppError> {
-    let servers = outside_servers(std::slice::from_ref(spec))
+    let specs = std::slice::from_ref(spec);
+    let mut servers = scan_outside(specs, true)
         .remove(&spec.project_id)
         .unwrap_or_default();
+    if servers.is_empty() {
+        servers = scan_outside(specs, false)
+            .remove(&spec.project_id)
+            .unwrap_or_default();
+    }
+    if servers.is_empty() {
+        return Err(AppError::DevServerFailed {
+            name: spec.name.clone(),
+            reason: format!(
+                "Rezure found no other copy running in {} - if it runs from another folder or as administrator, close it there",
+                spec.dir.display()
+            ),
+        });
+    }
     for server in &servers {
+        log::info!(
+            "stopping a dev server running outside Rezure: {}",
+            server.describe()
+        );
         process::kill_process_tree(server.pid);
     }
     let held: Vec<u16> = servers.iter().flat_map(|s| s.ports.clone()).collect();
+    let killed: Vec<Pid> = servers.iter().map(|s| Pid::from_u32(s.pid)).collect();
+    let mut sys = System::new();
     for _ in 0..50 {
-        if held.iter().all(|port| ports::holder(*port).is_none()) {
+        sys.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&killed),
+            true,
+            ProcessRefreshKind::nothing(),
+        );
+        let gone = killed.iter().all(|pid| sys.process(*pid).is_none());
+        if gone && held.iter().all(|port| ports::holder(*port).is_none()) {
             return Ok(());
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -1253,7 +1309,13 @@ mod tests {
         for (bound, pid) in ports::listening_sockets() {
             listening.entry(pid).or_default().push(bound);
         }
-        let found = find_outside(&sys, &listening, std::slice::from_ref(&spec), u32::MAX);
+        let found = find_outside(
+            &sys,
+            &listening,
+            std::slice::from_ref(&spec),
+            u32::MAX,
+            true,
+        );
         println!("{found:?}");
         let servers = &found["outside"];
         assert_eq!(servers[0].pid, child.id());
@@ -1265,6 +1327,7 @@ mod tests {
             &listening,
             std::slice::from_ref(&spec),
             std::process::id(),
+            true,
         );
         assert!(own.is_empty(), "{own:?}");
 
