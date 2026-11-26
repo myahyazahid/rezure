@@ -240,6 +240,9 @@ on request, and both are real Windows installs (Settings > Apps), not files unde
 - **SQL Server Express LocalDB**, optional: a local SQL Server shown on the
   Services page (service id `sqlserver`). Rezure creates one instance, `Rezure`,
   reached as `(localdb)\Rezure` over a named pipe. There is no TCP port.
+  LocalDB 2022, 2019 and 2017 can be installed side by side; the instance runs
+  on one of them, chosen by the user on the Switch page, which recreates it
+  there. The address stays the same.
 - **Login to LocalDB:** Windows Authentication. Leave `DB_USERNAME` and
   `DB_PASSWORD` empty. The instance belongs to the Windows user running Rezure.
 - **Over TCP** (for tools that can't open a pipe): `127.0.0.1,14330`, SQL login
