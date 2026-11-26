@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { PortHolder, ServiceInfo } from '@/types/service'
-import { useServicesStore } from '@/stores/services'
+import { LOCALDB_SERVICE_ID, useServicesStore } from '@/stores/services'
 import { useBinariesStore } from '@/stores/binaries'
 import { useSettingsStore } from '@/stores/settings'
 import BasePill from '@/components/common/BasePill.vue'
 import ServiceSparkline from '@/components/services/ServiceSparkline.vue'
 import ServiceLogPanel from '@/components/services/ServiceLogPanel.vue'
+import LocalDbHealthPanel from '@/components/services/LocalDbHealthPanel.vue'
 import TechIcon from '@/components/common/TechIcon.vue'
 import LicenseConsentModal from '@/components/common/LicenseConsentModal.vue'
 import { useLicensedInstall } from '@/composables/useLicensedInstall'
@@ -158,14 +159,29 @@ const freeing = ref(false)
  *  changes how something the user installed behaves from then on. */
 const disableAutostart = ref(false)
 
+/** SQL Server LocalDB gets its own panel: why it won't start (a disk SQL
+ *  Server can't run on) and the way out. */
+const isLocalDb = computed(() => props.service.id === LOCALDB_SERVICE_ID)
+/** A LocalDB start just failed — the panel re-checks and offers recreating
+ *  the instance. */
+const localDbStartFailed = ref(false)
+
+function onLocalDbRecovered() {
+  error.value = null
+  localDbStartFailed.value = false
+}
+
 async function onPrimaryAction() {
   error.value = null
   blockers.value = []
   disableAutostart.value = false
+  localDbStartFailed.value = false
+  const starting = !isRunning.value
   try {
     await (isRunning.value ? store.stop(props.service.id) : store.start(props.service.id))
   } catch (e) {
     error.value = errorMessage(e)
+    if (isLocalDb.value && starting) localDbStartFailed.value = true
     // A port conflict is the one failure with an obvious next action, so
     // find out who's responsible rather than leaving the message as advice.
     if (error.value.includes('port')) {
@@ -199,10 +215,12 @@ async function freePortAndStart() {
 
 async function onRestart() {
   error.value = null
+  localDbStartFailed.value = false
   try {
     await store.restart(props.service.id)
   } catch (e) {
     error.value = errorMessage(e)
+    if (isLocalDb.value) localDbStartFailed.value = true
   }
 }
 
@@ -672,6 +690,12 @@ function requestForceStop() {
         </button>
       </div>
     </div>
+
+    <LocalDbHealthPanel
+      v-if="isLocalDb && service.installed"
+      :start-failed="localDbStartFailed"
+      @recovered="onLocalDbRecovered"
+    />
 
     <ServiceLogPanel v-if="expanded" :service-id="service.id" />
 

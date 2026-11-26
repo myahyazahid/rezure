@@ -245,7 +245,7 @@ under `C:\rezure`:
 |---|---|---|
 | `pdo_sqlsrv` / `sqlsrv` | PHP Extensions page, or a project's requirements check | Microsoft's PHP drivers. A DLL in the PHP version's `ext\`, like `redis` |
 | Microsoft ODBC Driver 18 | PHP Extensions page, the requirements check, or Add connection | What both the PHP drivers and the Databases page talk to SQL Server through. **One UAC prompt**; listed in Settings → Apps |
-| SQL Server Express LocalDB (optional) | Services card, or Switch → Install version | A local SQL Server. **One UAC prompt**; listed in Settings → Apps |
+| SQL Server Express LocalDB (optional) | Services card (2022), or Switch → Install version (2022, 2019 or 2017) | A local SQL Server. **One UAC prompt** per release; listed in Settings → Apps |
 
 Before either Windows install, Rezure shows Microsoft's license and waits for you to tick
 the box accepting it — it never accepts it for you. The installers are downloaded from
@@ -286,6 +286,21 @@ restored there keep their files in `C:\rezure\data\mssql\` (LocalDB's own defaul
 of your user folder). **Export** writes a `.bak` backup to `C:\rezure\dumps\`; **Import**
 takes either a `.sql` script (split on `GO` lines, as SSMS does) or a `.bak`, which is
 **restored whole**, replacing a database of the same name.
+
+### LocalDB releases
+
+Install version offers three LocalDB releases: **2022** (the default, and what the Services
+card installs), **2019** and **2017**. They are the newest standalone installers Microsoft
+publishes for each release, pinned by checksum like the rest. SQL Server 2025 isn't offered,
+because Microsoft ships its LocalDB only inside the Express installer, with no standalone
+`.msi` to pin. Releases install side by side.
+
+The `Rezure` instance runs on **one release at a time**. The Switch page shows which one, and
+picking another there recreates the instance on that release. `(localdb)\Rezure` stays the
+same address, so projects don't change. Like **Recreate instance**, switching detaches the
+old instance's databases (their files stay in `C:\rezure\data\mssql\`), and databases
+created on a newer release can't be attached to an older one, so export what you need first.
+The usual reason to switch is a machine where 2022 crashes while starting.
 
 ### A SQL Server elsewhere
 
@@ -642,3 +657,22 @@ freshly created or freshly imported database can read as `0` until MariaDB updat
 statistics. On MySQL 8+ those numbers are also cached for a day
 (`information_schema_stats_expiry`); Rezure turns that cache off for its own query, so Refresh
 shows the current size rather than the one from when the first tables appeared.
+
+**SQL Server LocalDB won't start: "can't start on this disk"** — Windows 11's NVMe driver
+reports the drive's real physical sector size, and some NVMe drives report 8 KB or more. SQL
+Server, every version and LocalDB included, only runs on 512- or 4096-byte sectors, so it
+crashes while starting. A newer LocalDB doesn't help. Rezure reads the sector size itself
+(no admin rights needed) and shows a panel under the SQL Server card. **Fix disk
+compatibility** sets Microsoft's documented workaround,
+`HKLM\SYSTEM\CurrentControlSet\Services\stornvme\Parameters\Device\ForcedPhysicalSectorSizeInBytes`
+= `* 4095`, through one UAC prompt. **Restart Windows** after, then start SQL Server. If the
+panel still reports the problem after a restart, the disk isn't using Windows' own NVMe
+driver, and the workaround doesn't reach it. See
+[Microsoft's article](https://learn.microsoft.com/en-us/troubleshoot/sql/database-engine/database-file-operations/troubleshoot-os-4kb-disk-sector-size).
+Project Doctor flags the same thing for a project whose `DB_HOST` is `(localdb)\Rezure`.
+
+**SQL Server LocalDB won't start, and the disk is fine** — the error shows LocalDB's own reason
+and the last errors from the instance's `error.log`. When a start fails, the panel under the
+card offers **Recreate instance**. It deletes the `Rezure` instance and creates a fresh one,
+which fixes system databases left broken by an earlier failed start. Databases you created in
+it are detached; their files stay in `C:\rezure\data\mssql\`.

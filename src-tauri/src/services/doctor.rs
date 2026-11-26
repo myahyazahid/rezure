@@ -30,6 +30,7 @@ use std::process::Command;
 
 use serde::Serialize;
 
+use super::localdb_health::LocalDbHealth;
 use super::process::MAILPIT_SMTP_PORT;
 use super::{ca_bundle, mssql_localdb, odbc, php, php_ini, postgres};
 use crate::utils::command::HiddenWindow;
@@ -132,6 +133,10 @@ pub struct SqlServerSetup {
     /// Filled in by the command layer, which is what knows about services.
     pub localdb_installed: bool,
     pub localdb_running: bool,
+    /// The disk check from `services::localdb_health`, when the project uses
+    /// Rezure's LocalDB and it's installed — a disk SQL Server can't run on
+    /// is why such a project fails before any of the above matters.
+    pub localdb_health: Option<LocalDbHealth>,
 }
 
 /// A project's local-SMTP mail settings, checked against Mailpit.
@@ -253,6 +258,7 @@ pub fn sql_server_setup(env: &str, database_config: Option<&str>) -> Option<SqlS
         encrypts_by_default: false,
         localdb_installed: false,
         localdb_running: false,
+        localdb_health: None,
     })
 }
 

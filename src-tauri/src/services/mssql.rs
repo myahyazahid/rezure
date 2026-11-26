@@ -480,6 +480,15 @@ pub fn probe(request: Probe<'_>) -> Result<String, AppError> {
 /// Rezure's LocalDB — see `services::localdb_bridge`.
 pub const LOCALDB_LOGIN: &str = "rezure";
 
+/// Set once [`ensure_localdb_login`] has made sure of the login this run.
+static LOCALDB_LOGIN_READY: AtomicBool = AtomicBool::new(false);
+
+/// Makes the next [`ensure_localdb_login`] check again — for after the
+/// instance was recreated, which leaves it without the login.
+pub fn forget_localdb_login() {
+    LOCALDB_LOGIN_READY.store(false, Ordering::SeqCst);
+}
+
 /// Makes sure Rezure's LocalDB has the passwordless `rezure` login, as
 /// `sysadmin`.
 ///
@@ -492,8 +501,7 @@ pub const LOCALDB_LOGIN: &str = "rezure";
 /// Done once per run, through a Windows-authenticated connection — the
 /// account that created the instance is its `sysadmin`.
 pub fn ensure_localdb_login() -> Result<(), AppError> {
-    static DONE: AtomicBool = AtomicBool::new(false);
-    if DONE.load(Ordering::SeqCst) {
+    if LOCALDB_LOGIN_READY.load(Ordering::SeqCst) {
         return Ok(());
     }
     mssql_localdb::ensure_running()?;
@@ -519,7 +527,7 @@ pub fn ensure_localdb_login() -> Result<(), AppError> {
             name = bracket(LOCALDB_LOGIN),
         ),
     )?;
-    DONE.store(true, Ordering::SeqCst);
+    LOCALDB_LOGIN_READY.store(true, Ordering::SeqCst);
     Ok(())
 }
 

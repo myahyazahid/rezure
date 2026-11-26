@@ -41,6 +41,7 @@ onActivated(() => {
   composerStore.fetchVersions()
   binariesStore.fetchAll()
   binariesStore.fetchMariaDbVersions()
+  binariesStore.fetchLocalDbReleases().catch(() => {})
   nodeStore.fetchVersions()
   postgresStore.fetchVersions()
   phpStore.fetchDropInDir()
@@ -80,14 +81,69 @@ const mailpitVersions = computed<RuntimeVersionEntry[]>(() =>
 // its own compatible build — see `db_profiles::resolve_server_exe`), so
 // there's no single "active" version at this page's level the way PHP has
 // one. The newest installed build is shown as a label, not a real switch.
-// SQL Server LocalDB: a Windows install rather than a zip, but like Nginx and
-// Mailpit one pinned version, so the row only reports installed or not.
-const localdb = computed(() => binariesStore.binaries.find((b) => b.id === 'sqllocaldb') ?? null)
+// SQL Server LocalDB: one Windows install per SQL Server release, side by
+// side. "Active" is the release Rezure's instance was created on — switching
+// recreates the instance there (`mssql_localdb::recreate`), which detaches
+// its databases, so it asks first.
 const localdbVersions = computed<RuntimeVersionEntry[]>(() =>
-  localdb.value
-    ? [{ id: 'sqllocaldb', version: localdb.value.version, installed: localdb.value.installed }]
-    : [],
+  binariesStore.localdbReleases.map((r) => ({
+    id: r.id,
+    version: r.release,
+    installed: r.installed,
+    detail: r.version,
+  })),
 )
+const localdbActive = computed(
+  () => binariesStore.localdbReleases.find((r) => r.active)?.release ?? null,
+)
+const localdbInstalledCount = computed(
+  () => binariesStore.localdbReleases.filter((r) => r.installed).length,
+)
+const localdbInstallingId = computed(
+  () => binariesStore.localdbReleases.find((r) => binariesStore.isInstalling(r.id))?.id ?? null,
+)
+
+/** The release waiting on the user's confirmation to switch to. */
+const pendingLocalDbSwitch = computed(
+  () => binariesStore.localdbReleases.find((r) => r.id === pendingLocalDbId.value) ?? null,
+)
+const pendingLocalDbId = ref<string | null>(null)
+const localdbSwitching = ref(false)
+const localdbError = ref<string | null>(null)
+/** Going to an older release: databases created on the newer one can't be
+ *  attached to it at all, not just detached. */
+const localdbDowngrade = computed(() => {
+  const target = pendingLocalDbSwitch.value
+  const active = binariesStore.localdbReleases.find((r) => r.active)
+  return !!target && !!active && Number(target.release) < Number(active.release)
+})
+
+function onLocalDbSelect(id: string) {
+  localdbError.value = null
+  const release = binariesStore.localdbReleases.find((r) => r.id === id)
+  if (!release || release.active) return
+  pendingLocalDbId.value = id
+}
+
+function cancelLocalDbSwitch() {
+  pendingLocalDbId.value = null
+}
+
+async function confirmLocalDbSwitch() {
+  const id = pendingLocalDbId.value
+  if (!id) return
+  localdbSwitching.value = true
+  localdbError.value = null
+  try {
+    await servicesStore.switchLocalDbRelease(id)
+    pendingLocalDbId.value = null
+  } catch (e) {
+    localdbError.value = typeof e === 'string' ? e : 'Switching SQL Server LocalDB failed.'
+  } finally {
+    localdbSwitching.value = false
+    await binariesStore.fetchLocalDbReleases().catch(() => {})
+  }
+}
 
 const mariadbVersions = computed<RuntimeVersionEntry[]>(() =>
   binariesStore.mariadbVersions.map((v) => ({
@@ -269,12 +325,60 @@ const hasPhpConfig = computed(
       <RuntimeSwitchRow
         icon="sqlserver"
         name="SQL Server LocalDB"
-        :active-version="localdb?.installed ? localdb.version : null"
-        :installed-count="localdb?.installed ? 1 : 0"
+        :active-version="localdbActive"
+        :installed-count="localdbInstalledCount"
         :versions="localdbVersions"
-        :installing-id="binariesStore.isInstalling('sqllocaldb') ? 'sqllocaldb' : null"
-        :progress="binariesStore.progressFor('sqllocaldb')"
+        :installing-id="localdbInstallingId"
+        :progress="localdbInstallingId ? binariesStore.progressFor(localdbInstallingId) : null"
+        :busy="localdbSwitching"
+        @select="onLocalDbSelect"
       />
+      <!-- Switching recreates the instance, so it's confirmed in place rather
+           than done on the dropdown click. -->
+      <div v-if="pendingLocalDbSwitch || localdbError" class="px-4 py-3.5">
+        <div
+          v-if="pendingLocalDbSwitch"
+          class="rounded-xl border border-amber-300/60 bg-amber-100/50 p-3.5 dark:border-amber-500/25 dark:bg-amber-500/10"
+        >
+          <p class="text-sm font-semibold text-amber-900 dark:text-amber-200">
+            Switch SQL Server LocalDB to {{ pendingLocalDbSwitch.release }}?
+          </p>
+          <p class="mt-1 text-xs text-amber-800 dark:text-amber-300">
+            Rezure deletes its <span class="font-mono">(localdb)\Rezure</span> instance and creates
+            it again on SQL Server {{ pendingLocalDbSwitch.release }}. Projects keep the same
+            address. Databases in the old instance are detached - their files stay in
+            <span class="font-mono">C:\rezure\data\mssql</span>.
+          </p>
+          <p
+            v-if="localdbDowngrade"
+            class="mt-1 text-xs font-semibold text-amber-900 dark:text-amber-200"
+          >
+            This is an older release: databases created on the newer one can't be attached to it.
+            Export them first if you need them.
+          </p>
+          <div class="mt-3 flex gap-2">
+            <button
+              type="button"
+              class="glass-accent rounded-full px-4 py-1.5 text-sm font-semibold transition disabled:opacity-50"
+              :disabled="localdbSwitching"
+              @click="confirmLocalDbSwitch"
+            >
+              {{ localdbSwitching ? 'Switching…' : `Switch to ${pendingLocalDbSwitch.release}` }}
+            </button>
+            <button
+              type="button"
+              class="rounded-full px-4 py-1.5 text-sm font-semibold text-amber-900 dark:text-amber-200"
+              :disabled="localdbSwitching"
+              @click="cancelLocalDbSwitch"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+        <p v-if="localdbError" class="mt-2 text-xs text-red-600 dark:text-red-400">
+          {{ localdbError }}
+        </p>
+      </div>
       <RuntimeSwitchRow
         icon="composer"
         name="Composer"

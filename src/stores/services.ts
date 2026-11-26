@@ -2,10 +2,13 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import type { ManagedService, PortHolder, ServiceInfo } from '@/types/service'
+import type { LocalDbHealth, ManagedService, PortHolder, ServiceInfo } from '@/types/service'
 
 // Keep in sync with `CHANGED_EVENT` in src-tauri/src/services/supervisor.rs
 const CHANGED_EVENT = 'service://changed'
+
+// Keep in sync with `SERVICE_ID` in src-tauri/src/services/mssql_localdb.rs
+export const LOCALDB_SERVICE_ID = 'sqlserver'
 
 export const useServicesStore = defineStore('services', () => {
   /** The Services page's rows: every service not removed with Manage
@@ -123,6 +126,33 @@ export const useServicesStore = defineStore('services', () => {
     await fetchAll()
   }
 
+  /** The disk check for SQL Server LocalDB — see
+   *  `services::localdb_health`. */
+  function localDbHealth() {
+    return invoke<LocalDbHealth>('localdb_health')
+  }
+
+  /** Applies the NVMe sector size workaround through a UAC prompt. Only ever
+   *  called from a button the user pressed; Windows must restart after. */
+  function fixLocalDbDisk() {
+    return invoke<LocalDbHealth>('fix_localdb_disk')
+  }
+
+  /** Deletes LocalDB's instance, creates it afresh and starts it. Detaches
+   *  its databases — the caller confirms with the user first. */
+  function recreateLocalDb() {
+    return withPending(LOCALDB_SERVICE_ID, () => invoke<ServiceInfo>('recreate_localdb_instance'))
+  }
+
+  /** Moves LocalDB's instance to another installed release (by package id)
+   *  by recreating it there. Detaches its databases — the caller confirms
+   *  with the user first. */
+  function switchLocalDbRelease(id: string) {
+    return withPending(LOCALDB_SERVICE_ID, () =>
+      invoke<ServiceInfo>('switch_localdb_release', { id }),
+    )
+  }
+
   function isPending(id: string) {
     return pendingIds.value.has(id)
   }
@@ -138,6 +168,10 @@ export const useServicesStore = defineStore('services', () => {
     stop,
     forceStop,
     portHolder,
+    localDbHealth,
+    fixLocalDbDisk,
+    recreateLocalDb,
+    switchLocalDbRelease,
     freePort,
     restart,
     startAll,

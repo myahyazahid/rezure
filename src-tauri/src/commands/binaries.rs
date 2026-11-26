@@ -41,12 +41,22 @@ pub async fn install_binary(
     msi::install(&app, &id, accept_license.unwrap_or(false)).await?;
     // LocalDB is only useful on the Databases page through the connection
     // that points at it; adding it here means it's there the moment the
-    // install finishes, not after the next restart.
-    if id == "sqllocaldb" {
+    // install finishes, not after the next restart. Any release counts.
+    if package.localdb_folder().is_some() {
         connections::ensure_localdb();
         localdb_bridge::start();
     }
     Ok(msi::status_of(package))
+}
+
+/// Every SQL Server LocalDB release Rezure offers, with which are installed
+/// and which one its instance runs on — for the Switch page and Install
+/// version. Reading the instance spawns `SqlLocalDB`, hence off the runtime.
+#[tauri::command]
+pub async fn list_localdb_releases() -> Result<Vec<msi::LocalDbRelease>, AppError> {
+    tokio::task::spawn_blocking(msi::localdb_releases)
+        .await
+        .map_err(|e| AppError::Io(format!("background task panicked: {e}")))
 }
 
 /// Every MariaDB version currently on disk — the same scan

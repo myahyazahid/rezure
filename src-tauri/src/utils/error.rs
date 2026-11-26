@@ -282,6 +282,37 @@ pub enum AppError {
         "PostgreSQL refuses to run with administrator rights, and Rezure was started as administrator - close it and open it normally, then start PostgreSQL again"
     )]
     PostgresElevated,
+
+    /// The disk under LocalDB reports a sector size SQL Server can't run on
+    /// — see `services::localdb_health`. A variant of its own, not a
+    /// `ProcessSpawnFailed`, so telemetry can count how often it happens.
+    #[error(
+        "SQL Server LocalDB can't start on this disk: Windows reports {sector}, and SQL Server only supports 512 and 4096 - use Fix disk compatibility on the SQL Server card (one admin prompt, then restart Windows)"
+    )]
+    LocalDbSectorSize { sector: String },
+
+    #[error(
+        "SQL Server LocalDB can't start yet: the disk compatibility fix is in place, but Windows reports {sector} until it restarts - restart Windows, then start SQL Server again"
+    )]
+    LocalDbRestartPending { sector: String },
+
+    #[error(
+        "SQL Server LocalDB can't start on this disk: Windows still reports {sector} after a restart with the disk compatibility fix in place, so this disk isn't driven by Windows' own NVMe driver - update the storage driver, or keep SQL Server on a disk with 4096-byte sectors"
+    )]
+    LocalDbFixIneffective { sector: String },
+
+    /// `SqlLocalDB start` failed, or claimed success and left the instance
+    /// stopped — for any reason other than the disk.
+    #[error("SQL Server LocalDB didn't start: {reason}")]
+    LocalDbStartFailed { reason: String },
+
+    #[error(
+        "the disk compatibility fix was cancelled - click Yes on the admin prompt to apply it"
+    )]
+    LocalDbFixCancelled,
+
+    #[error("couldn't apply the disk compatibility fix: {0}")]
+    LocalDbFixFailed(String),
 }
 
 /// Serialized as its `Display` message (the `#[error("...")]` text) rather
@@ -382,6 +413,12 @@ impl AppError {
             Self::UnsupportedOnSqlServer { .. } => "UnsupportedOnSqlServer",
             Self::PostgresVersionNotFound { .. } => "PostgresVersionNotFound",
             Self::PostgresElevated => "PostgresElevated",
+            Self::LocalDbSectorSize { .. } => "LocalDbSectorSize",
+            Self::LocalDbRestartPending { .. } => "LocalDbRestartPending",
+            Self::LocalDbFixIneffective { .. } => "LocalDbFixIneffective",
+            Self::LocalDbStartFailed { .. } => "LocalDbStartFailed",
+            Self::LocalDbFixCancelled => "LocalDbFixCancelled",
+            Self::LocalDbFixFailed { .. } => "LocalDbFixFailed",
         }
     }
 }

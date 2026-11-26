@@ -55,10 +55,42 @@ pub struct MsiPackage {
     pub license_url: &'static str,
     /// The public property the installer insists on before a silent run.
     pub license_property: &'static str,
-    /// Whether the package is already there — the only reliable success
-    /// check after the installer has run (see [`install`]).
-    pub is_installed: fn() -> bool,
+    /// How to tell whether the package is already there — the only reliable
+    /// success check after the installer has run (see [`install`]).
+    pub detect: Detect,
 }
+
+/// How an installed package is recognised.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Detect {
+    /// Registered with Windows' ODBC driver manager.
+    OdbcDriver,
+    /// A LocalDB release, by the folder its engine installs into — the major
+    /// version times ten (`150` for 2019). Releases install side by side.
+    LocalDb { folder: u32 },
+}
+
+impl MsiPackage {
+    pub fn is_installed(&self) -> bool {
+        match self.detect {
+            Detect::OdbcDriver => odbc::is_installed(),
+            Detect::LocalDb { folder } => mssql_localdb::is_release_installed(folder),
+        }
+    }
+
+    /// The release folder, for a LocalDB package.
+    pub fn localdb_folder(&self) -> Option<u32> {
+        match self.detect {
+            Detect::LocalDb { folder } => Some(folder),
+            Detect::OdbcDriver => None,
+        }
+    }
+}
+
+/// Microsoft's license-terms lookup, for the LocalDB releases whose exact
+/// per-release terms page couldn't be pinned: the same terms are shown in the
+/// installer itself, which Rezure runs silently.
+const USE_TERMS_URL: &str = "https://www.microsoft.com/en-us/useterms";
 
 /// Verified against the downloads on 2026-10-03: checksum below, and a valid
 /// Authenticode signature from `CN=Microsoft Corporation` on both.
@@ -75,8 +107,11 @@ pub const PACKAGES: &[MsiPackage] = &[
         // The license text the installer itself shows, as Microsoft hosts it.
         license_url: "https://aka.ms/odbc18eularedist",
         license_property: "IACCEPTMSODBCSQLLICENSETERMS",
-        is_installed: odbc::is_installed,
+        detect: Detect::OdbcDriver,
     },
+    // LocalDB, newest first. `sqllocaldb` stays the id of the default release
+    // (the one the Services card installs) so existing installs keep
+    // matching it.
     MsiPackage {
         id: "sqllocaldb",
         name: "SQL Server 2022 Express LocalDB",
@@ -88,9 +123,71 @@ pub const PACKAGES: &[MsiPackage] = &[
         // editions.
         license_url: "https://www.microsoft.com/content/dam/microsoft/usetm/documents/sql-server/sql-server-2022-developer-express-evaluation/retail-packaged/SQLServer2022_SQLServer2022DeveloperExpressEvaluation_English.pdf",
         license_property: "IACCEPTSQLLOCALDBLICENSETERMS",
-        is_installed: mssql_localdb::is_installed,
+        detect: Detect::LocalDb { folder: 160 },
+    },
+    // The newest standalone LocalDB installers Microsoft publishes for these
+    // releases, for machines where 2022 won't run. Verified against the
+    // downloads on 2026-11-26: checksum below, a valid Authenticode signature
+    // from `CN=Microsoft Corporation`, ProductVersion as pinned, and the same
+    // license property in the installer's own sequence.
+    MsiPackage {
+        id: "sqllocaldb-2019",
+        name: "SQL Server 2019 Express LocalDB",
+        version: "15.0.2000.5",
+        download_url: "https://download.microsoft.com/download/7/c/1/7c14e92e-bdcb-4f89-b7cf-93543e7112d1/SqlLocalDB.msi",
+        sha256: "80702f2b2732de041fe34ea6477ea556eeb5d73ee44ce4a4301de719455345e0",
+        license_url: USE_TERMS_URL,
+        license_property: "IACCEPTSQLLOCALDBLICENSETERMS",
+        detect: Detect::LocalDb { folder: 150 },
+    },
+    MsiPackage {
+        id: "sqllocaldb-2017",
+        name: "SQL Server 2017 Express LocalDB",
+        version: "14.0.1000.169",
+        download_url: "https://download.microsoft.com/download/E/F/2/EF23C21D-7860-4F05-88CE-39AA114B014B/SqlLocalDB.msi",
+        sha256: "1f8ecc7dcb4691c72d9f0fa29b05ac14c472944409c97c1ba428b67ec4fccff9",
+        license_url: USE_TERMS_URL,
+        license_property: "IACCEPTSQLLOCALDBLICENSETERMS",
+        detect: Detect::LocalDb { folder: 140 },
     },
 ];
+
+/// One LocalDB release, as the Switch page and Install version list it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalDbRelease {
+    /// The package id, for installing and switching.
+    pub id: String,
+    /// `2019`.
+    pub release: String,
+    /// The pinned installer's version, `15.0.2000.5`.
+    pub version: String,
+    pub installed: bool,
+    /// Rezure's instance runs on this release.
+    pub active: bool,
+}
+
+/// Every LocalDB release Rezure offers, newest first, with which one the
+/// instance runs on. Spawns `SqlLocalDB info` (cached briefly) to read that.
+pub fn localdb_releases() -> Vec<LocalDbRelease> {
+    let active = mssql_localdb::instance_folder();
+    PACKAGES
+        .iter()
+        .filter_map(|pkg| {
+            let folder = pkg.localdb_folder()?;
+            let major = (folder / 10).to_string();
+            Some(LocalDbRelease {
+                id: pkg.id.to_string(),
+                release: mssql_localdb::release_for_major(&major)
+                    .unwrap_or(&major)
+                    .to_string(),
+                version: pkg.version.to_string(),
+                installed: pkg.is_installed(),
+                active: active == Some(folder),
+            })
+        })
+        .collect()
+}
 
 pub fn find(id: &str) -> Option<&'static MsiPackage> {
     PACKAGES.iter().find(|pkg| pkg.id == id)
@@ -101,7 +198,7 @@ pub fn status_of(pkg: &MsiPackage) -> BinaryStatus {
         id: pkg.id.to_string(),
         name: pkg.name.to_string(),
         version: pkg.version.to_string(),
-        installed: (pkg.is_installed)(),
+        installed: pkg.is_installed(),
         license_url: Some(pkg.license_url.to_string()),
     }
 }
@@ -199,7 +296,7 @@ pub async fn install(app: &AppHandle, id: &str, license_accepted: bool) -> Resul
     if !license_accepted {
         return Err(AppError::LicenseNotAccepted(pkg.name.to_string()));
     }
-    if (pkg.is_installed)() {
+    if pkg.is_installed() {
         return Ok(());
     }
 
@@ -261,7 +358,7 @@ fn run_installer(pkg: &MsiPackage, bytes: &[u8]) -> Result<(), AppError> {
 
     // The exit code is a claim; this is the fact. Windows has to actually
     // know about the package now, or nothing downstream will find it.
-    if !(pkg.is_installed)() {
+    if !pkg.is_installed() {
         return Err(AppError::InstallerFailed {
             name: pkg.name.to_string(),
             reason: format!(
@@ -291,6 +388,30 @@ mod tests {
                 pkg.download_url
             );
             assert!(pkg.license_url.starts_with("https://"), "{}", pkg.id);
+        }
+    }
+
+    /// The Switch page lists them in this order and calls the first one
+    /// "latest"; two packages on one folder would be the same install.
+    #[test]
+    fn localdb_releases_are_newest_first_and_each_its_own_folder() {
+        let folders: Vec<u32> = PACKAGES.iter().filter_map(|p| p.localdb_folder()).collect();
+        assert!(folders.len() >= 3, "{folders:?}");
+        assert!(folders.windows(2).all(|w| w[0] > w[1]), "{folders:?}");
+        // The default release keeps the id the Services card installs.
+        assert_eq!(
+            find("sqllocaldb").and_then(|p| p.localdb_folder()),
+            Some(160)
+        );
+    }
+
+    /// What this machine has.
+    /// `cargo test --lib services::msi::tests::print_real_localdb_releases -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn print_real_localdb_releases() {
+        for release in localdb_releases() {
+            println!("{release:?}");
         }
     }
 
@@ -345,7 +466,7 @@ mod tests {
     async fn installs_for_real() {
         let id = std::env::var("REZURE_TEST_MSI").expect("set REZURE_TEST_MSI to a package id");
         let pkg = find(&id).expect("no such package");
-        if (pkg.is_installed)() {
+        if pkg.is_installed() {
             println!("{} is already installed - nothing to do", pkg.name);
             return;
         }
@@ -361,7 +482,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(
-            (pkg.is_installed)(),
+            pkg.is_installed(),
             "{} must be detected afterwards",
             pkg.name
         );

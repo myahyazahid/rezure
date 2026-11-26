@@ -37,9 +37,11 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
+use super::localdb_health;
 use super::{Service, ServiceInfo, ServiceStatus};
 use crate::utils::command::HiddenWindow;
 use crate::utils::error::AppError;
@@ -90,6 +92,55 @@ pub fn is_installed() -> bool {
     locate().is_some()
 }
 
+/// `C:\Program Files\Microsoft SQL Server` — where every LocalDB release
+/// installs, each in its own `<NNN>` folder.
+fn sql_server_root() -> Option<PathBuf> {
+    Some(PathBuf::from(std::env::var_os("ProgramFiles")?).join("Microsoft SQL Server"))
+}
+
+/// The engine a LocalDB release installs: `<NNN>\LocalDB\Binn\sqlservr.exe`,
+/// where `NNN` is the major version times ten (`150` for 2019). Releases
+/// install side by side, each into its own folder.
+fn engine_exe(root: &Path, folder: u32) -> PathBuf {
+    root.join(folder.to_string())
+        .join("LocalDB")
+        .join("Binn")
+        .join("sqlservr.exe")
+}
+
+/// Whether the LocalDB release in `folder` (`150` for 2019) is installed.
+pub fn is_release_installed(folder: u32) -> bool {
+    sql_server_root().is_some_and(|root| engine_exe(&root, folder).is_file())
+}
+
+/// The `SqlLocalDB create` version argument for a release folder —
+/// `150` → `15.0`.
+fn create_version_arg(folder: u32) -> String {
+    format!("{}.0", folder / 10)
+}
+
+/// `15.0.2000.5` → `150`, the folder a release installs into.
+fn folder_of_version(version: &str) -> Option<u32> {
+    let major: u32 = version.split('.').next()?.trim().parse().ok()?;
+    Some(major * 10)
+}
+
+/// The release folder of the engine [`INSTANCE`] was last seen on, `0`
+/// before it has been read. Kept so [`release_label`] can report the release
+/// actually in use without spawning `SqlLocalDB` itself.
+static INSTANCE_FOLDER: AtomicU32 = AtomicU32::new(0);
+
+/// The release folder [`INSTANCE`] was created on (`150` for 2019), or
+/// `None` when it doesn't exist yet.
+pub fn instance_folder() -> Option<u32> {
+    let exe = locate()?;
+    let info = instance_info(&exe);
+    if !info.exists {
+        return None;
+    }
+    folder_of_version(&info.version)
+}
+
 /// The marketing release for an internal major version (`16` → `2022`).
 pub fn release_for_major(major: &str) -> Option<&'static str> {
     Some(match major {
@@ -110,23 +161,32 @@ pub fn release_for_major(major: &str) -> Option<&'static str> {
 /// `services::telemetry` reports as the SQL Server in use. `None` when LocalDB
 /// isn't installed.
 ///
-/// Read from the folder the install went to rather than asked of the
-/// instance: it's the same answer at the granularity a stack chart wants, and
-/// it costs no process spawn on a path that runs for every service start.
+/// The release the instance was last seen on, when it has been read this
+/// run; otherwise the folder the newest install went to. Either way it costs
+/// no process spawn, on a path that runs for every service start.
 pub fn release_label() -> Option<String> {
-    release_label_of(&locate()?)
+    let exe = locate()?;
+    match INSTANCE_FOLDER.load(Ordering::Relaxed) {
+        0 => release_label_of(&exe),
+        folder => Some(release_label_for(folder)),
+    }
 }
 
 /// `…\Microsoft SQL Server\160\Tools\Binn\SqlLocalDB.exe` → the `160`, which
 /// is the major version times ten.
 fn release_label_of(exe: &Path) -> Option<String> {
     let folder = exe.ancestors().nth(3)?.file_name()?.to_str()?;
-    let major = (folder.parse::<u32>().ok()? / 10).to_string();
-    Some(match release_for_major(&major) {
+    Some(release_label_for(folder.parse::<u32>().ok()?))
+}
+
+/// `SQL Server 2019 LocalDB` for the release folder `150`.
+fn release_label_for(folder: u32) -> String {
+    let major = (folder / 10).to_string();
+    match release_for_major(&major) {
         Some(release) => format!("SQL Server {release} LocalDB"),
         // A release newer than this knows: still worth reporting, as a number.
         None => format!("SQL Server LocalDB {major}"),
-    })
+    }
 }
 
 /// `C:\rezure\data\mssql` — where the databases Rezure creates or restores
@@ -306,6 +366,11 @@ fn instance_info(exe: &Path) -> InstanceInfo {
         Ok(stdout) => parse_info(&stdout),
         Err(_) => InstanceInfo::default(),
     };
+    if info.exists {
+        if let Some(folder) = folder_of_version(&info.version) {
+            INSTANCE_FOLDER.store(folder, Ordering::Relaxed);
+        }
+    }
     if info.version.is_empty() {
         info.version = sqllocaldb(exe, &["versions"])
             .map(|stdout| parse_versions(&stdout))
@@ -322,18 +387,35 @@ fn instance_info(exe: &Path) -> InstanceInfo {
 /// the first Start: once the instance exists, LocalDB starts it by itself
 /// the moment a client connects, so a project pointed at `(localdb)\Rezure`
 /// works whether or not anyone pressed Start. Before it exists, it fails.
+///
+/// `create` starts the instance once to build its system databases, so it
+/// fails for the same reasons a start does — and is reported the same way,
+/// through `localdb_health::start_failure`.
 pub fn ensure_created() -> Result<bool, AppError> {
     let exe = locate().ok_or_else(|| AppError::BinaryNotInstalled(SERVICE_NAME.to_string()))?;
     if instance_info(&exe).exists {
         return Ok(false);
     }
-    sqllocaldb(&exe, &["create", INSTANCE]).map_err(|reason| AppError::ProcessSpawnFailed {
-        name: SERVICE_NAME.to_string(),
-        reason,
-    })?;
-    forget_cached_info();
-    log::info!("created the LocalDB instance {INSTANCE}");
+    create_instance(&exe, None)?;
     Ok(true)
+}
+
+/// `SqlLocalDB create Rezure [15.0]` — on the release in `folder`, or the
+/// newest one installed when that's `None`.
+fn create_instance(exe: &Path, folder: Option<u32>) -> Result<(), AppError> {
+    let version = folder.map(create_version_arg);
+    let mut args = vec!["create", INSTANCE];
+    if let Some(version) = version.as_deref() {
+        args.push(version);
+    }
+    let since = SystemTime::now();
+    sqllocaldb(exe, &args).map_err(|reason| localdb_health::start_failure(reason, since))?;
+    forget_cached_info();
+    log::info!(
+        "created the LocalDB instance {INSTANCE} on {}",
+        version.as_deref().unwrap_or("the newest installed release")
+    );
+    Ok(())
 }
 
 /// Makes sure [`INSTANCE`] exists and is running, creating it on first use.
@@ -343,6 +425,11 @@ pub fn ensure_created() -> Result<bool, AppError> {
 /// never created on demand, and a project pointed at `(localdb)\Rezure`
 /// before anyone pressed Start would otherwise fail with "instance not
 /// found".
+///
+/// Success is judged by reading the instance's state back afterwards, not
+/// by what `SqlLocalDB start` printed: [`sqllocaldb`] recognises a failure by
+/// its English wording, and on a Windows set to another language the tool's
+/// messages — and so a failure — could read as success.
 pub fn ensure_running() -> Result<(), AppError> {
     let exe = locate().ok_or_else(|| AppError::BinaryNotInstalled(SERVICE_NAME.to_string()))?;
     let info = instance_info(&exe);
@@ -353,12 +440,54 @@ pub fn ensure_running() -> Result<(), AppError> {
         ensure_created()?;
     }
     forget_cached_info();
-    sqllocaldb(&exe, &["start", INSTANCE]).map_err(|reason| AppError::ProcessSpawnFailed {
-        name: SERVICE_NAME.to_string(),
-        reason,
-    })?;
+    let since = SystemTime::now();
+    sqllocaldb(&exe, &["start", INSTANCE])
+        .map_err(|reason| localdb_health::start_failure(reason, since))?;
     forget_cached_info();
+    if !instance_info(&exe).running {
+        return Err(localdb_health::start_failure(
+            "LocalDB reported the instance stopped right after starting it".to_string(),
+            since,
+        ));
+    }
     Ok(())
+}
+
+/// Deletes [`INSTANCE`] and creates it afresh, then starts it — the way out
+/// of an instance whose system databases were left broken, typically by a
+/// `create` that failed half way, and how the instance moves to another
+/// release: `folder` is the one to create it on (`150` for 2019). `None`
+/// keeps the release it was on, or takes the newest installed when that
+/// can't be read.
+///
+/// Databases attached to the old instance are detached by this; their
+/// `.mdf`/`.ldf` files stay where they are, in [`data_dir`]. The UI says so
+/// before offering it.
+pub fn recreate(folder: Option<u32>) -> Result<(), AppError> {
+    let exe = locate().ok_or_else(|| AppError::BinaryNotInstalled(SERVICE_NAME.to_string()))?;
+    let folder = folder
+        .or_else(|| {
+            let info = instance_info(&exe);
+            info.exists
+                .then(|| folder_of_version(&info.version))
+                .flatten()
+        })
+        .filter(|folder| is_release_installed(*folder));
+    if instance_info(&exe).exists {
+        // A stopped instance makes `stop` fail; that's fine, `delete` is
+        // what matters.
+        let _ = sqllocaldb(&exe, &["stop", INSTANCE, "-k"]);
+        sqllocaldb(&exe, &["delete", INSTANCE]).map_err(|reason| AppError::LocalDbStartFailed {
+            reason: format!("couldn't delete the old instance: {reason}"),
+        })?;
+        forget_cached_info();
+        log::info!("deleted the LocalDB instance {INSTANCE} to recreate it");
+    }
+    // The new instance has none of the old one's logins.
+    super::mssql::forget_localdb_login();
+    INSTANCE_FOLDER.store(0, Ordering::Relaxed);
+    create_instance(&exe, folder)?;
+    ensure_running()
 }
 
 /// The pipe the running instance listens on, starting it first if need be —
@@ -485,6 +614,16 @@ mod tests {
 
     /// `SqlLocalDB info` with no name: one instance per line, including the
     /// automatic one before anything has created it.
+    #[test]
+    fn a_release_folder_maps_to_its_create_argument_and_back() {
+        assert_eq!(create_version_arg(150), "15.0");
+        assert_eq!(folder_of_version("15.0.2000.5"), Some(150));
+        assert_eq!(folder_of_version("16.0.1000.6"), Some(160));
+        assert_eq!(folder_of_version(""), None);
+        assert_eq!(release_label_for(150), "SQL Server 2019 LocalDB");
+        assert_eq!(release_label_for(990), "SQL Server LocalDB 99");
+    }
+
     #[test]
     fn the_instance_listing_is_one_name_per_line() {
         assert_eq!(

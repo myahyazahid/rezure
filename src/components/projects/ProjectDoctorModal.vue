@@ -118,8 +118,32 @@ const sqlReady = computed(
     !!sql.value &&
     sql.value.driverLoaded &&
     sql.value.odbcDriver !== null &&
-    (!sql.value.usesLocaldb || (sql.value.localdbInstalled && !sql.value.portConflicts)),
+    (!sql.value.usesLocaldb ||
+      (sql.value.localdbInstalled && !sql.value.portConflicts && !sqlDiskProblem.value)),
 )
+
+/** The disk under LocalDB is one SQL Server can't run on — see
+ *  `services::localdb_health`. The fix itself lives on the SQL Server card on
+ *  the Services page, so there's one place that changes the registry. */
+const sqlDiskProblem = computed(() => {
+  const verdict = sql.value?.localdbHealth?.verdict
+  return verdict === 'needsFix' || verdict === 'restartPending' || verdict === 'fixIneffective'
+})
+
+const sqlDiskMessage = computed(() => {
+  const health = sql.value?.localdbHealth
+  if (!health) return ''
+  const sector = health.sectorBytes
+    ? `${health.sectorBytes.toLocaleString()}-byte`
+    : 'larger than 4,096-byte'
+  if (health.verdict === 'restartPending') {
+    return `The disk compatibility fix for LocalDB is in place, but Windows keeps reporting ${sector} sectors until it restarts. Restart Windows, then start SQL Server.`
+  }
+  if (health.verdict === 'fixIneffective') {
+    return `Windows still reports ${sector} disk sectors after restarting with the compatibility fix, so LocalDB can't start on this disk. The fix only reaches Windows' own NVMe driver.`
+  }
+  return `Windows reports ${sector} disk sectors, and SQL Server only runs on 512 or 4,096, so LocalDB crashes while starting. Use Fix disk compatibility on the SQL Server card on the Services page.`
+})
 
 /** ODBC Driver 18 refuses a certificate it can't verify, and the project
  *  hasn't switched trust on. LocalDB is fine either way — checked by
@@ -446,6 +470,12 @@ async function install(name: string) {
             <code class="font-mono">DB_PORT</code> - or its default, 1433 - to the host unless it's
             empty. Set <code class="font-mono">DB_PORT=</code> (nothing after the
             <code class="font-mono">=</code>) in <code class="font-mono">.env</code>.
+          </div>
+          <div
+            v-if="sql.usesLocaldb && sqlDiskProblem"
+            class="rounded-xl bg-amber-100/50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200"
+          >
+            {{ sqlDiskMessage }}
           </div>
         </div>
 

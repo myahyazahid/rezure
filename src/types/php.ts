@@ -1,3 +1,5 @@
+import type { LocalDbHealth } from '@/types/service'
+
 export interface PhpVersion {
   id: string
   version: string
@@ -116,6 +118,9 @@ export interface SqlServerSetup {
   encryptsByDefault: boolean
   localdbInstalled: boolean
   localdbRunning: boolean
+  /** The LocalDB disk check, when the project uses Rezure's LocalDB and it's
+   *  installed. */
+  localdbHealth: LocalDbHealth | null
 }
 
 /** A project's local-SMTP mail settings, checked against Mailpit. */

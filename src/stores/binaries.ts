@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import type { BinaryStatus, InstallProgress } from '@/types/binary'
+import type { BinaryStatus, InstallProgress, LocalDbRelease } from '@/types/binary'
 import type { InstalledVersion, MariaDbRelease } from '@/types/runtime'
 import { useServicesStore } from '@/stores/services'
 import { useDbConnectionsStore } from '@/stores/dbConnections'
@@ -34,6 +34,19 @@ export const useBinariesStore = defineStore('binaries', () => {
   const mariadbCatalogLoading = ref(false)
   const mariadbCatalogError = ref<string | null>(null)
   const installingMariaDbVersion = ref<string | null>(null)
+
+  /** SQL Server LocalDB releases, newest first, with which are installed and
+   *  which one Rezure's instance runs on. */
+  const localdbReleases = ref<LocalDbRelease[]>([])
+
+  async function fetchLocalDbReleases() {
+    localdbReleases.value = await invoke<LocalDbRelease[]>('list_localdb_releases')
+  }
+
+  /** Whether `id` is one of the LocalDB packages. */
+  function isLocalDbPackage(id: string) {
+    return id === 'sqllocaldb' || id.startsWith('sqllocaldb-')
+  }
 
   listen<InstallProgress>(PROGRESS_EVENT, (event) => {
     progress.value[event.payload.id] = event.payload
@@ -72,6 +85,7 @@ export const useBinariesStore = defineStore('binaries', () => {
           .fetchAll()
           .catch(() => {})
       }
+      if (isLocalDbPackage(id)) await fetchLocalDbReleases().catch(() => {})
     } finally {
       installingIds.value.delete(id)
       delete progress.value[id]
@@ -127,6 +141,9 @@ export const useBinariesStore = defineStore('binaries', () => {
     binaries,
     loading,
     fetchAll,
+    localdbReleases,
+    fetchLocalDbReleases,
+    isLocalDbPackage,
     install,
     isInstalling,
     progressFor,

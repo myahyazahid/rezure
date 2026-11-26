@@ -12,6 +12,7 @@ use crate::config::settings::{self, SettingsState};
 use crate::services::binaries;
 use crate::services::ca_bundle::{self, CaBundleStatus};
 use crate::services::doctor::{self, ProjectDiagnosis, TlsCheck};
+use crate::services::localdb_health;
 use crate::services::mssql_localdb;
 use crate::services::php::{self, PhpVersionStatus};
 use crate::services::php_catalog::{self, PhpRelease};
@@ -248,6 +249,9 @@ pub async fn diagnose_project(
         let info = localdb.info();
         sql_server.localdb_installed = info.installed;
         sql_server.localdb_running = info.status == ServiceStatus::Running;
+        if sql_server.uses_localdb && info.installed {
+            sql_server.localdb_health = Some(localdb_health::check());
+        }
     }
     if let (Some(setup), Ok(service)) = (
         diagnosis.postgres.as_mut(),

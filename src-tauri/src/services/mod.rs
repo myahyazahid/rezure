@@ -23,6 +23,7 @@ pub mod frameworks;
 pub mod hosts;
 pub mod launcher;
 pub mod localdb_bridge;
+pub mod localdb_health;
 pub mod mariadb_catalog;
 pub mod msi;
 pub mod mssql;

@@ -33,9 +33,10 @@ const RUNTIMES: { id: Runtime; label: string; icon: string }[] = [
   { id: 'node', label: 'Node.js', icon: 'node' },
 ]
 
-/** Runtimes with exactly one build, pinned and checksummed rather than read
- *  from a live catalog — in `binaries::MANIFEST`, or for LocalDB in
- *  `services::msi`. Their id is also their package id. */
+/** Runtimes with pinned, checksummed builds rather than a live catalog — in
+ *  `binaries::MANIFEST`, or for LocalDB in `services::msi`. Nginx and Mailpit
+ *  have one build, whose id is the runtime's; LocalDB has one per SQL Server
+ *  release (`sqllocaldb`, `sqllocaldb-2019`, …), installed side by side. */
 const PINNED: Runtime[] = ['nginx', 'mailpit', 'sqllocaldb']
 
 /** LocalDB is a Microsoft installer: it asks for license consent first. */
@@ -45,9 +46,16 @@ const selected = ref<Runtime | null>(null)
 
 const isPinned = computed(() => selected.value !== null && PINNED.includes(selected.value))
 
-const pinnedPackage = computed(() =>
-  isPinned.value ? (binariesStore.binaries.find((b) => b.id === selected.value) ?? null) : null,
-)
+/** The builds offered for the selected pinned runtime, newest first. */
+const pinnedPackages = computed(() => {
+  if (!isPinned.value) return []
+  if (selected.value === 'sqllocaldb') {
+    return binariesStore.binaries.filter((b) => binariesStore.isLocalDbPackage(b.id))
+  }
+  return binariesStore.binaries.filter((b) => b.id === selected.value)
+})
+
+const pinnedPackage = computed(() => pinnedPackages.value[0] ?? null)
 
 /** Any install in flight, across every runtime — closing mid-download would
  *  leave the frontend with no way to see it finish. */
@@ -56,6 +64,9 @@ const busy = computed(
     phpStore.installingId !== null ||
     phpStore.adding ||
     PINNED.some((id) => binariesStore.isInstalling(id)) ||
+    binariesStore.binaries.some(
+      (b) => binariesStore.isLocalDbPackage(b.id) && binariesStore.isInstalling(b.id),
+    ) ||
     binariesStore.installingMariaDbVersion !== null ||
     composerStore.installingVersion !== null ||
     nodeStore.installingVersion !== null ||
@@ -254,36 +265,54 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
           <p v-if="binariesStore.loading" class="py-6 text-center text-sm text-neutral-500">
             Checking what's installed…
           </p>
-          <div v-else-if="pinnedPackage" class="glass-inset rounded-2xl p-3.5">
-            <div class="flex items-center gap-3">
-              <div class="min-w-0 flex-1">
-                <span class="font-mono font-semibold text-neutral-900 dark:text-neutral-100">
-                  {{ pinnedPackage.version }}
+          <div v-else-if="pinnedPackages.length" class="flex flex-col gap-2">
+            <div
+              v-for="(pkg, i) in pinnedPackages"
+              :key="pkg.id"
+              class="glass-inset rounded-2xl p-3.5"
+            >
+              <div class="flex items-center gap-3">
+                <div class="min-w-0 flex-1">
+                  <span class="font-semibold text-neutral-900 dark:text-neutral-100">
+                    <template v-if="selected === 'sqllocaldb'">{{ pkg.name }}</template>
+                    <span
+                      class="font-mono"
+                      :class="selected === 'sqllocaldb' ? 'ml-1.5 text-xs text-neutral-500' : ''"
+                    >
+                      {{ pkg.version }}
+                    </span>
+                  </span>
+                  <p class="mt-0.5 text-xs text-neutral-500">
+                    {{
+                      selected !== 'sqllocaldb'
+                        ? "Only one build is offered for now - there's nothing to pick between yet."
+                        : i === 0
+                          ? 'A local SQL Server for projects that use one, reached as (localdb)\\Rezure. Windows asks for administrator permission once.'
+                          : "For machines where a newer release won't start. Installs beside the others."
+                    }}
+                  </p>
+                </div>
+                <button
+                  v-if="!pkg.installed"
+                  type="button"
+                  class="glass-accent shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition disabled:opacity-50"
+                  :disabled="busy"
+                  @click="licensed.request(pkg.id)"
+                >
+                  {{ binariesStore.isInstalling(pkg.id) ? 'Installing…' : 'Install' }}
+                </button>
+                <span
+                  v-else
+                  class="glass-inset shrink-0 rounded-full px-4 py-2 text-sm font-semibold text-neutral-400 dark:text-neutral-500"
+                >
+                  Installed
                 </span>
-                <p class="mt-0.5 text-xs text-neutral-500">
-                  {{
-                    pinnedPackage.licenseUrl
-                      ? 'A local SQL Server for projects that use one, reached as (localdb)\\Rezure. Windows asks for administrator permission once.'
-                      : "Only one build is offered for now - there's nothing to pick between yet."
-                  }}
-                </p>
               </div>
-              <button
-                v-if="!pinnedPackage.installed"
-                type="button"
-                class="glass-accent shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition disabled:opacity-50"
-                :disabled="busy"
-                @click="licensed.request(selected)"
-              >
-                {{ binariesStore.isInstalling(selected) ? 'Installing…' : 'Install' }}
-              </button>
-              <span
-                v-else
-                class="glass-inset shrink-0 rounded-full px-4 py-2 text-sm font-semibold text-neutral-400 dark:text-neutral-500"
-              >
-                Installed
-              </span>
             </div>
+            <p v-if="selected === 'sqllocaldb'" class="text-xs text-neutral-500">
+              Rezure's instance runs on one release at a time. After installing another, choose it
+              for SQL Server LocalDB on the Switch page.
+            </p>
           </div>
           <p v-if="licensed.error.value" class="mt-2 text-sm text-red-600 dark:text-red-400">
             {{ licensed.error.value }}

@@ -78,3 +78,17 @@ export interface WindowsService {
   /** Start type Automatic — stopping it only lasts until the next boot. */
   startsWithWindows: boolean
 }
+
+/** Whether the disk under SQL Server LocalDB is one SQL Server can run on —
+ *  mirrors `services::localdb_health::SectorVerdict`. */
+export type LocalDbSectorVerdict =
+  'supported' | 'needsFix' | 'restartPending' | 'fixIneffective' | 'unknown'
+
+/** Mirrors `services::localdb_health::LocalDbHealth`. */
+export interface LocalDbHealth {
+  verdict: LocalDbSectorVerdict
+  /** The physical sector size Windows reports, in bytes; null when unread. */
+  sectorBytes: number | null
+  /** Microsoft's NVMe registry workaround is set. */
+  fixApplied: boolean
+}

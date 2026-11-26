@@ -18,3 +18,17 @@ export interface InstallProgress {
   downloadedBytes: number
   totalBytes: number | null
 }
+
+/** One SQL Server LocalDB release Rezure offers — mirrors
+ *  `services::msi::LocalDbRelease`. */
+export interface LocalDbRelease {
+  /** The package id, for installing and switching. */
+  id: string
+  /** The marketing release, `2019`. */
+  release: string
+  /** The pinned installer's version, `15.0.2000.5`. */
+  version: string
+  installed: boolean
+  /** Rezure's instance runs on this release. */
+  active: boolean
+}

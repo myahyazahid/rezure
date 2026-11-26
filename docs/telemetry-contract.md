@@ -44,6 +44,8 @@ Recording and sending are two separate steps, and each independently respects
 | A service is started via the Services page | event, `service.start` (name = the service's display name, e.g. `Nginx`, `MariaDB`), with the PHP/database versions in `payload` | `commands::services::start_service` |
 | A service is stopped via the Services page | event, `service.stop` | `commands::services::stop_service` |
 | Starting, stopping or restarting a service fails | event, `error.report` (name = the error's kind, e.g. `PortInUse`) | `commands::services::{start,stop,restart}_service` |
+| Applying SQL Server LocalDB's disk compatibility fix, recreating its instance, or switching it to another release fails | event, `error.report` (name = the error's kind, e.g. `LocalDbFixCancelled`) | `commands::services::{fix_localdb_disk,recreate_localdb_instance,switch_localdb_release}` |
+| SQL Server LocalDB's instance is recreated, or switched to another release, and started | event, `service.start`, as for any start (its payload's SQL Server label names the release) | `commands::services::{recreate_localdb_instance,switch_localdb_release}` |
 | Every worker of a service dies on its own | event, `error.report` (name = `ServiceCrashed`) | the crash sink in `services::process::real_services` |
 | A folder is added with **Add folder** on the Projects page | event, `project.linked` (name = the framework id it's served as) | `commands::projects::link_project` |
 | A project's framework is changed, or set back to Auto | event, `project.framework_changed` (name = the framework id it's served as now) | `commands::projects::set_project_framework` |
@@ -103,8 +105,8 @@ When it's there, it's one of:
   `php_version` and `mysql_version`/`mariadb_version`, so the two new keys are stored but not
   yet charted. Showing them (a PostgreSQL combo, say) is a change in `laravel-api`, not here.
 - **`error.report`**: what was being done to which service:
-  `{ "action": "service.start | service.stop | service.restart | service.run", "service": "php-8.0.30" }`
-  (`service.run` is a crash). `event_name` is `AppError::code()`, the variant's name,
+  `{ "action": "service.start | service.stop | service.restart | service.run | localdb.fix_disk | localdb.recreate | localdb.switch", "service": "php-8.0.30" }`
+  (`service.run` is a crash; the `localdb.*` actions are always on `sqlserver`). `event_name` is `AppError::code()`, the variant's name,
   or `ServiceCrashed`.
 - **`project.linked`** / **`project.framework_changed`**: which framework detection found and
   what the user chose instead — `{ "detected": "node", "chosen": "codeigniter4" }`, with

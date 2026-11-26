@@ -2,10 +2,12 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::config::settings::{Settings, SettingsState};
 use crate::services::dev_servers;
+use crate::services::localdb_health::{self, LocalDbHealth};
 use crate::services::ports::{self, PortHolder};
 use crate::services::service_visibility::{self, ManagedService};
 use crate::services::start_on_launch;
 use crate::services::telemetry;
+use crate::services::{msi, mssql_localdb};
 use crate::services::{ServiceInfo, ServiceManager, ServiceStatus};
 use crate::utils::error::AppError;
 
@@ -225,6 +227,95 @@ pub async fn restart_service(
     }
     if let Err(err) = &result {
         telemetry::record_error(&app, err, "service.restart", &id);
+    }
+    result
+}
+
+/// The disk check for SQL Server LocalDB — whether the disk under it has a
+/// sector size SQL Server can run on, and whether the fix is in place. See
+/// `services::localdb_health`.
+#[tauri::command]
+pub async fn localdb_health() -> Result<LocalDbHealth, AppError> {
+    tokio::task::spawn_blocking(localdb_health::check)
+        .await
+        .map_err(|e| AppError::Io(format!("background task panicked: {e}")))
+}
+
+/// Applies Microsoft's NVMe sector size workaround through one UAC prompt
+/// and returns the disk check as it now stands. Windows has to restart
+/// before it takes effect; the frontend only calls this from a button the
+/// user pressed.
+#[tauri::command]
+pub async fn fix_localdb_disk(app: AppHandle) -> Result<LocalDbHealth, AppError> {
+    let result = tokio::task::spawn_blocking(localdb_health::apply_sector_fix)
+        .await
+        .map_err(|e| AppError::Io(format!("background task panicked: {e}")))?;
+    if let Err(err) = &result {
+        telemetry::record_error(&app, err, "localdb.fix_disk", mssql_localdb::SERVICE_ID);
+    }
+    result
+}
+
+/// Deletes Rezure's LocalDB instance, creates it afresh and starts it — for
+/// an instance left broken by an earlier failed start. Detaches whatever
+/// databases the old one had; the frontend says so before calling this.
+#[tauri::command]
+pub async fn recreate_localdb_instance(
+    manager: State<'_, ServiceManager>,
+    app: AppHandle,
+) -> Result<ServiceInfo, AppError> {
+    let service = manager.find(mssql_localdb::SERVICE_ID)?;
+    let result = run_blocking(mssql_localdb::SERVICE_ID, move || {
+        mssql_localdb::recreate(None)?;
+        Ok(service.info())
+    })
+    .await;
+    match &result {
+        Ok(info) => telemetry::record(
+            &app,
+            "service.start",
+            Some(&info.name),
+            telemetry::stack_context(info),
+        ),
+        Err(err) => {
+            telemetry::record_error(&app, err, "localdb.recreate", mssql_localdb::SERVICE_ID)
+        }
+    }
+    result
+}
+
+/// Moves Rezure's LocalDB instance to another installed release — `id` is
+/// the release's package id from `services::msi` — by recreating it there.
+/// Like Recreate instance, this detaches the old instance's databases, and
+/// ones from a newer release can't be attached to an older one; the
+/// frontend says both before calling this.
+#[tauri::command]
+pub async fn switch_localdb_release(
+    id: String,
+    manager: State<'_, ServiceManager>,
+    app: AppHandle,
+) -> Result<ServiceInfo, AppError> {
+    let package = msi::find(&id).ok_or_else(|| AppError::UnknownBinary(id.clone()))?;
+    let folder = package
+        .localdb_folder()
+        .ok_or_else(|| AppError::UnknownBinary(id.clone()))?;
+    if !package.is_installed() {
+        return Err(AppError::BinaryNotInstalled(package.name.to_string()));
+    }
+    let service = manager.find(mssql_localdb::SERVICE_ID)?;
+    let result = run_blocking(mssql_localdb::SERVICE_ID, move || {
+        mssql_localdb::recreate(Some(folder))?;
+        Ok(service.info())
+    })
+    .await;
+    match &result {
+        Ok(info) => telemetry::record(
+            &app,
+            "service.start",
+            Some(&info.name),
+            telemetry::stack_context(info),
+        ),
+        Err(err) => telemetry::record_error(&app, err, "localdb.switch", mssql_localdb::SERVICE_ID),
     }
     result
 }
